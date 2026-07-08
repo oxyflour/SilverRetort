@@ -22,7 +22,7 @@
     ],
     "extraResources": [
       {
-        "from": "../next/.next/standalone",
+        "from": "../next/.next/desktop-standalone",
         "to": "next",
         "filter": [
           "**/*"
