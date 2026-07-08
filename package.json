@@ -1,0 +1,10 @@
+{
+  "name": "silverretort-workspace",
+  "private": true,
+  "packageManager": "pnpm@11.7.0",
+  "scripts": {
+    "dev": "pnpm --filter silverretort-desktop run dev",
+    "build": "pnpm --filter silverretort-desktop run build",
+    "build:dir": "pnpm --filter silverretort-desktop run build:dir"
+  }
+}

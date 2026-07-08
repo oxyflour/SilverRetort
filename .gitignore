@@ -1,0 +1,8 @@
+.*/
+*.tsbuildinfo
+
+node_modules/
+__pycache__/
+tmp/
+build/
+dist/

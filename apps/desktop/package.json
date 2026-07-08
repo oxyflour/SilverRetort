@@ -1,0 +1,54 @@
+{
+  "name": "silverretort-desktop",
+  "version": "0.1.0",
+  "description": "SilverRetort Desktop Application",
+  "main": "src/main.cjs",
+  "scripts": {
+    "dev": "electron .",
+    "build:dir": "pnpm --filter silverretort-next run build && pnpm --filter silverretort-uvicorn run build && electron-builder --dir --publish never -c.directories.output=release-dir",
+    "build": "pnpm --filter silverretort-next run build && pnpm --filter silverretort-uvicorn run build && electron-builder --publish never"
+  },
+  "build": {
+    "appId": "com.silverretort.app",
+    "productName": "SilverRetort",
+    "asar": false,
+    "directories": {
+      "output": "release"
+    },
+    "files": [
+      "package.json",
+      "index.html",
+      "src/**/*"
+    ],
+    "extraResources": [
+      {
+        "from": "../next/.next/standalone",
+        "to": "next",
+        "filter": [
+          "**/*"
+        ]
+      },
+      {
+        "from": "../uvicorn/dist",
+        "to": "uvicorn",
+        "filter": [
+          "**/*"
+        ]
+      }
+    ],
+    "win": {
+      "signAndEditExecutable": false,
+      "target": [
+        "nsis"
+      ]
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true
+    }
+  },
+  "devDependencies": {
+    "electron": "41.0.4",
+    "electron-builder": "26.8.1"
+  }
+}

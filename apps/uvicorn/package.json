@@ -1,0 +1,8 @@
+{
+  "name": "silverretort-uvicorn",
+  "private": true,
+  "scripts": {
+    "dev": "uv run --project . uvicorn main:app --host 127.0.0.1 --port 23001",
+    "build": "uv run --project . --with pyinstaller pyinstaller --noconfirm --clean --onedir --name silverretort-uvicorn --distpath dist --workpath build --specpath build main.py"
+  }
+}
