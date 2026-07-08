@@ -6,6 +6,10 @@ import threading
 from fastapi import FastAPI
 import uvicorn
 
+import db
+import mcp_server
+from routes import router
+
 
 def exit_on_stdin_eof() -> None:
     while True:
@@ -18,10 +22,14 @@ def exit_on_stdin_eof() -> None:
 async def lifespan(_: FastAPI):
     watcher = threading.Thread(target=exit_on_stdin_eof, daemon=True)
     watcher.start()
-    yield
+    db.connect()
+    async with mcp_server.mcp.session_manager.run():
+        yield
 
 
 app = FastAPI(lifespan=lifespan)
+app.include_router(router)
+app.mount("/mcp", mcp_server.mcp.streamable_http_app())
 
 
 @app.get("/health")

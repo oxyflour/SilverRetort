@@ -1,0 +1,7 @@
+{
+  "name": "silverretort-hermes",
+  "private": true,
+  "scripts": {
+    "dev": "uv run --project . python main.py"
+  }
+}

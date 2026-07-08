@@ -1,0 +1,10 @@
+# Python-generated files
+__pycache__/
+*.py[oc]
+
+# Virtual environments
+.venv/
+
+# 本地 hermes 运行时数据（配置/会话/日志）
+home/
+home-*/
