@@ -50,7 +50,7 @@ export function ChatApp() {
       <PanelGroup direction="horizontal" className="h-full w-full">
         {sidebarOpen && (
           <>
-            <Panel id="sidebar" order={1} defaultSize={18} minSize={12} maxSize={32}>
+            <Panel className="dark:bg-neutral-900" id="sidebar" order={1} defaultSize={18} minSize={12} maxSize={32}>
               <div className="h-full pt-10">
                 <SessionSidebar />
               </div>

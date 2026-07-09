@@ -19,12 +19,14 @@ export const SessionSchema = z.object({
 });
 export type Session = z.infer<typeof SessionSchema>;
 
+const NullableStringSchema = z.string().nullish();
+
 export const ToolCallSchema = z.object({
   id: z.string(),
   name: z.string(),
   status: z.enum(["running", "done", "error"]),
-  detail: z.string().optional(),
-  result: z.string().optional(),
+  detail: NullableStringSchema,
+  result: NullableStringSchema,
 });
 export type ToolCall = z.infer<typeof ToolCallSchema>;
 
@@ -86,14 +88,14 @@ export const ChatEventSchema = z.discriminatedUnion("type", [
     ...runBase,
     toolCallId: z.string(),
     name: z.string(),
-    detail: z.string().optional(),
+    detail: NullableStringSchema,
   }),
   z.object({
     type: z.literal("tool-end"),
     ...runBase,
     toolCallId: z.string(),
     status: z.enum(["done", "error"]),
-    result: z.string().optional(),
+    result: NullableStringSchema,
   }),
   z.object({
     type: z.literal("artifact"),
