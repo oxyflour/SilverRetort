@@ -16,7 +16,14 @@ const separatorClass =
   "w-1 bg-neutral-200 transition-colors hover:bg-neutral-400 data-[resize-handle-state=drag]:bg-neutral-400 dark:bg-neutral-800 dark:hover:bg-neutral-600";
 
 export function ChatApp() {
-  const panelOpen = useChatStore((s) => s.panel.open);
+  const panelOpen = useChatStore((state) => {
+    const sessionId = state.currentSessionId;
+    if (!sessionId) {
+      return false;
+    }
+    const workspace = state.artifactWorkspaces[sessionId];
+    return Boolean(workspace?.open && workspace.tabIds.length > 0);
+  });
   const [sidebarOpen, setSidebarOpen] = useState(true);
 
   useEffect(() => {

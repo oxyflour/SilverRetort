@@ -9,16 +9,41 @@ function IframeRenderer({ artifact }: ArtifactRendererProps) {
     <iframe
       title={artifact.title}
       className="h-full w-full border-0 bg-white"
-      sandbox="allow-scripts allow-forms allow-popups allow-modals allow-downloads"
+      sandbox="allow-scripts allow-forms allow-popups allow-modals allow-downloads allow-same-origin"
       {...(payload.url ? { src: payload.url } : { srcDoc: payload.html ?? "" })}
     />
   );
 }
 
-/** image artifact payload：{ url } 或 { dataUri } */
+type ImageArtifactPayload = {
+  url?: string;
+  dataUri?: string;
+  path?: string;
+  filePath?: string;
+  localPath?: string;
+  src?: string;
+};
+
+function isLocalImageUrl(value: string): boolean {
+  return value.startsWith("file://") || /^[A-Za-z]:[\\/]/.test(value) || value.startsWith("\\\\");
+}
+
+function toImageSrc(payload: ImageArtifactPayload): string {
+  const localPath = payload.path ?? payload.filePath ?? payload.localPath;
+  if (localPath) {
+    return `/api/local-image?path=${encodeURIComponent(localPath)}`;
+  }
+  const url = payload.url ?? payload.src;
+  if (url && isLocalImageUrl(url)) {
+    return `/api/local-image?path=${encodeURIComponent(url)}`;
+  }
+  return url ?? payload.dataUri ?? "";
+}
+
+/** image artifact payload：{ url }、{ dataUri } 或 { path/filePath/localPath } */
 function ImageRenderer({ artifact }: ArtifactRendererProps) {
-  const payload = artifact.payload as { url?: string; dataUri?: string };
-  const src = payload.url ?? payload.dataUri ?? "";
+  const payload = artifact.payload as ImageArtifactPayload;
+  const src = toImageSrc(payload);
   return (
     <div className="flex h-full w-full items-center justify-center overflow-auto p-4">
       <img src={src} alt={artifact.title} className="max-h-full max-w-full object-contain" />

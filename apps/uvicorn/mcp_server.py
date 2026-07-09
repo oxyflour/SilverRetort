@@ -47,7 +47,7 @@ def ui_show_artifact(
 
     type 可通过 ui_list_render_types 查询；内置：
     - iframe: payload {"url": ...} 或 {"html": ...}
-    - image: payload {"url": ...} 或 {"dataUri": ...}
+    - image: payload {"url": ...}、{"dataUri": ...} 或 {"path"/"filePath"/"localPath": ...}
     - markdown: payload {"text": ...}
     返回 artifact_id，可用于 ui_update_artifact 增量更新。
     """

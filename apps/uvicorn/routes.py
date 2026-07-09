@@ -1,6 +1,10 @@
 """REST API + 常驻事件通道。路径与 packages/protocol 的 ApiClient 一一对应。"""
 
+import mimetypes
+from pathlib import Path
 import uuid
+from urllib.parse import unquote, urlparse
+from urllib.request import url2pathname
 
 from fastapi import APIRouter, HTTPException, UploadFile
 from fastapi.responses import FileResponse
@@ -149,6 +153,33 @@ def get_file(file_id: str) -> FileResponse:
         raise HTTPException(404, "file not found")
     attachment, path = found
     return FileResponse(path, media_type=attachment.mime_type, filename=attachment.name)
+
+
+def _resolve_local_image_path(raw_path: str) -> Path:
+    if not raw_path:
+        raise HTTPException(400, "path is required")
+    if raw_path.startswith("file://"):
+        parsed = urlparse(raw_path)
+        path_str = url2pathname(unquote(parsed.path))
+        if parsed.netloc and parsed.netloc != "localhost":
+            path_str = f"//{parsed.netloc}{path_str}"
+    else:
+        path_str = raw_path
+    path = Path(path_str).expanduser()
+    if not path.is_absolute():
+        path = path.resolve()
+    return path
+
+
+@router.get("/local-image")
+def get_local_image(path: str) -> FileResponse:
+    resolved = _resolve_local_image_path(path)
+    if not resolved.is_file():
+        raise HTTPException(404, "local image not found")
+    mime_type, _ = mimetypes.guess_type(resolved.name)
+    if mime_type is None or not mime_type.startswith("image/"):
+        raise HTTPException(400, "local path is not an image")
+    return FileResponse(resolved, media_type=mime_type, filename=resolved.name)
 
 
 # ---- events ----
