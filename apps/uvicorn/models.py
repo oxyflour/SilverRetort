@@ -79,6 +79,10 @@ class SendChatRequest(ApiModel):
     attachment_ids: list[str] = Field(default_factory=list)
 
 
+class RestartMessageRequest(ApiModel):
+    text: str
+
+
 class SendChatResponse(ApiModel):
     run_id: str
     user_message_id: str

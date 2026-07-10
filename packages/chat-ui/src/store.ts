@@ -37,6 +37,7 @@ interface ChatState {
   renameSession: (id: string, title: string) => Promise<void>;
   deleteSession: (id: string) => Promise<void>;
   sendMessage: (text: string) => Promise<void>;
+  restartFromMessage: (messageId: string, text: string) => Promise<void>;
   stopRun: (sessionId: string) => Promise<void>;
   addAttachment: (file: File) => Promise<void>;
   removeAttachment: (id: string) => void;
@@ -189,6 +190,69 @@ function setWorkspaceOpen(
   return { ...normalized, open };
 }
 
+function replaceSessionArtifacts(
+  currentArtifacts: Record<string, Artifact>,
+  sessionId: string,
+  nextArtifacts: Artifact[],
+): Record<string, Artifact> {
+  return {
+    ...Object.fromEntries(
+      Object.entries(currentArtifacts).filter(
+        ([, artifact]) => artifact.sessionId !== sessionId,
+      ),
+    ),
+    ...Object.fromEntries(
+      nextArtifacts.map((artifact) => [artifact.id, artifact]),
+    ),
+  };
+}
+
+function removeArtifacts(
+  currentArtifacts: Record<string, Artifact>,
+  artifactIds: Set<string>,
+): Record<string, Artifact> {
+  if (artifactIds.size === 0) {
+    return currentArtifacts;
+  }
+  return Object.fromEntries(
+    Object.entries(currentArtifacts).filter(
+      ([artifactId]) => !artifactIds.has(artifactId),
+    ),
+  );
+}
+
+function removeWorkspaceArtifacts(
+  workspace: ArtifactWorkspaceState,
+  artifactIds: Set<string>,
+): ArtifactWorkspaceState {
+  if (artifactIds.size === 0) {
+    return normalizeArtifactWorkspace(workspace);
+  }
+  return normalizeArtifactWorkspace({
+    ...workspace,
+    activeArtifactId:
+      workspace.activeArtifactId && artifactIds.has(workspace.activeArtifactId)
+        ? null
+        : workspace.activeArtifactId,
+    tabIds: workspace.tabIds.filter((id) => !artifactIds.has(id)),
+  });
+}
+
+function keepWorkspaceArtifacts(
+  workspace: ArtifactWorkspaceState,
+  validArtifactIds: Set<string>,
+): ArtifactWorkspaceState {
+  return normalizeArtifactWorkspace({
+    ...workspace,
+    activeArtifactId:
+      workspace.activeArtifactId &&
+      validArtifactIds.has(workspace.activeArtifactId)
+        ? workspace.activeArtifactId
+        : null,
+    tabIds: workspace.tabIds.filter((id) => validArtifactIds.has(id)),
+  });
+}
+
 export const useChatStore = create<ChatState>((set, get) => {
   const withBucket = (
     sessionId: string,
@@ -267,10 +331,7 @@ export const useChatStore = create<ChatState>((set, get) => {
         loaded: true,
       }));
       set((state) => ({
-        artifacts: {
-          ...state.artifacts,
-          ...Object.fromEntries(artifacts.map((artifact) => [artifact.id, artifact])),
-        },
+        artifacts: replaceSessionArtifacts(state.artifacts, id, artifacts),
       }));
     },
 
@@ -293,6 +354,7 @@ export const useChatStore = create<ChatState>((set, get) => {
         return {
           sessions,
           buckets,
+          artifacts: replaceSessionArtifacts(state.artifacts, id, []),
           artifactWorkspaces,
           currentSessionId:
             state.currentSessionId === id
@@ -344,6 +406,98 @@ export const useChatStore = create<ChatState>((set, get) => {
         error: null,
       }));
       touchSession(sessionId);
+    },
+
+    restartFromMessage: async (messageId, text) => {
+      const sessionId = get().currentSessionId;
+      if (!sessionId) {
+        return;
+      }
+      const bucket = get().buckets[sessionId];
+      if (!bucket) {
+        return;
+      }
+
+      const targetIndex = bucket.messages.findIndex(
+        (message) => message.id === messageId,
+      );
+      if (targetIndex === -1) {
+        return;
+      }
+
+      const response = await get().client.restartFromMessage(sessionId, messageId, {
+        text,
+      });
+
+      const now = new Date().toISOString();
+      const nextMessages: Message[] = bucket.messages
+        .slice(0, targetIndex + 1)
+        .map((message) =>
+          message.id === response.userMessageId
+            ? ({
+                ...message,
+                parts: [{ type: "text", text }],
+                artifactIds: [],
+                status: "complete",
+              } satisfies Message)
+            : message,
+        );
+      const assistantMessage: Message = {
+        id: response.assistantMessageId,
+        sessionId,
+        role: "assistant",
+        parts: [],
+        attachments: [],
+        artifactIds: [],
+        status: "streaming",
+        createdAt: now,
+      };
+      const removedArtifactIds = new Set(
+        bucket.messages
+          .slice(targetIndex + 1)
+          .flatMap((message) => message.artifactIds),
+      );
+
+      set((state) => ({
+        buckets: {
+          ...state.buckets,
+          [sessionId]: {
+            ...(state.buckets[sessionId] ?? bucket),
+            messages: [...nextMessages, assistantMessage],
+            runId: response.runId,
+            error: null,
+            loaded: true,
+          },
+        },
+        artifacts: removeArtifacts(state.artifacts, removedArtifactIds),
+        artifactWorkspaces: {
+          ...state.artifactWorkspaces,
+          [sessionId]: removeWorkspaceArtifacts(
+            state.artifactWorkspaces[sessionId] ?? emptyArtifactWorkspace(),
+            removedArtifactIds,
+          ),
+        },
+      }));
+      touchSession(sessionId);
+
+      try {
+        const artifacts = await get().client.listArtifacts(sessionId);
+        const validArtifactIds = new Set(
+          artifacts.map((artifact) => artifact.id),
+        );
+        set((state) => ({
+          artifacts: replaceSessionArtifacts(state.artifacts, sessionId, artifacts),
+          artifactWorkspaces: {
+            ...state.artifactWorkspaces,
+            [sessionId]: keepWorkspaceArtifacts(
+              state.artifactWorkspaces[sessionId] ?? emptyArtifactWorkspace(),
+              validArtifactIds,
+            ),
+          },
+        }));
+      } catch {
+        // Keep the optimistic cleanup if artifact resync fails.
+      }
     },
 
     stopRun: async (sessionId) => {

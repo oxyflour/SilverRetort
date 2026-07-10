@@ -21,6 +21,7 @@ from models import (
     Attachment,
     CreateSessionRequest,
     Message,
+    RestartMessageRequest,
     SendChatRequest,
     SendChatResponse,
     Session,
@@ -32,6 +33,10 @@ router = APIRouter(prefix="/api")
 engine = create_engine()
 
 DEFAULT_TITLE = "新会话"
+
+
+def _auto_title(text: str) -> str:
+    return text[:30] or DEFAULT_TITLE
 
 
 # ---- sessions ----
@@ -110,13 +115,52 @@ async def send_chat(session_id: str, body: SendChatRequest) -> SendChatResponse:
 
     # 首条消息时用内容生成标题
     if session.title == DEFAULT_TITLE and not history:
-        db.rename_session(session_id, body.text[:30] or DEFAULT_TITLE)
+        db.rename_session(session_id, _auto_title(body.text))
 
     run_id = uuid.uuid4().hex
     runs.start_run(engine, session_id, run_id, history, user_message, assistant_message)
     return SendChatResponse(
         run_id=run_id,
         user_message_id=user_message.id,
+        assistant_message_id=assistant_message.id,
+    )
+
+
+@router.post("/sessions/{session_id}/messages/{message_id}/restart")
+async def restart_message(
+    session_id: str, message_id: str, body: RestartMessageRequest
+) -> SendChatResponse:
+    session = db.get_session(session_id)
+    if session is None:
+        raise HTTPException(404, "session not found")
+    if runs.is_running(session_id):
+        raise HTTPException(409, "session already has an active run")
+
+    try:
+        result = db.restart_message(session_id, message_id, body.text)
+    except db.MessageRestartNotFoundError as exc:
+        raise HTTPException(404, str(exc)) from exc
+    except db.MessageRestartNotAllowedError as exc:
+        raise HTTPException(400, str(exc)) from exc
+
+    now = db.now_iso()
+    assistant_message = Message(
+        id=uuid.uuid4().hex,
+        session_id=session_id,
+        role="assistant",
+        status="streaming",
+        created_at=now,
+    )
+    db.insert_message(assistant_message)
+
+    if result.was_first_user_message and session.title == _auto_title(result.old_text):
+        db.rename_session(session_id, _auto_title(body.text))
+
+    run_id = uuid.uuid4().hex
+    runs.start_run(engine, session_id, run_id, result.history, result.user_message, assistant_message)
+    return SendChatResponse(
+        run_id=run_id,
+        user_message_id=result.user_message.id,
         assistant_message_id=assistant_message.id,
     )
 

@@ -6,6 +6,7 @@ import {
   AttachmentSchema,
   Message,
   MessageSchema,
+  RestartMessageRequest,
   SendChatRequest,
   SendChatResponse,
   SendChatResponseSchema,
@@ -73,6 +74,21 @@ export class ApiClient {
       method: "POST",
       body: JSON.stringify(body),
     });
+  }
+
+  restartFromMessage(
+    sessionId: string,
+    messageId: string,
+    body: RestartMessageRequest,
+  ): Promise<SendChatResponse> {
+    return this.request(
+      SendChatResponseSchema,
+      `/api/sessions/${sessionId}/messages/${messageId}/restart`,
+      {
+        method: "POST",
+        body: JSON.stringify(body),
+      },
+    );
   }
 
   async stopRun(sessionId: string): Promise<void> {

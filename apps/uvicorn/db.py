@@ -7,13 +7,30 @@ import json
 import os
 import sqlite3
 import threading
+from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 
-from models import Artifact, Attachment, Message, Session
+from models import Artifact, Attachment, Message, Session, TextPart
 
 _lock = threading.Lock()
 _conn: sqlite3.Connection | None = None
+
+
+class MessageRestartNotAllowedError(ValueError):
+    pass
+
+
+class MessageRestartNotFoundError(LookupError):
+    pass
+
+
+@dataclass
+class RestartMessageResult:
+    history: list[Message]
+    user_message: Message
+    old_text: str
+    was_first_user_message: bool
 
 
 def data_dir() -> Path:
@@ -93,6 +110,36 @@ def _query(sql: str, params: tuple = ()) -> list[sqlite3.Row]:
         return connect().execute(sql, params).fetchall()
 
 
+def _dump_parts(message: Message) -> str:
+    return json.dumps([part.model_dump(by_alias=True) for part in message.parts], ensure_ascii=False)
+
+
+def _dump_attachments(message: Message) -> str:
+    return json.dumps([attachment.model_dump(by_alias=True) for attachment in message.attachments], ensure_ascii=False)
+
+
+def _dump_string_list(values: list[str]) -> str:
+    return json.dumps(values, ensure_ascii=False)
+
+
+def _message_text(message: Message) -> str:
+    return "".join(part.text for part in message.parts if getattr(part, "type", None) == "text")
+
+
+def _delete_messages_by_ids(conn: sqlite3.Connection, message_ids: list[str]) -> None:
+    if not message_ids:
+        return
+    placeholders = ",".join("?" for _ in message_ids)
+    conn.execute(f"DELETE FROM messages WHERE id IN ({placeholders})", tuple(message_ids))
+
+
+def _delete_artifacts_by_ids(conn: sqlite3.Connection, artifact_ids: list[str]) -> None:
+    if not artifact_ids:
+        return
+    placeholders = ",".join("?" for _ in artifact_ids)
+    conn.execute(f"DELETE FROM artifacts WHERE id IN ({placeholders})", tuple(artifact_ids))
+
+
 # ---- sessions ----
 
 def _row_to_session(row: sqlite3.Row) -> Session:
@@ -162,9 +209,9 @@ def insert_message(message: Message) -> None:
             message.id,
             message.session_id,
             message.role,
-            json.dumps([p.model_dump(by_alias=True) for p in message.parts], ensure_ascii=False),
-            json.dumps([a.model_dump(by_alias=True) for a in message.attachments], ensure_ascii=False),
-            json.dumps(message.artifact_ids, ensure_ascii=False),
+            _dump_parts(message),
+            _dump_attachments(message),
+            _dump_string_list(message.artifact_ids),
             message.status,
             message.created_at,
         ),
@@ -175,11 +222,74 @@ def update_message(message: Message) -> None:
     _execute(
         "UPDATE messages SET parts = ?, artifact_ids = ?, status = ? WHERE id = ?",
         (
-            json.dumps([p.model_dump(by_alias=True) for p in message.parts], ensure_ascii=False),
-            json.dumps(message.artifact_ids, ensure_ascii=False),
+            _dump_parts(message),
+            _dump_string_list(message.artifact_ids),
             message.status,
             message.id,
         ),
+    )
+
+
+def restart_message(session_id: str, message_id: str, text: str) -> RestartMessageResult:
+    with _lock:
+        conn = connect()
+        try:
+            rows = conn.execute(
+                "SELECT rowid, * FROM messages WHERE session_id = ? ORDER BY created_at, rowid",
+                (session_id,),
+            ).fetchall()
+            messages = [_row_to_message(row) for row in rows]
+
+            target_index = next((index for index, row in enumerate(rows) if row["id"] == message_id), None)
+            if target_index is None:
+                raise MessageRestartNotFoundError("message not found")
+
+            target_message = messages[target_index]
+            if target_message.role != "user":
+                raise MessageRestartNotAllowedError("only user messages can be restarted")
+
+            history = messages[:target_index]
+            first_user_index = next(
+                (index for index, message in enumerate(messages) if message.role == "user"),
+                None,
+            )
+            old_text = _message_text(target_message)
+
+            target_message.parts = [TextPart(text=text)]
+            target_message.artifact_ids = []
+            target_message.status = "complete"
+
+            trailing_messages = messages[target_index + 1 :]
+            trailing_message_ids = [message.id for message in trailing_messages]
+            trailing_artifact_ids = sorted(
+                {
+                    artifact_id
+                    for message in trailing_messages
+                    for artifact_id in message.artifact_ids
+                }
+            )
+
+            conn.execute(
+                "UPDATE messages SET parts = ?, artifact_ids = ?, status = ? WHERE id = ?",
+                (
+                    _dump_parts(target_message),
+                    _dump_string_list(target_message.artifact_ids),
+                    target_message.status,
+                    target_message.id,
+                ),
+            )
+            _delete_messages_by_ids(conn, trailing_message_ids)
+            _delete_artifacts_by_ids(conn, trailing_artifact_ids)
+            conn.commit()
+        except Exception:
+            conn.rollback()
+            raise
+
+    return RestartMessageResult(
+        history=history,
+        user_message=target_message,
+        old_text=old_text,
+        was_first_user_message=target_index == first_user_index,
     )
 
 

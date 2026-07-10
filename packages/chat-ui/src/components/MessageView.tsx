@@ -2,8 +2,8 @@
 
 import { useState } from "react";
 import ReactMarkdown from "react-markdown";
-import remarkGfm from "remark-gfm";
 import rehypeHighlight from "rehype-highlight";
+import remarkGfm from "remark-gfm";
 import { Message, ToolCall } from "silverretort-protocol";
 import { useChatStore } from "../store";
 
@@ -95,6 +95,29 @@ function getShownArtifactId(toolCall: ToolCall): string | null {
   return parseArtifactResult(toolCall.result);
 }
 
+function messageText(message: Message): string {
+  return message.parts.reduce(
+    (text, part) => (part.type === "text" ? text + part.text : text),
+    "",
+  );
+}
+
+function toRestartErrorMessage(error: unknown): string {
+  if (!(error instanceof Error)) {
+    return "保存失败，请稍后重试";
+  }
+  if (error.message.includes("HTTP 409")) {
+    return "当前会话正在生成，稍后再试";
+  }
+  if (error.message.includes("HTTP 400")) {
+    return "只能编辑并重开用户消息";
+  }
+  if (error.message.includes("HTTP 404")) {
+    return "目标消息不存在";
+  }
+  return error.message;
+}
+
 function ToolCard({
   toolCall,
   message,
@@ -113,7 +136,11 @@ function ToolCard({
   const [expanded, setExpanded] = useState(false);
   const openArtifact = useChatStore((state) => state.openArtifact);
   const icon =
-    toolCall.status === "running" ? "⏳" : toolCall.status === "done" ? "✓" : "✗";
+    toolCall.status === "running"
+      ? "..."
+      : toolCall.status === "done"
+        ? "ok"
+        : "err";
   const detailText = toolCall.detail?.trim() ? toolCall.detail : "暂无详情";
   const resultText = toolCall.result?.trim() ? toolCall.result : "暂无返回结果";
   const shownArtifactId =
@@ -166,7 +193,7 @@ function ToolCard({
         <button
           type="button"
           aria-expanded={expanded}
-          onClick={() => setExpanded((v) => !v)}
+          onClick={() => setExpanded((value) => !value)}
           className="shrink-0 rounded px-1 text-xs text-neutral-400 hover:text-neutral-700 dark:hover:text-neutral-200"
         >
           {expanded ? "v" : ">"}
@@ -205,12 +232,22 @@ function ToolCard({
 }
 
 export function MessageView({ message }: { message: Message }) {
-  const client = useChatStore((s) => s.client);
-  const openArtifact = useChatStore((s) => s.openArtifact);
-  const artifacts = useChatStore((s) => s.artifacts);
+  const client = useChatStore((state) => state.client);
+  const openArtifact = useChatStore((state) => state.openArtifact);
+  const restartFromMessage = useChatStore(
+    (state) => state.restartFromMessage,
+  );
+  const artifacts = useChatStore((state) => state.artifacts);
   const sessionMessages = useChatStore(
     (state) => state.buckets[message.sessionId]?.messages ?? [],
   );
+  const running = useChatStore(
+    (state) => state.buckets[message.sessionId]?.runId != null,
+  );
+  const [editing, setEditing] = useState(false);
+  const [draft, setDraft] = useState("");
+  const [saving, setSaving] = useState(false);
+  const [submitError, setSubmitError] = useState<string | null>(null);
   const isUser = message.role === "user";
   const sessionArtifactIds = Object.values(artifacts)
     .filter((artifact) => artifact.sessionId === message.sessionId)
@@ -219,80 +256,189 @@ export function MessageView({ message }: { message: Message }) {
   const artifactCreatedAtById = Object.fromEntries(
     Object.values(artifacts).map((artifact) => [artifact.id, artifact.createdAt]),
   );
+  const messageIndex = sessionMessages.findIndex(
+    (currentMessage) => currentMessage.id === message.id,
+  );
+  const hasFollowingMessages =
+    messageIndex >= 0 && messageIndex < sessionMessages.length - 1;
+
+  const beginEditing = () => {
+    setDraft(messageText(message));
+    setSubmitError(null);
+    setEditing(true);
+  };
+
+  const cancelEditing = () => {
+    if (saving) {
+      return;
+    }
+    setEditing(false);
+    setDraft("");
+    setSubmitError(null);
+  };
+
+  const submitRestart = async () => {
+    const trimmed = draft.trim();
+    if (!trimmed || saving || running) {
+      return;
+    }
+    if (
+      hasFollowingMessages &&
+      !window.confirm("后续消息和生成内容将被清除，确认保存并重开？")
+    ) {
+      return;
+    }
+
+    setSaving(true);
+    setSubmitError(null);
+    try {
+      await restartFromMessage(message.id, trimmed);
+      setEditing(false);
+      setDraft("");
+    } catch (error) {
+      setSubmitError(toRestartErrorMessage(error));
+    } finally {
+      setSaving(false);
+    }
+  };
 
   return (
-    <div className={`px-4 py-3 ${isUser ? "bg-neutral-100 dark:bg-neutral-800/60" : ""}`}>
+    <div
+      className={`group px-4 py-3 ${
+        isUser ? "bg-neutral-100 dark:bg-neutral-800/60" : ""
+      }`}
+    >
       <div className="mx-auto max-w-3xl">
-        <div className="mb-1 text-xs font-semibold text-neutral-500">
-          {isUser ? "你" : "助手"}
+        <div className="mb-1 flex items-center gap-2 text-xs font-semibold text-neutral-500">
+          <span>{isUser ? "用户" : "助手"}</span>
           {message.status === "streaming" && (
-            <span className="ml-2 animate-pulse text-emerald-600">生成中…</span>
+            <span className="animate-pulse text-emerald-600">生成中</span>
           )}
           {message.status === "error" && (
-            <span className="ml-2 text-red-500">出错了</span>
+            <span className="text-red-500">出错</span>
           )}
           {message.status === "stopped" && (
-            <span className="ml-2 text-neutral-400">已停止</span>
+            <span className="text-neutral-400">已停止</span>
+          )}
+          {isUser && (
+            <span className="ml-auto hidden shrink-0 group-hover:flex">
+              <button
+                type="button"
+                title="编辑重开"
+                onClick={beginEditing}
+                disabled={running || saving || editing}
+                className="rounded px-1 text-neutral-500 hover:text-neutral-900 disabled:cursor-not-allowed disabled:opacity-40 dark:hover:text-neutral-100"
+              >
+                ✎
+              </button>
+            </span>
           )}
         </div>
 
         {message.attachments.length > 0 && (
           <div className="mb-2 flex flex-wrap gap-2">
-            {message.attachments.map((a) =>
-              a.kind === "image" ? (
+            {message.attachments.map((attachment) =>
+              attachment.kind === "image" ? (
                 <img
-                  key={a.id}
-                  src={client.fileUrl(a.id)}
-                  alt={a.name}
+                  key={attachment.id}
+                  src={client.fileUrl(attachment.id)}
+                  alt={attachment.name}
                   className="max-h-40 rounded-md border border-neutral-200 dark:border-neutral-700"
                 />
               ) : (
                 <a
-                  key={a.id}
-                  href={client.fileUrl(a.id)}
+                  key={attachment.id}
+                  href={client.fileUrl(attachment.id)}
                   target="_blank"
                   rel="noreferrer"
                   className="rounded-full border border-neutral-300 px-3 py-1 text-xs hover:bg-neutral-100 dark:border-neutral-600 dark:hover:bg-neutral-800"
                 >
-                  📄 {a.name}
+                  file {attachment.name}
                 </a>
               ),
             )}
           </div>
         )}
 
-        {message.parts.map((part, i) =>
-          part.type === "text" ? (
-            <div key={i} className="prose prose-sm dark:prose-invert max-w-none">
-              <ReactMarkdown
-                remarkPlugins={[remarkGfm]}
-                rehypePlugins={[rehypeHighlight]}
-              >
-                {part.text}
-              </ReactMarkdown>
-            </div>
-          ) : (
-            <ToolCard
-              key={part.toolCall.id}
-              toolCall={part.toolCall}
-              message={message}
-              sessionMessages={sessionMessages}
-              sessionArtifactIds={sessionArtifactIds}
-              artifactCreatedAtById={artifactCreatedAtById}
-              sessionId={message.sessionId}
+        {editing ? (
+          <div className="rounded-md border border-neutral-300 bg-white p-3 dark:border-neutral-700 dark:bg-neutral-900/70">
+            <textarea
+              value={draft}
+              onChange={(event) => setDraft(event.target.value)}
+              onKeyDown={(event) => {
+                if (
+                  event.key === "Enter" &&
+                  !event.shiftKey &&
+                  !event.nativeEvent.isComposing
+                ) {
+                  event.preventDefault();
+                  void submitRestart();
+                }
+              }}
+              rows={Math.min(8, Math.max(3, draft.split("\n").length))}
+              disabled={saving}
+              className="w-full resize-y rounded-md border border-neutral-300 bg-white px-3 py-2 text-sm outline-none focus:border-neutral-500 disabled:opacity-60 dark:border-neutral-600 dark:bg-neutral-950"
             />
-          ),
+            <div className="mt-2 text-xs text-neutral-500">
+              本次仅支持修改文本，附件将保持不变。
+            </div>
+            {submitError && (
+              <div className="mt-2 text-xs text-red-500">{submitError}</div>
+            )}
+            <div className="mt-3 flex justify-end gap-2">
+              <button
+                type="button"
+                onClick={cancelEditing}
+                disabled={saving}
+                className="rounded-md border border-neutral-300 px-3 py-1.5 text-sm hover:bg-neutral-100 disabled:opacity-40 dark:border-neutral-600 dark:hover:bg-neutral-800"
+              >
+                取消
+              </button>
+              <button
+                type="button"
+                onClick={() => void submitRestart()}
+                disabled={!draft.trim() || saving || running}
+                className="rounded-md bg-neutral-900 px-3 py-1.5 text-sm text-white hover:bg-neutral-700 disabled:opacity-40 dark:bg-neutral-100 dark:text-neutral-900 dark:hover:bg-neutral-300"
+              >
+                {saving ? "重开中..." : "保存并重开"}
+              </button>
+            </div>
+          </div>
+        ) : (
+          message.parts.map((part, index) =>
+            part.type === "text" ? (
+              <div key={index} className="prose prose-sm max-w-none dark:prose-invert">
+                <ReactMarkdown
+                  remarkPlugins={[remarkGfm]}
+                  rehypePlugins={[rehypeHighlight]}
+                >
+                  {part.text}
+                </ReactMarkdown>
+              </div>
+            ) : (
+              <ToolCard
+                key={part.toolCall.id}
+                toolCall={part.toolCall}
+                message={message}
+                sessionMessages={sessionMessages}
+                sessionArtifactIds={sessionArtifactIds}
+                artifactCreatedAtById={artifactCreatedAtById}
+                sessionId={message.sessionId}
+              />
+            ),
+          )
         )}
 
         {message.artifactIds.length > 0 && (
           <div className="mt-2 flex flex-wrap gap-2">
-            {message.artifactIds.map((id) => (
+            {message.artifactIds.map((artifactId) => (
               <button
-                key={id}
-                onClick={() => openArtifact(id, message.sessionId)}
+                key={artifactId}
+                type="button"
+                onClick={() => openArtifact(artifactId, message.sessionId)}
                 className="rounded-md border border-neutral-300 px-3 py-1 text-xs hover:bg-neutral-100 dark:border-neutral-600 dark:hover:bg-neutral-800"
               >
-                🗔 {artifacts[id]?.title ?? "查看内容"}
+                {artifacts[artifactId]?.title ?? "查看内容"}
               </button>
             ))}
           </div>

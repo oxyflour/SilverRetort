@@ -132,6 +132,11 @@ export const SendChatRequestSchema = z.object({
 });
 export type SendChatRequest = z.infer<typeof SendChatRequestSchema>;
 
+export const RestartMessageRequestSchema = z.object({
+  text: z.string(),
+});
+export type RestartMessageRequest = z.infer<typeof RestartMessageRequestSchema>;
+
 export const SendChatResponseSchema = z.object({
   runId: z.string(),
   userMessageId: z.string(),
