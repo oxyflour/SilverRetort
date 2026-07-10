@@ -8,6 +8,7 @@ const { app, BrowserWindow, utilityProcess } = require("electron/main");
 const DEFAULT_NEXT_PORT = 23000;
 const DEFAULT_PYTHON_PORT = 23001;
 const DEFAULT_HERMES_PORT = 23002;
+const DEFAULT_HERMES_CONTAINER_PORT = 23002;
 
 /**
  * 
@@ -40,9 +41,25 @@ function watchProc(label, proc) {
 }
 
 /**
+ *
+ * @param { string } label
+ * @param { import("node:child_process").ChildProcess } proc
+ */
+function pipeProcLogs(label, proc) {
+    proc.stdout?.on("data", (data) => logWithLabel(label, data));
+    proc.stderr?.on("data", (data) => logWithLabel(label, data));
+    proc.addListener("error", (error) => {
+        console.error(`[main] ERR: ${label} failed`, error);
+    });
+}
+
+/**
  * @type {null | import("electron").BrowserWindow}
  */
 let mainWindow = null;
+/** @type {Array<() => void | Promise<void>>} */
+let shutdownHooks = [];
+let isShuttingDown = false;
 
 /**
  * 
@@ -163,6 +180,26 @@ function randomApiKey() {
     return crypto.randomBytes(32).toString("hex");
 }
 
+function hashSuffix(input) {
+    return crypto.createHash("sha256").update(input).digest("hex").slice(0, 12);
+}
+
+function registerShutdownHook(fn) {
+    shutdownHooks.push(fn);
+}
+
+async function runShutdownHooks() {
+    const hooks = shutdownHooks;
+    shutdownHooks = [];
+    for (const hook of hooks.reverse()) {
+        try {
+            await hook();
+        } catch (error) {
+            console.error("[main] shutdown hook failed", error);
+        }
+    }
+}
+
 function resolveNextEntry() {
     const target = app.isPackaged
         ? path.join(serviceRoot, "next", "apps", "next", "server.js")
@@ -182,6 +219,87 @@ function resolveHermesRuntime() {
         };
     }
     return null;
+}
+
+function resolveHermesDockerConfig(settings, hermesUrl, hermesApiKey) {
+    const image = `${settings.hermesDockerImage || ""}`.trim();
+    if (!image) {
+        return null;
+    }
+
+    if (!hermesUrl) {
+        throw new Error("DATA_DIR/settings.json has hermesDockerImage but missing hermesUrl");
+    }
+    const effectiveApiKey = hermesApiKey || randomApiKey();
+
+    const parsed = new URL(`${hermesUrl}/`);
+    const publicPort = parsed.port
+        ? Number(parsed.port)
+        : parsed.protocol === "https:"
+            ? 443
+            : 80;
+    if (!Number.isInteger(publicPort) || publicPort <= 0) {
+        throw new Error(`invalid hermesUrl port: ${hermesUrl}`);
+    }
+
+    const containerPort = Number(settings.hermesDockerContainerPort || DEFAULT_HERMES_CONTAINER_PORT);
+    if (!Number.isInteger(containerPort) || containerPort <= 0) {
+        throw new Error(`invalid hermesDockerContainerPort: ${settings.hermesDockerContainerPort}`);
+    }
+
+    const containerName = `${settings.hermesDockerContainerName || `silverretort-hermes-${hashSuffix(hermesUrl)}`}`.trim();
+    if (!containerName) {
+        throw new Error("hermesDockerContainerName must not be empty");
+    }
+
+    const forwardedEnvKeys = [
+        "OPENAI_API_KEY",
+        "OPENAI_BASE_URL",
+        "OPENAI_MODEL",
+        "OPENAI_MODEL_ID",
+    ];
+
+    /** @type {string[]} */
+    const args = [
+        "run",
+        "--rm",
+        "-d",
+        "--name",
+        containerName,
+        "-p",
+        `${publicPort}:${containerPort}`,
+        "-e",
+        "WATCH_STDIN=0",
+        "-e",
+        "LISTEN_HOST=0.0.0.0",
+        "-e",
+        `LISTEN_PORT=${containerPort}`,
+        "-e",
+        `HERMES_API_KEY=${effectiveApiKey}`,
+        "-e",
+        "HERMES_RELAY_ENABLED=1",
+    ];
+
+    for (const key of forwardedEnvKeys) {
+        const value = `${desktopEnv[key] || process.env[key] || ""}`.trim();
+        if (value) {
+            args.push("-e", `${key}=${value}`);
+        }
+    }
+
+    args.push(image);
+    return {
+        image,
+        apiKey: effectiveApiKey,
+        containerName,
+        publicPort,
+        containerPort,
+        command: "docker",
+        runArgs: args,
+        removeArgs: ["rm", "-f", containerName],
+        logsArgs: ["logs", "-f", containerName],
+        waitArgs: ["wait", containerName],
+    };
 }
 
 /**
@@ -219,6 +337,17 @@ function resolveHermesMode(dataDir, pythonPort, hermesPort) {
     const settings = readSettings(dataDir);
     const hermesUrl = normalizeBaseUrl(settings.hermesUrl);
     const hermesApiKey = `${settings.hermesApiKey || ""}`.trim();
+    const docker = resolveHermesDockerConfig(settings, hermesUrl, hermesApiKey);
+
+    if (docker) {
+        return {
+            mode: "docker",
+            url: hermesUrl,
+            apiKey: docker.apiKey,
+            healthUrl: joinUrl(hermesUrl, "health"),
+            docker,
+        };
+    }
 
     if (hermesUrl) {
         if (!hermesApiKey) {
@@ -249,7 +378,7 @@ function resolveHermesMode(dataDir, pythonPort, hermesPort) {
         env: {
             LISTEN_PORT: `${hermesPort}`,
             HERMES_API_KEY: apiKey,
-            MCP_URL: `http://127.0.0.1:${pythonPort}/mcp`,
+            MCP_URL: `http://127.0.0.1:${pythonPort}/mcp/`,
             HERMES_HOME: ensureDir(path.join(dataDir, "hermes-home")),
             HERMES_ENV_FILE: desktopEnvPath,
         },
@@ -268,6 +397,96 @@ function startHermesProcess(hermesMode) {
     });
     watchProc("hermes", proc);
     return proc;
+}
+
+function startHermesDocker(hermesMode) {
+    if (hermesMode.mode !== "docker") {
+        return null;
+    }
+
+    return new Promise((resolve, reject) => {
+        const removeExisting = spawn(hermesMode.docker.command, hermesMode.docker.removeArgs, {
+            cwd: serviceRoot,
+            env: buildChildEnv(),
+            stdio: "pipe",
+        });
+        pipeProcLogs("hermes-docker-rm", removeExisting);
+        removeExisting.addListener("error", reject);
+        removeExisting.addListener("exit", () => {
+            const run = spawn(hermesMode.docker.command, hermesMode.docker.runArgs, {
+                cwd: serviceRoot,
+                env: buildChildEnv(),
+                stdio: "pipe",
+            });
+            pipeProcLogs("hermes-docker", run);
+
+            let settled = false;
+            let stdout = "";
+            let stderr = "";
+
+            const finish = (fn) => {
+                if (!settled) {
+                    settled = true;
+                    fn();
+                }
+            };
+
+            run.stdout?.on("data", (data) => {
+                stdout += `${data}`;
+            });
+            run.stderr?.on("data", (data) => {
+                stderr += `${data}`;
+            });
+            run.addListener("error", (error) => finish(() => reject(error)));
+            run.addListener("exit", (code) => {
+                if (code !== 0) {
+                    finish(() =>
+                        reject(new Error(`docker run failed (${code}): ${(stderr || stdout).trim() || "unknown error"}`))
+                    );
+                    return;
+                }
+
+                const logsProc = spawn(hermesMode.docker.command, hermesMode.docker.logsArgs, {
+                    cwd: serviceRoot,
+                    env: buildChildEnv(),
+                    stdio: "pipe",
+                });
+                pipeProcLogs("hermes-docker-logs", logsProc);
+
+                const waitProc = spawn(hermesMode.docker.command, hermesMode.docker.waitArgs, {
+                    cwd: serviceRoot,
+                    env: buildChildEnv(),
+                    stdio: "pipe",
+                });
+                pipeProcLogs("hermes-docker-wait", waitProc);
+                waitProc.addListener("exit", () => {
+                    console.log(`[main] BYE: hermes docker container ${hermesMode.docker.containerName} exited`);
+                    app.quit();
+                });
+
+                registerShutdownHook(() => {
+                    if (!logsProc.killed) {
+                        logsProc.kill();
+                    }
+                    if (!waitProc.killed) {
+                        waitProc.kill();
+                    }
+                    return new Promise((done) => {
+                        const stop = spawn(hermesMode.docker.command, hermesMode.docker.removeArgs, {
+                            cwd: serviceRoot,
+                            env: buildChildEnv(),
+                            stdio: "pipe",
+                        });
+                        pipeProcLogs("hermes-docker-stop", stop);
+                        stop.addListener("exit", () => done());
+                        stop.addListener("error", () => done());
+                    });
+                });
+
+                finish(() => resolve({ logsProc, waitProc }));
+            });
+        });
+    });
 }
 
 /**
@@ -320,6 +539,7 @@ async function startServer(
     }));
 
     startHermesProcess(hermesMode);
+    await startHermesDocker(hermesMode);
     const nextjs = startNextServer(nextJsPort, pythonPort);
     // @ts-ignore
     watchProc("nextjs", nextjs);
@@ -378,6 +598,15 @@ app.on("window-all-closed", () => {
     if (process.platform !== "darwin") {
         app.quit();
     }
+});
+
+app.on("before-quit", (event) => {
+    if (isShuttingDown) {
+        return;
+    }
+    isShuttingDown = true;
+    event.preventDefault();
+    void runShutdownHooks().finally(() => app.quit());
 });
 
 app.on("activate", async () => {

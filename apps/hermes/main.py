@@ -136,21 +136,55 @@ def merge_runtime_config(home: Path, mcp_url: str | None) -> None:
         )
 
 
+def relay_enabled() -> bool:
+    return os.getenv("HERMES_RELAY_ENABLED", "0").strip() == "1"
+
+
+def configure_api_server() -> tuple[str, str]:
+    public_port = os.getenv("LISTEN_PORT", "23002")
+    public_host = os.getenv("LISTEN_HOST", "127.0.0.1")
+    if relay_enabled():
+        gateway_port = os.getenv("HERMES_GATEWAY_PORT", str(int(public_port) + 1))
+        gateway_host = os.getenv("HERMES_GATEWAY_HOST", "127.0.0.1")
+        os.environ.setdefault("API_SERVER_ENABLED", "true")
+        os.environ["API_SERVER_PORT"] = gateway_port
+        os.environ["API_SERVER_HOST"] = gateway_host
+        return public_host, public_port
+
+    os.environ.setdefault("API_SERVER_ENABLED", "true")
+    os.environ.setdefault("API_SERVER_PORT", public_port)
+    os.environ.setdefault("API_SERVER_HOST", public_host)
+    return public_host, public_port
+
+
+def configure_bridge_relay(public_host: str, public_port: str) -> str | None:
+    if not relay_enabled():
+        return os.getenv("MCP_URL")
+
+    from relay import start_background_server
+
+    gateway_host = os.environ["API_SERVER_HOST"]
+    gateway_port = os.environ["API_SERVER_PORT"]
+    start_background_server(
+        listen_host=public_host,
+        listen_port=int(public_port),
+        gateway_base_url=f"http://{gateway_host}:{gateway_port}",
+        api_key=os.getenv("HERMES_API_KEY", "").strip(),
+    )
+    return f"http://127.0.0.1:{public_port}/mcp/"
+
+
 def main() -> None:
     if os.getenv("WATCH_STDIN", "1") != "0":
         threading.Thread(target=exit_on_stdin_eof, daemon=True).start()
 
     load_shared_env()
     home = resolve_hermes_home()
-
-    port = os.getenv("LISTEN_PORT", "23002")
-    os.environ.setdefault("API_SERVER_ENABLED", "true")
-    os.environ.setdefault("API_SERVER_PORT", port)
-    os.environ.setdefault("API_SERVER_HOST", os.getenv("LISTEN_HOST", "127.0.0.1"))
+    public_host, public_port = configure_api_server()
     if os.getenv("HERMES_API_KEY"):
         os.environ.setdefault("API_SERVER_KEY", os.environ["HERMES_API_KEY"])
 
-    mcp_url = os.getenv("MCP_URL")
+    mcp_url = configure_bridge_relay(public_host, public_port)
     merge_runtime_config(home, mcp_url)
 
     # 复用 hermes CLI 入口，等价于命令行执行 `hermes gateway`

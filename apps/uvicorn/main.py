@@ -6,6 +6,7 @@ import threading
 from fastapi import FastAPI
 import uvicorn
 
+import bridge_client
 import db
 import mcp_server
 from routes import router
@@ -23,8 +24,12 @@ async def lifespan(_: FastAPI):
     watcher = threading.Thread(target=exit_on_stdin_eof, daemon=True)
     watcher.start()
     db.connect()
-    async with mcp_server.mcp.session_manager.run():
-        yield
+    bridge_task = bridge_client.start_task()
+    try:
+        async with mcp_server.mcp.session_manager.run():
+            yield
+    finally:
+        await bridge_client.stop_task(bridge_task)
 
 
 app = FastAPI(lifespan=lifespan)
