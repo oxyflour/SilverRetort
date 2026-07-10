@@ -176,6 +176,12 @@ function joinUrl(baseUrl, route) {
     return new URL(route, `${normalizeBaseUrl(baseUrl)}/`).toString();
 }
 
+function toWebSocketUrl(baseUrl, route = "") {
+    const url = new URL(route, `${normalizeBaseUrl(baseUrl)}/`);
+    url.protocol = url.protocol === "https:" ? "wss:" : "ws:";
+    return url.toString();
+}
+
 function randomApiKey() {
     return crypto.randomBytes(32).toString("hex");
 }
@@ -533,6 +539,11 @@ async function startServer(
                 : {
                     HERMES_URL: hermesMode.url,
                     HERMES_API_KEY: hermesMode.apiKey,
+                    ...(hermesMode.mode === "docker"
+                        ? {
+                            HERMES_BRIDGE_URL: toWebSocketUrl(hermesMode.url, "bridge"),
+                        }
+                        : {}),
                 }),
         }),
         stdio: "pipe",

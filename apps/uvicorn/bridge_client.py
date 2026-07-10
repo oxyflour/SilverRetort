@@ -19,6 +19,18 @@ def _normalized_base_url(url: str) -> str:
     return url.strip().rstrip("/")
 
 
+def _coerce_bridge_url(url: str) -> str:
+    normalized = _normalized_base_url(url)
+    if not normalized:
+        return ""
+
+    parsed = urlsplit(normalized)
+    if parsed.scheme in {"http", "https"}:
+        scheme = "wss" if parsed.scheme == "https" else "ws"
+        return urlunsplit((scheme, parsed.netloc, parsed.path, parsed.query, parsed.fragment))
+    return normalized
+
+
 def _is_remote_host(hostname: str | None) -> bool:
     if not hostname:
         return False
@@ -26,7 +38,7 @@ def _is_remote_host(hostname: str | None) -> bool:
 
 
 def resolve_bridge_url() -> str | None:
-    explicit = _normalized_base_url(os.getenv("HERMES_BRIDGE_URL", ""))
+    explicit = _coerce_bridge_url(os.getenv("HERMES_BRIDGE_URL", ""))
     if explicit:
         return explicit
 
