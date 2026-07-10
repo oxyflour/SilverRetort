@@ -1,8 +1,4 @@
-"""hermes-agent 适配层：调其 OpenAI 兼容 API，归一化为内部引擎事件。
-
-hermes 是无状态推理引擎：每次 run 传完整消息历史；session_id 与附件清单
-写进 ephemeral system prompt，hermes 经 MCP（ui_* / *_user_file 工具）回连操控 UI。
-"""
+"""Hermes Responses API adapter."""
 
 import base64
 import json
@@ -42,7 +38,8 @@ def _to_openai_message(message: Message) -> dict[str, Any]:
             found = db.get_file(attachment.id)
             if found is None:
                 continue
-            data = open(found[1], "rb").read()
+            with open(found[1], "rb") as file:
+                data = file.read()
             content.append(
                 {
                     "type": "image_url",
@@ -67,6 +64,143 @@ def _attachments_note(history: list[Message], user_message: Message) -> str:
     return "\n用户上传过以下文件（用 read_user_file 读取）：\n" + "\n".join(lines)
 
 
+def _flatten_response_output(output: Any) -> str | None:
+    if output is None:
+        return None
+    if isinstance(output, str):
+        return output
+    if isinstance(output, dict):
+        text = output.get("text")
+        if text is not None:
+            return str(text)
+        return json.dumps(output, ensure_ascii=False)
+    if isinstance(output, list):
+        parts: list[str] = []
+        for part in output:
+            if isinstance(part, str):
+                parts.append(part)
+                continue
+            if isinstance(part, dict):
+                text = part.get("text")
+                part_type = str(part.get("type") or "").lower()
+                if text is not None and part_type in {"text", "input_text", "output_text"}:
+                    parts.append(str(text))
+                    continue
+                if text is not None:
+                    parts.append(str(text))
+                    continue
+            elif part is not None:
+                parts.append(str(part))
+        if parts:
+            return "".join(parts)
+        return json.dumps(output, ensure_ascii=False)
+    return str(output)
+
+
+def _extract_failed_response_message(payload: Any) -> str:
+    if isinstance(payload, dict):
+        error = payload.get("error")
+        if isinstance(error, dict):
+            message = error.get("message")
+            if isinstance(message, str) and message.strip():
+                return message
+        response = payload.get("response")
+        if isinstance(response, dict):
+            error = response.get("error")
+            if isinstance(error, dict):
+                message = error.get("message")
+                if isinstance(message, str) and message.strip():
+                    return message
+        message = payload.get("message")
+        if isinstance(message, str) and message.strip():
+            return message
+    rendered = payload if isinstance(payload, str) else json.dumps(payload, ensure_ascii=False)
+    return f"hermes response failed: {rendered[:500]}"
+
+
+async def _iter_sse_events(response: httpx.Response) -> AsyncGenerator[tuple[str | None, str], None]:
+    event_name: str | None = None
+    data_lines: list[str] = []
+
+    async for raw_line in response.aiter_lines():
+        if raw_line == "":
+            if data_lines:
+                yield event_name, "\n".join(data_lines)
+                event_name = None
+                data_lines = []
+            continue
+        if raw_line.startswith(":"):
+            continue
+        if raw_line.startswith("event:"):
+            event_name = raw_line[6:].strip() or None
+            continue
+        if raw_line.startswith("data:"):
+            data = raw_line[5:]
+            if data.startswith(" "):
+                data = data[1:]
+            data_lines.append(data)
+
+    if data_lines:
+        yield event_name, "\n".join(data_lines)
+
+
+def _normalize_response_event(
+    event_name: str | None,
+    payload: Any,
+    completed_tool_calls: set[str],
+) -> list[dict[str, Any]]:
+    if not isinstance(payload, dict):
+        return []
+
+    resolved_event = event_name or str(payload.get("type") or "")
+
+    if resolved_event == "response.output_text.delta":
+        delta = payload.get("delta")
+        return [{"kind": "text", "delta": delta}] if isinstance(delta, str) and delta else []
+
+    if resolved_event in {"response.output_item.added", "response.output_item.done"}:
+        item = payload.get("item")
+        if not isinstance(item, dict):
+            return []
+
+        item_type = str(item.get("type") or "")
+        if item_type == "function_call" and resolved_event == "response.output_item.added":
+            tool_id = str(item.get("call_id") or item.get("id") or uuid.uuid4().hex)
+            detail = item.get("arguments")
+            if detail is not None and not isinstance(detail, str):
+                detail = json.dumps(detail, ensure_ascii=False)
+            return [
+                {
+                    "kind": "tool-start",
+                    "id": tool_id,
+                    "name": str(item.get("name") or "tool"),
+                    "detail": detail,
+                }
+            ]
+
+        if item_type == "function_call_output":
+            tool_id = item.get("call_id")
+            if not tool_id:
+                return []
+            tool_id = str(tool_id)
+            if tool_id in completed_tool_calls:
+                return []
+            completed_tool_calls.add(tool_id)
+            return [
+                {
+                    "kind": "tool-end",
+                    "id": tool_id,
+                    "status": "done",
+                    "result": _flatten_response_output(item.get("output")),
+                }
+            ]
+
+    if resolved_event == "response.failed":
+        raise RuntimeError(_extract_failed_response_message(payload))
+
+    return []
+
+
 class HermesEngine:
     def __init__(self, base_url: str, api_key: str, model: str = "hermes-agent"):
         self.base_url = base_url.rstrip("/")
@@ -84,69 +218,37 @@ class HermesEngine:
             read_user_file_tool=READ_USER_FILE_TOOL,
             attachments_note=_attachments_note(history, user_message),
         )
-        messages = [{"role": "system", "content": system}]
-        messages += [_to_openai_message(m) for m in history if _text_of(m) or m.attachments]
-        messages.append(_to_openai_message(user_message))
-
-        payload = {"model": self.model, "messages": messages, "stream": True}
+        conversation_history = [_to_openai_message(m) for m in history if _text_of(m) or m.attachments]
+        payload = {
+            "model": self.model,
+            "instructions": system,
+            "conversation_history": conversation_history,
+            "input": [_to_openai_message(user_message)],
+            "stream": True,
+        }
         headers = {"authorization": f"Bearer {self.api_key}"}
+        completed_tool_calls: set[str] = set()
 
         async with httpx.AsyncClient(timeout=httpx.Timeout(None, connect=10)) as client:
             async with client.stream(
-                "POST", f"{self.base_url}/v1/chat/completions", json=payload, headers=headers
+                "POST",
+                f"{self.base_url}/v1/responses",
+                json=payload,
+                headers=headers,
             ) as response:
                 if response.status_code != 200:
                     body = (await response.aread()).decode("utf-8", "replace")[:500]
                     raise RuntimeError(f"hermes HTTP {response.status_code}: {body}")
-                current_event: str | None = None
-                async for line in response.aiter_lines():
-                    if line.startswith("event:"):
-                        current_event = line[6:].strip() or None
-                        continue
-                    if not line.startswith("data:"):
-                        continue
-                    data = line[5:].strip()
+                async for event_name, data in _iter_sse_events(response):
                     if data == "[DONE]":
                         return
                     try:
-                        chunk = json.loads(data)
+                        event_payload = json.loads(data)
                     except json.JSONDecodeError:
                         continue
-                    if current_event == "hermes.tool.progress" and isinstance(chunk, dict):
-                        chunk.setdefault("type", current_event)
-                    for event in _normalize_chunk(chunk):
+                    for event in _normalize_response_event(
+                        event_name,
+                        event_payload,
+                        completed_tool_calls,
+                    ):
                         yield event
-                    current_event = None
-
-
-def _normalize_chunk(chunk: dict[str, Any]) -> list[dict[str, Any]]:
-    """把 hermes 的 chat.completion.chunk / hermes.tool.progress 归一化为内部事件。"""
-    kind = chunk.get("type") or chunk.get("object") or ""
-
-    if kind == "hermes.tool.progress" or "tool" in str(kind):
-        name = chunk.get("tool") or chunk.get("tool_name") or chunk.get("name") or "tool"
-        tool_id = str(
-            chunk.get("toolCallId") or chunk.get("id") or chunk.get("tool_call_id") or uuid.uuid4().hex
-        )
-        status = str(chunk.get("status") or chunk.get("phase") or "started")
-        detail = chunk.get("detail") or chunk.get("arguments") or chunk.get("args") or chunk.get("preview")
-        detail = json.dumps(detail, ensure_ascii=False) if isinstance(detail, (dict, list)) else detail
-        if status in ("started", "start", "running", "in_progress"):
-            return [{"kind": "tool-start", "id": tool_id, "name": name, "detail": detail}]
-        result = chunk.get("result") or chunk.get("output") or chunk.get("preview")
-        result = json.dumps(result, ensure_ascii=False) if isinstance(result, (dict, list)) else result
-        return [
-            {
-                "kind": "tool-end",
-                "id": tool_id,
-                "status": "error" if status in ("error", "failed") else "done",
-                "result": result,
-            }
-        ]
-
-    events: list[dict[str, Any]] = []
-    for choice in chunk.get("choices") or []:
-        delta = (choice.get("delta") or {}).get("content")
-        if delta:
-            events.append({"kind": "text", "delta": delta})
-    return events

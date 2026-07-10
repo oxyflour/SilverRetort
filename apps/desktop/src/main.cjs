@@ -345,6 +345,10 @@ async function createMainWindow() {
         width: 640,
         height: 480,
         show: false,
+        webPreferences: {
+            allowRunningInsecureContent: true,
+            webSecurity: false,
+        }
     });
 
     mainWindow.once("ready-to-show", () => {
