@@ -4,3 +4,48 @@
 
 /* Tailwind 4 需显式声明 workspace 包源码目录才会扫描其中的 class */
 @source "../../../packages/chat-ui/src";
+
+:root {
+  --scrollbar-size: 10px;
+  --scrollbar-track: rgba(10, 10, 10, 0.06);
+  --scrollbar-thumb: rgba(115, 115, 115, 0.5);
+  --scrollbar-thumb-hover: rgba(82, 82, 82, 0.72);
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --scrollbar-track: rgba(255, 255, 255, 0.06);
+    --scrollbar-thumb: rgba(163, 163, 163, 0.38);
+    --scrollbar-thumb-hover: rgba(212, 212, 212, 0.54);
+  }
+}
+
+* {
+  scrollbar-width: thin;
+  scrollbar-color: var(--scrollbar-thumb) var(--scrollbar-track);
+}
+
+*::-webkit-scrollbar {
+  width: var(--scrollbar-size);
+  height: var(--scrollbar-size);
+}
+
+*::-webkit-scrollbar-track {
+  background: var(--scrollbar-track);
+  border-radius: 999px;
+}
+
+*::-webkit-scrollbar-thumb {
+  background-color: var(--scrollbar-thumb);
+  border: 2px solid transparent;
+  border-radius: 999px;
+  background-clip: padding-box;
+}
+
+*::-webkit-scrollbar-thumb:hover {
+  background-color: var(--scrollbar-thumb-hover);
+}
+
+*::-webkit-scrollbar-corner {
+  background: transparent;
+}
