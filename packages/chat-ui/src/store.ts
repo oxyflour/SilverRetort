@@ -94,6 +94,32 @@ function ensureAssistantMessage(
   return { ...bucket, messages: [...bucket.messages, placeholder] };
 }
 
+function appendSentMessages(
+  bucket: SessionBucket,
+  userMessage: Message,
+  assistantMessage: Message,
+): SessionBucket {
+  const existingUser = bucket.messages.find(
+    (message) => message.id === userMessage.id,
+  );
+  const existingAssistant = bucket.messages.find(
+    (message) => message.id === assistantMessage.id,
+  );
+  const remainingMessages = bucket.messages.filter(
+    (message) =>
+      message.id !== userMessage.id && message.id !== assistantMessage.id,
+  );
+
+  return {
+    ...bucket,
+    messages: [
+      ...remainingMessages,
+      { ...userMessage, ...existingUser },
+      { ...assistantMessage, ...existingAssistant },
+    ],
+  };
+}
+
 function normalizeArtifactWorkspace(
   workspace: ArtifactWorkspaceState,
 ): ArtifactWorkspaceState {
@@ -291,11 +317,8 @@ export const useChatStore = create<ChatState>((set, get) => {
       });
       const now = new Date().toISOString();
       withBucket(sessionId, (bucket) => ({
-        ...bucket,
-        runId: response.runId,
-        error: null,
-        messages: [
-          ...bucket.messages,
+        ...appendSentMessages(
+          bucket,
           {
             id: response.userMessageId,
             sessionId,
@@ -316,7 +339,9 @@ export const useChatStore = create<ChatState>((set, get) => {
             status: "streaming",
             createdAt: now,
           },
-        ],
+        ),
+        runId: response.runId,
+        error: null,
       }));
       touchSession(sessionId);
     },
