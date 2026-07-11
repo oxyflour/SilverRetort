@@ -45,6 +45,8 @@ export const ToolCallSchema = z.object({
   status: z.enum(["running", "done", "error"]),
   detail: NullableStringSchema,
   result: NullableStringSchema,
+  detailTruncated: z.boolean().optional(),
+  resultTruncated: z.boolean().optional(),
 });
 export type ToolCall = z.infer<typeof ToolCallSchema>;
 

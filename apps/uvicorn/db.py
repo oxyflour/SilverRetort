@@ -280,6 +280,14 @@ def list_messages(session_id: str) -> list[Message]:
     ]
 
 
+def get_message(session_id: str, message_id: str) -> Message | None:
+    rows = _query(
+        "SELECT * FROM messages WHERE session_id = ? AND id = ?",
+        (session_id, message_id),
+    )
+    return _row_to_message(rows[0]) if rows else None
+
+
 def insert_message(message: Message) -> None:
     _execute(
         "INSERT INTO messages (id, session_id, role, parts, attachments, artifact_ids, status, created_at)"

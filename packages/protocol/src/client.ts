@@ -12,6 +12,8 @@ import {
   SendChatResponseSchema,
   Session,
   SessionSchema,
+  ToolCall,
+  ToolCallSchema,
   Workspace,
   WorkspaceCapability,
   WorkspaceCapabilitySchema,
@@ -93,7 +95,21 @@ export class ApiClient {
   }
 
   listMessages(sessionId: string): Promise<Message[]> {
-    return this.request(z.array(MessageSchema), `/api/sessions/${sessionId}/messages`);
+    return this.request(
+      z.array(MessageSchema),
+      `/api/sessions/${sessionId}/messages?compact=true`,
+    );
+  }
+
+  getToolCall(
+    sessionId: string,
+    messageId: string,
+    toolCallId: string,
+  ): Promise<ToolCall> {
+    return this.request(
+      ToolCallSchema,
+      `/api/sessions/${sessionId}/messages/${messageId}/tools/${toolCallId}`,
+    );
   }
 
   listArtifacts(sessionId: string): Promise<Artifact[]> {

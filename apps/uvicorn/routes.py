@@ -29,6 +29,7 @@ from models import (
     SendChatResponse,
     Session,
     TextPart,
+    ToolCall,
     UpdateSessionRequest,
     UpdateWorkspaceRequest,
     Workspace,
@@ -141,9 +142,41 @@ async def delete_session(session_id: str) -> dict[str, bool]:
     return {"ok": True}
 
 
+TOOL_SUMMARY_LIMIT = 240
+
+
+def _compact_message(message: Message) -> Message:
+    compact_message = message.model_copy(deep=True)
+    for part in compact_message.parts:
+        if getattr(part, "type", None) != "tool":
+            continue
+        tool_call = part.tool_call
+        if tool_call.detail and len(tool_call.detail) > TOOL_SUMMARY_LIMIT:
+            tool_call.detail = tool_call.detail[:TOOL_SUMMARY_LIMIT] + "…"
+            tool_call.detail_truncated = True
+        if tool_call.result and len(tool_call.result) > TOOL_SUMMARY_LIMIT:
+            tool_call.result = tool_call.result[:TOOL_SUMMARY_LIMIT] + "…"
+            tool_call.result_truncated = True
+    return compact_message
+
+
 @router.get("/sessions/{session_id}/messages")
-def list_messages(session_id: str) -> list[Message]:
-    return db.list_messages(session_id)
+def list_messages(session_id: str, compact: bool = False) -> list[Message]:
+    messages = db.list_messages(session_id)
+    return [_compact_message(message) for message in messages] if compact else messages
+
+
+@router.get("/sessions/{session_id}/messages/{message_id}/tools/{tool_call_id}")
+def get_message_tool(
+    session_id: str, message_id: str, tool_call_id: str
+) -> ToolCall:
+    message = db.get_message(session_id, message_id)
+    if message is None:
+        raise HTTPException(404, "message not found")
+    for part in message.parts:
+        if getattr(part, "type", None) == "tool" and part.tool_call.id == tool_call_id:
+            return part.tool_call
+    raise HTTPException(404, "tool call not found")
 
 
 @router.get("/sessions/{session_id}/artifacts")

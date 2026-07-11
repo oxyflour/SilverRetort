@@ -8,6 +8,10 @@
   "exports": {
     ".": "./src/index.ts"
   },
+  "scripts": {
+    "test": "vitest run",
+    "test:watch": "vitest"
+  },
   "dependencies": {
     "lucide-react": "^1.24.0",
     "react-markdown": "^10.1.0",
@@ -22,7 +26,12 @@
     "react-dom": "^19"
   },
   "devDependencies": {
+    "@testing-library/jest-dom": "^6.9.1",
+    "@testing-library/react": "^16.3.2",
+    "@testing-library/user-event": "^14.6.1",
     "@types/react": "^19",
-    "typescript": "^5"
+    "jsdom": "^29.1.1",
+    "typescript": "^5",
+    "vitest": "^4.1.10"
   }
 }

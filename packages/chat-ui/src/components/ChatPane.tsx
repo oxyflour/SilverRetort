@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useChatStore } from "../store";
 import { MessageView } from "./MessageView";
 import { ChatInput } from "./ChatInput";
@@ -10,19 +10,79 @@ export function ChatPane() {
   const bucket = useChatStore((s) =>
     s.currentSessionId ? s.buckets[s.currentSessionId] : undefined,
   );
+  const artifacts = useChatStore((s) => s.artifacts);
   const scrollRef = useRef<HTMLDivElement>(null);
+  const scrollFrameRef = useRef<number | null>(null);
   // 用户上滚时暂停自动跟随，回到底部恢复
   const [follow, setFollow] = useState(true);
+  const [renderWindow, setRenderWindow] = useState({
+    sessionId: "",
+    count: 8,
+  });
 
   useEffect(() => {
     if (follow && scrollRef.current) {
-      scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
+      if (scrollFrameRef.current !== null) {
+        cancelAnimationFrame(scrollFrameRef.current);
+      }
+      scrollFrameRef.current = requestAnimationFrame(() => {
+        if (scrollRef.current) {
+          scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
+        }
+        scrollFrameRef.current = null;
+      });
     }
-  }, [bucket?.messages, follow]);
+    return () => {
+      if (scrollFrameRef.current !== null) {
+        cancelAnimationFrame(scrollFrameRef.current);
+        scrollFrameRef.current = null;
+      }
+    };
+  }, [bucket?.messages, follow, renderWindow.count]);
 
   useEffect(() => {
     setFollow(true);
   }, [currentSessionId]);
+
+  const renderedCount =
+    renderWindow.sessionId === currentSessionId ? renderWindow.count : 8;
+  const totalMessages = bucket?.messages.length ?? 0;
+
+  useEffect(() => {
+    if (!currentSessionId || renderedCount >= totalMessages) {
+      return;
+    }
+    const frame = requestAnimationFrame(() => {
+      setRenderWindow({
+        sessionId: currentSessionId,
+        count: Math.min(totalMessages, renderedCount + 8),
+      });
+    });
+    return () => cancelAnimationFrame(frame);
+  }, [currentSessionId, renderedCount, totalMessages]);
+
+  const messageOrderKey = bucket?.messages
+    .map((message) => `${message.id}:${message.createdAt}`)
+    .join("|");
+  const messageContext = useMemo(() => {
+    const sessionArtifacts = Object.values(artifacts)
+      .filter((artifact) => artifact.sessionId === currentSessionId)
+      .sort(
+        (left, right) =>
+          Date.parse(left.createdAt) - Date.parse(right.createdAt),
+      );
+    return {
+      artifacts,
+      running: bucket?.runId != null,
+      sessionMessages: bucket?.messages ?? [],
+      sessionArtifactIds: sessionArtifacts.map((artifact) => artifact.id),
+      artifactCreatedAtById: Object.fromEntries(
+        sessionArtifacts.map((artifact) => [artifact.id, artifact.createdAt]),
+      ),
+    };
+  }, [artifacts, bucket?.runId, currentSessionId, messageOrderKey]);
+  const firstRenderedIndex = Math.max(0, totalMessages - renderedCount);
+  const renderedMessages = bucket?.messages.slice(firstRenderedIndex) ?? [];
 
   return (
     <div className="flex h-full flex-col bg-white dark:bg-neutral-900">
@@ -39,8 +99,15 @@ export function ChatPane() {
             {currentSessionId ? "发送一条消息开始对话" : "新建一个会话开始"}
           </div>
         ) : (
-          bucket!.messages.map((message) => (
-            <MessageView key={message.id} message={message} />
+          renderedMessages.map((message, index) => (
+            <MessageView
+              key={message.id}
+              message={message}
+              context={messageContext}
+              hasFollowingMessages={
+                firstRenderedIndex + index < totalMessages - 1
+              }
+            />
           ))
         )}
         {bucket?.error && (

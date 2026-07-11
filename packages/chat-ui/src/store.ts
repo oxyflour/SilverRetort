@@ -277,6 +277,65 @@ export const useChatStore = create<ChatState>((set, get) => {
     }));
   };
 
+  const pendingTextDeltas = new Map<
+    string,
+    { event: Extract<ChatEvent, { type: "text-delta" }>; delta: string; timer: ReturnType<typeof setTimeout> }
+  >();
+
+  const applyTextDeltaNow = (
+    event: Extract<ChatEvent, { type: "text-delta" }>,
+    delta: string,
+  ) => {
+    withBucket(event.sessionId, (bucket) =>
+      updateMessage(
+        ensureAssistantMessage(bucket, event.sessionId, event.messageId),
+        event.messageId,
+        (message) => {
+          const parts = [...message.parts];
+          const lastPart = parts[parts.length - 1];
+          if (lastPart?.type === "text") {
+            parts[parts.length - 1] = {
+              type: "text",
+              text: lastPart.text + delta,
+            };
+          } else {
+            parts.push({ type: "text", text: delta });
+          }
+          return { ...message, parts };
+        },
+      ),
+    );
+  };
+
+  const flushTextDelta = (key: string) => {
+    const pending = pendingTextDeltas.get(key);
+    if (!pending) {
+      return;
+    }
+    clearTimeout(pending.timer);
+    pendingTextDeltas.delete(key);
+    applyTextDeltaNow(pending.event, pending.delta);
+  };
+
+  const flushAllTextDeltas = () => {
+    for (const key of [...pendingTextDeltas.keys()]) {
+      flushTextDelta(key);
+    }
+  };
+
+  const queueTextDelta = (
+    event: Extract<ChatEvent, { type: "text-delta" }>,
+  ) => {
+    const key = `${event.sessionId}:${event.messageId}`;
+    const pending = pendingTextDeltas.get(key);
+    if (pending) {
+      pending.delta += event.delta;
+      return;
+    }
+    const timer = setTimeout(() => flushTextDelta(key), 32);
+    pendingTextDeltas.set(key, { event, delta: event.delta, timer });
+  };
+
   const withArtifactWorkspace = (
     sessionId: string,
     fn: (workspace: ArtifactWorkspaceState) => ArtifactWorkspaceState,
@@ -651,6 +710,9 @@ export const useChatStore = create<ChatState>((set, get) => {
     },
 
     applyEvent: (event) => {
+      if (event.type !== "text-delta") {
+        flushAllTextDeltas();
+      }
       switch (event.type) {
         case "run-started":
           withBucket(event.sessionId, (bucket) => ({
@@ -661,25 +723,7 @@ export const useChatStore = create<ChatState>((set, get) => {
           break;
 
         case "text-delta":
-          withBucket(event.sessionId, (bucket) =>
-            updateMessage(
-              ensureAssistantMessage(bucket, event.sessionId, event.messageId),
-              event.messageId,
-              (message) => {
-                const parts = [...message.parts];
-                const lastPart = parts[parts.length - 1];
-                if (lastPart?.type === "text") {
-                  parts[parts.length - 1] = {
-                    type: "text",
-                    text: lastPart.text + event.delta,
-                  };
-                } else {
-                  parts.push({ type: "text", text: event.delta });
-                }
-                return { ...message, parts };
-              },
-            ),
-          );
+          queueTextDelta(event);
           break;
 
         case "tool-start":

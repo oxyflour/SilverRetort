@@ -41,6 +41,8 @@ class ToolCall(ApiModel):
     status: Literal["running", "done", "error"]
     detail: str | None = None
     result: str | None = None
+    detail_truncated: bool = False
+    result_truncated: bool = False
 
 
 class TextPart(ApiModel):

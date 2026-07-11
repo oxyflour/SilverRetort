@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { memo, useState } from "react";
 import {
   Check,
   ChevronDown,
@@ -16,7 +16,10 @@ import { Message, ToolCall } from "silverretort-protocol";
 import { openArtifactInNewWindow } from "../openArtifactInNewWindow";
 import { useChatStore } from "../store";
 import { AppIcon } from "./icons";
+import { collapsedDetail, MessageViewProps } from "./messageViewSupport";
 
+const markdownRemarkPlugins = [remarkGfm];
+const markdownRehypePlugins = [rehypeHighlight];
 function isShowArtifactTool(toolName: string): boolean {
   return toolName.includes("ui_show_artifact");
 }
@@ -161,9 +164,13 @@ function ToolCard({
   sessionId: string;
 }) {
   const [expanded, setExpanded] = useState(false);
+  const [fullToolCall, setFullToolCall] = useState<ToolCall | null>(null);
+  const [loadingDetails, setLoadingDetails] = useState(false);
+  const client = useChatStore((state) => state.client);
   const openArtifact = useChatStore((state) => state.openArtifact);
-  const detailText = toolCall.detail?.trim() ? toolCall.detail : "No details";
-  const resultText = toolCall.result?.trim() ? toolCall.result : "No result";
+  const displayedToolCall = fullToolCall ?? toolCall;
+  const detailText = displayedToolCall.detail?.trim() || "No details";
+  const resultText = displayedToolCall.result?.trim() || "No result";
   const shownArtifactId =
     getShownArtifactId(toolCall) ??
     inferArtifactIdFromMessageWindow(
@@ -186,7 +193,7 @@ function ToolCard({
           </span>
           {toolCall.detail && (
             <span className="min-w-0 flex-1 truncate text-xs text-neutral-500">
-              {toolCall.detail}
+              {collapsedDetail(toolCall.detail)}
             </span>
           )}
           {shownArtifactId && (
@@ -203,7 +210,23 @@ function ToolCard({
         <button
           type="button"
           aria-expanded={expanded}
-          onClick={() => setExpanded((value) => !value)}
+          onClick={() => {
+            const nextExpanded = !expanded;
+            setExpanded(nextExpanded);
+            if (
+              nextExpanded &&
+              !fullToolCall &&
+              !loadingDetails &&
+              (toolCall.detailTruncated || toolCall.resultTruncated)
+            ) {
+              setLoadingDetails(true);
+              void client
+                .getToolCall(sessionId, message.id, toolCall.id)
+                .then(setFullToolCall)
+                .catch(() => undefined)
+                .finally(() => setLoadingDetails(false));
+            }
+          }}
           className="shrink-0 rounded p-1 text-neutral-400 hover:text-neutral-700 dark:hover:text-neutral-200"
         >
           <AppIcon
@@ -235,7 +258,7 @@ function ToolCard({
               result
             </div>
             <pre className="max-h-64 overflow-auto whitespace-pre-wrap break-words rounded bg-white/70 px-2 py-1 dark:bg-neutral-900/60">
-              {resultText}
+              {loadingDetails ? "Loading full details…" : resultText}
             </pre>
           </div>
         </div>
@@ -244,35 +267,27 @@ function ToolCard({
   );
 }
 
-export function MessageView({ message }: { message: Message }) {
+function MessageViewComponent({
+  message,
+  context,
+  hasFollowingMessages,
+}: MessageViewProps) {
   const client = useChatStore((state) => state.client);
   const openArtifact = useChatStore((state) => state.openArtifact);
   const closeArtifact = useChatStore((state) => state.closeArtifact);
   const restartFromMessage = useChatStore((state) => state.restartFromMessage);
-  const artifacts = useChatStore((state) => state.artifacts);
-  const sessionMessages = useChatStore(
-    (state) => state.buckets[message.sessionId]?.messages ?? [],
-  );
-  const running = useChatStore(
-    (state) => state.buckets[message.sessionId]?.runId != null,
-  );
+  const {
+    artifacts,
+    running,
+    sessionMessages,
+    sessionArtifactIds,
+    artifactCreatedAtById,
+  } = context;
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState("");
   const [saving, setSaving] = useState(false);
   const [submitError, setSubmitError] = useState<string | null>(null);
   const isUser = message.role === "user";
-  const sessionArtifactIds = Object.values(artifacts)
-    .filter((artifact) => artifact.sessionId === message.sessionId)
-    .sort((left, right) => toTimestamp(left.createdAt) - toTimestamp(right.createdAt))
-    .map((artifact) => artifact.id);
-  const artifactCreatedAtById = Object.fromEntries(
-    Object.values(artifacts).map((artifact) => [artifact.id, artifact.createdAt]),
-  );
-  const messageIndex = sessionMessages.findIndex(
-    (currentMessage) => currentMessage.id === message.id,
-  );
-  const hasFollowingMessages =
-    messageIndex >= 0 && messageIndex < sessionMessages.length - 1;
 
   const beginEditing = () => {
     setDraft(messageText(message));
@@ -324,6 +339,7 @@ export function MessageView({ message }: { message: Message }) {
 
   return (
     <div
+      style={{ contentVisibility: "auto", containIntrinsicSize: "auto 160px" }}
       className={`group px-4 py-3 ${
         isUser ? "bg-neutral-100 dark:bg-neutral-800/60" : ""
       }`}
@@ -427,8 +443,8 @@ export function MessageView({ message }: { message: Message }) {
             part.type === "text" ? (
               <div key={index} className="prose prose-sm max-w-none dark:prose-invert">
                 <ReactMarkdown
-                  remarkPlugins={[remarkGfm]}
-                  rehypePlugins={[rehypeHighlight]}
+                  remarkPlugins={markdownRemarkPlugins}
+                  rehypePlugins={markdownRehypePlugins}
                 >
                   {part.text}
                 </ReactMarkdown>
@@ -477,3 +493,5 @@ export function MessageView({ message }: { message: Message }) {
     </div>
   );
 }
+
+export const MessageView = memo(MessageViewComponent);
