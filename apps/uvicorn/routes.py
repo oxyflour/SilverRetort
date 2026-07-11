@@ -7,7 +7,7 @@ from urllib.parse import unquote, urlparse
 from urllib.request import url2pathname
 
 from fastapi import APIRouter, HTTPException, UploadFile
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, HTMLResponse
 from sse_starlette.sse import EventSourceResponse
 
 import db
@@ -74,6 +74,28 @@ def list_messages(session_id: str) -> list[Message]:
 @router.get("/sessions/{session_id}/artifacts")
 def list_artifacts(session_id: str) -> list[Artifact]:
     return db.list_artifacts(session_id)
+
+
+@router.get("/artifacts/{artifact_id}")
+def get_artifact(artifact_id: str) -> Artifact:
+    artifact = db.get_artifact(artifact_id)
+    if artifact is None:
+        raise HTTPException(404, "artifact not found")
+    return artifact
+
+
+@router.get("/artifacts/{artifact_id}/content")
+def get_artifact_content(artifact_id: str) -> HTMLResponse:
+    artifact = db.get_artifact(artifact_id)
+    if artifact is None:
+        raise HTTPException(404, "artifact not found")
+    payload = artifact.payload
+    if not isinstance(payload, dict):
+        raise HTTPException(400, "artifact does not contain inline HTML")
+    html = payload.get("html")
+    if not isinstance(html, str):
+        raise HTTPException(400, "artifact does not contain inline HTML")
+    return HTMLResponse(html)
 
 
 # ---- chat run ----

@@ -5,6 +5,7 @@ import ReactMarkdown from "react-markdown";
 import rehypeHighlight from "rehype-highlight";
 import remarkGfm from "remark-gfm";
 import { Message, ToolCall } from "silverretort-protocol";
+import { openArtifactInNewWindow } from "../openArtifactInNewWindow";
 import { useChatStore } from "../store";
 
 function isShowArtifactTool(toolName: string): boolean {
@@ -264,6 +265,7 @@ function ToolCard({
 export function MessageView({ message }: { message: Message }) {
   const client = useChatStore((state) => state.client);
   const openArtifact = useChatStore((state) => state.openArtifact);
+  const closeArtifact = useChatStore((state) => state.closeArtifact);
   const restartFromMessage = useChatStore(
     (state) => state.restartFromMessage,
   );
@@ -305,6 +307,12 @@ export function MessageView({ message }: { message: Message }) {
     setEditing(false);
     setDraft("");
     setSubmitError(null);
+  };
+
+  const popOutArtifact = (artifactId: string) => {
+    if (openArtifactInNewWindow(artifactId)) {
+      closeArtifact(artifactId);
+    }
   };
 
   const submitRestart = async () => {
@@ -462,14 +470,26 @@ export function MessageView({ message }: { message: Message }) {
         {message.artifactIds.length > 0 && (
           <div className="mt-2 flex flex-wrap gap-2">
             {message.artifactIds.map((artifactId) => (
-              <button
+              <div
                 key={artifactId}
-                type="button"
-                onClick={() => openArtifact(artifactId, message.sessionId)}
-                className="rounded-md border border-neutral-300 px-3 py-1 text-xs hover:bg-neutral-100 dark:border-neutral-600 dark:hover:bg-neutral-800"
+                className="flex items-center overflow-hidden rounded-md border border-neutral-300 dark:border-neutral-600"
               >
+                <button
+                  type="button"
+                  onClick={() => openArtifact(artifactId, message.sessionId)}
+                  className="px-3 py-1 text-xs hover:bg-neutral-100 dark:hover:bg-neutral-800"
+                >
                 {artifacts[artifactId]?.title ?? "查看内容"}
-              </button>
+                </button>
+                <button
+                  type="button"
+                  title="Open in new window"
+                  onClick={() => popOutArtifact(artifactId)}
+                  className="border-l border-neutral-300 px-2 py-1 text-[11px] text-neutral-500 hover:bg-neutral-100 hover:text-neutral-900 dark:border-neutral-600 dark:hover:bg-neutral-800 dark:hover:text-neutral-100"
+                >
+                  Open
+                </button>
+              </div>
             ))}
           </div>
         )}

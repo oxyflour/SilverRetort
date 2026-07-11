@@ -1,7 +1,8 @@
 "use client";
 
-import { getArtifactRenderer } from "../registry";
+import { openArtifactInNewWindow } from "../openArtifactInNewWindow";
 import { useChatStore } from "../store";
+import { ArtifactContent } from "./ArtifactContent";
 
 const EMPTY_TAB_IDS: string[] = [];
 
@@ -18,9 +19,12 @@ export function ArtifactPanel() {
   const tabIds = workspace?.tabIds ?? EMPTY_TAB_IDS;
   const activeArtifactId = workspace?.activeArtifactId ?? null;
   const activeArtifact = activeArtifactId ? artifacts[activeArtifactId] : null;
-  const Renderer = activeArtifact
-    ? getArtifactRenderer(activeArtifact.type)
-    : undefined;
+
+  const popOutArtifact = (artifactId: string) => {
+    if (openArtifactInNewWindow(artifactId)) {
+      closeArtifact(artifactId);
+    }
+  };
 
   return (
     <div className="flex h-full flex-col border-l border-neutral-200 bg-white dark:border-neutral-800 dark:bg-neutral-900">
@@ -28,13 +32,23 @@ export function ArtifactPanel() {
         <span className="min-w-0 flex-1 truncate text-sm font-medium">
           {activeArtifact?.title ?? "Artifacts"}
         </span>
+        {activeArtifactId && (
+          <button
+            type="button"
+            title="Open in new window"
+            onClick={() => popOutArtifact(activeArtifactId)}
+            className="rounded px-1.5 text-xs text-neutral-500 hover:text-neutral-900 dark:hover:text-neutral-100"
+          >
+            Open
+          </button>
+        )}
         <button
           type="button"
           title="Close panel"
           onClick={() => setPanelOpen(false)}
-          className="rounded px-1.5 text-neutral-500 hover:text-neutral-900 dark:hover:text-neutral-100"
+          className="rounded px-1.5 text-xs text-neutral-500 hover:text-neutral-900 dark:hover:text-neutral-100"
         >
-          x
+          Close
         </button>
       </div>
 
@@ -66,13 +80,13 @@ export function ArtifactPanel() {
                     event.stopPropagation();
                     closeArtifact(id);
                   }}
-                  className={`rounded-full px-2 py-1 text-xs ${
+                  className={`rounded-full px-2 py-1 text-[11px] ${
                     active
                       ? "text-white/80 hover:text-white dark:text-neutral-700 dark:hover:text-neutral-900"
                       : "text-neutral-400 hover:text-neutral-700 dark:hover:text-neutral-200"
                   }`}
                 >
-                  x
+                  Close
                 </button>
               </div>
             );
@@ -81,21 +95,10 @@ export function ArtifactPanel() {
       )}
 
       <div className="min-h-0 flex-1">
-        {!activeArtifact && activeArtifactId ? (
-          <div className="flex h-full items-center justify-center text-sm text-neutral-400">
-            Loading artifact...
-          </div>
-        ) : !activeArtifact ? (
-          <div className="flex h-full items-center justify-center text-sm text-neutral-400">
-            No artifact selected
-          </div>
-        ) : Renderer ? (
-          <Renderer artifact={activeArtifact} />
-        ) : (
-          <div className="flex h-full items-center justify-center p-4 text-sm text-neutral-400">
-            No renderer registered for "{activeArtifact.type}"
-          </div>
-        )}
+        <ArtifactContent
+          artifact={activeArtifact}
+          loading={Boolean(activeArtifactId && !activeArtifact)}
+        />
       </div>
     </div>
   );

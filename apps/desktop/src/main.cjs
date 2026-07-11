@@ -4,6 +4,7 @@ const path = require("node:path");
 const { existsSync, mkdirSync, readFileSync } = require("node:fs");
 const { spawn } = require("node:child_process");
 const { app, BrowserWindow, utilityProcess } = require("electron/main");
+const { shell } = require("electron");
 
 const APP_ID = "com.silverretort.app";
 const DEFAULT_NEXT_PORT = 23000;
@@ -182,6 +183,48 @@ function toWebSocketUrl(baseUrl, route = "") {
     const url = new URL(route, `${normalizeBaseUrl(baseUrl)}/`);
     url.protocol = url.protocol === "https:" ? "wss:" : "ws:";
     return url.toString();
+}
+
+function isArtifactViewerPath(pathname) {
+    return pathname.startsWith("/artifacts/");
+}
+
+function configureWindowOpenHandler(window, baseUrl) {
+    const appOrigin = new URL(baseUrl).origin;
+    const sharedWindowOptions = {
+        allowRunningInsecureContent: true,
+        webSecurity: false,
+    };
+
+    window.webContents.setWindowOpenHandler(({ url }) => {
+        let targetUrl;
+        try {
+            targetUrl = new URL(url);
+        } catch {
+            return { action: "deny" };
+        }
+
+        if (targetUrl.origin === appOrigin && isArtifactViewerPath(targetUrl.pathname)) {
+            return {
+                action: "allow",
+                overrideBrowserWindowOptions: {
+                    width: 1000,
+                    height: 760,
+                    minWidth: 640,
+                    minHeight: 480,
+                    autoHideMenuBar: true,
+                    title: "Artifact",
+                    icon: existsSync(desktopIconPath) ? desktopIconPath : undefined,
+                    webPreferences: sharedWindowOptions,
+                },
+            };
+        }
+
+        if ((targetUrl.protocol === "http:" || targetUrl.protocol === "https:") && targetUrl.origin !== appOrigin) {
+            void shell.openExternal(targetUrl.toString());
+        }
+        return { action: "deny" };
+    });
 }
 
 function randomApiKey() {
@@ -574,14 +617,18 @@ async function startServer(
 }
 
 async function createMainWindow() {
+    const sharedWindowOptions = {
+        allowRunningInsecureContent: true,
+        webSecurity: false,
+    };
+
     mainWindow = new BrowserWindow({
         width: 640,
         height: 480,
         show: false,
         icon: existsSync(desktopIconPath) ? desktopIconPath : undefined,
         webPreferences: {
-            allowRunningInsecureContent: true,
-            webSecurity: false,
+            ...sharedWindowOptions,
         }
     });
 
@@ -597,6 +644,7 @@ async function createMainWindow() {
     await mainWindow.loadFile(path.join(desktopRoot, "index.html"));
 
     const url = await startServer();
+    configureWindowOpenHandler(mainWindow, url);
     await mainWindow.loadURL(url);
 }
 

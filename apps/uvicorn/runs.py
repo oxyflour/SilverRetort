@@ -9,6 +9,7 @@ import uuid
 
 import db
 import events
+import mcp_tools
 from engines import Engine
 from models import Artifact, Message, TextPart, ToolCall, ToolPart
 
@@ -91,6 +92,9 @@ async def _run(
                     )
                 )
             elif kind == "artifact":
+                type_error = mcp_tools.validate_render_type(event["type"])
+                if type_error is not None:
+                    raise ValueError(type_error)
                 artifact = Artifact(
                     id=event.get("id") or uuid.uuid4().hex,
                     session_id=session_id,

@@ -69,6 +69,14 @@ export class ApiClient {
     return this.request(z.array(ArtifactSchema), `/api/sessions/${sessionId}/artifacts`);
   }
 
+  getArtifact(artifactId: string): Promise<Artifact> {
+    return this.request(ArtifactSchema, `/api/artifacts/${artifactId}`);
+  }
+
+  artifactContentUrl(artifactId: string): string {
+    return `${this.baseUrl}/api/artifacts/${artifactId}/content`;
+  }
+
   sendChat(sessionId: string, body: SendChatRequest): Promise<SendChatResponse> {
     return this.request(SendChatResponseSchema, `/api/sessions/${sessionId}/chat`, {
       method: "POST",

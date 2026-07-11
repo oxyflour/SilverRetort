@@ -5,12 +5,13 @@ import { registerArtifactRenderer, ArtifactRendererProps } from "../registry";
 /** iframe artifact payload：{ url } 或 { html } 二选一 */
 function IframeRenderer({ artifact }: ArtifactRendererProps) {
   const payload = artifact.payload as { url?: string; html?: string };
+
   return (
     <iframe
       title={artifact.title}
       className="h-full w-full border-0 bg-white"
       sandbox="allow-scripts allow-forms allow-popups allow-modals allow-downloads allow-same-origin"
-      {...(payload.url ? { src: payload.url } : { srcDoc: payload.html ?? "" })}
+      src={payload.url ?? `/api/artifacts/${encodeURIComponent(artifact.id)}/content`}
     />
   );
 }

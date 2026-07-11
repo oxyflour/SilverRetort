@@ -28,12 +28,26 @@ def set_render_types(types: list[str]) -> None:
     _render_types = types or list(BUILTIN_RENDER_TYPES)
 
 
+def supported_render_types() -> list[str]:
+    return list(_render_types)
+
+
+def validate_render_type(type: str) -> str | None:
+    if type in _render_types:
+        return None
+    supported = ", ".join(_render_types) or "(none)"
+    return f"error: unsupported artifact type: {type}; supported types: {supported}"
+
+
 def ui_show_artifact(
     session_id: str, type: str, title: str, payload: dict[str, Any] | None = None
 ) -> str:
     """Show an artifact in the user's right panel and return its artifact_id."""
     if db.get_session(session_id) is None:
         return f"error: session not found: {session_id}"
+    type_error = validate_render_type(type)
+    if type_error is not None:
+        return type_error
     artifact = Artifact(
         id=uuid.uuid4().hex,
         session_id=session_id,
@@ -68,7 +82,7 @@ def ui_update_artifact(artifact_id: str, payload: dict[str, Any]) -> str:
 
 def ui_list_render_types() -> list[str]:
     """List artifact renderer types currently registered by the frontend."""
-    return list(_render_types)
+    return supported_render_types()
 
 
 def list_user_files(session_id: str) -> list[dict[str, Any]]:

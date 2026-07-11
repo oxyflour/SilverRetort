@@ -5,12 +5,9 @@ import { Panel, PanelGroup, PanelResizeHandle } from "react-resizable-panels";
 import { subscribeEvents } from "silverretort-protocol";
 import { useChatStore } from "../store";
 import { listRenderTypes } from "../registry";
-import { registerBuiltinRenderers } from "../renderers/builtins";
 import { SessionSidebar } from "./SessionSidebar";
 import { ChatPane } from "./ChatPane";
 import { ArtifactPanel } from "./ArtifactPanel";
-
-registerBuiltinRenderers();
 
 const separatorClass =
   "w-1 bg-neutral-200 transition-colors hover:bg-neutral-400 data-[resize-handle-state=drag]:bg-neutral-400 dark:bg-neutral-800 dark:hover:bg-neutral-600";
