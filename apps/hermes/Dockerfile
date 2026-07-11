@@ -15,7 +15,11 @@ COPY . .
 ENV WATCH_STDIN=0 \
     LISTEN_HOST=0.0.0.0 \
     LISTEN_PORT=23002 \
-    MCP_URL=http://host.docker.internal:23001/mcp/
+    MCP_URL=http://host.docker.internal:23001/mcp/ \
+    HERMES_WORKSPACES_DIR=/var/lib/silverretort/workspaces
+
+RUN mkdir -p /var/lib/silverretort/workspaces
+VOLUME ["/var/lib/silverretort/workspaces"]
 
 EXPOSE 23002
 

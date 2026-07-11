@@ -24,6 +24,7 @@ def is_running(session_id: str) -> bool:
 def start_run(
     engine: Engine,
     session_id: str,
+    workspace_id: str,
     run_id: str,
     history: list[Message],
     user_message: Message,
@@ -32,7 +33,7 @@ def start_run(
     if is_running(session_id):
         raise RuntimeError("session already has an active run")
     task = asyncio.create_task(
-        _run(engine, session_id, run_id, history, user_message, assistant_message)
+        _run(engine, session_id, workspace_id, run_id, history, user_message, assistant_message)
     )
     _active[session_id] = task
 
@@ -45,9 +46,16 @@ def stop_run(session_id: str) -> bool:
     return True
 
 
+def stop_workspace(workspace_id: str) -> None:
+    for session in db.list_sessions():
+        if session.workspace_id == workspace_id:
+            stop_run(session.id)
+
+
 async def _run(
     engine: Engine,
     session_id: str,
+    workspace_id: str,
     run_id: str,
     history: list[Message],
     user_message: Message,
@@ -56,7 +64,7 @@ async def _run(
     message = assistant_message
     events.broadcast(events.run_started(session_id, run_id, message.id))
     try:
-        async for event in engine.run(session_id, history, user_message):
+        async for event in engine.run(session_id, workspace_id, history, user_message):
             kind = event["kind"]
             if kind == "text":
                 delta = event["delta"]

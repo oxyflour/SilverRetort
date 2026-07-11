@@ -1,6 +1,5 @@
 """Hermes Responses API adapter."""
 
-import base64
 import json
 import uuid
 from typing import Any, AsyncGenerator
@@ -17,11 +16,11 @@ LIST_USER_FILES_TOOL = f"{MCP_TOOL_PREFIX}list_user_files"
 READ_USER_FILE_TOOL = f"{MCP_TOOL_PREFIX}read_user_file"
 
 SYSTEM_PROMPT = """你在一个桌面聊天应用中回答用户。当前 session_id: {session_id}
+当前 workspace_id: {workspace_id}。工作区目录由 Hermes 解析；所有文件操作应限制在该工作区内。
 
 你可以通过 silverretort-ui MCP 工具操控界面，调用时请使用当前工具列表里的实际函数名：
 - {ui_show_artifact_tool}(session_id, type, title, payload) 在右侧面板展示内容（type 用 ui_list_render_types 查询）
 - {ui_update_artifact_tool}(artifact_id, payload) 增量更新
-- {list_user_files_tool}(session_id) / {read_user_file_tool}(file_id) 读取用户上传的附件
 {attachments_note}"""
 
 
@@ -31,25 +30,6 @@ def _text_of(message: Message) -> str:
 
 def _to_openai_message(message: Message) -> dict[str, Any]:
     text = _text_of(message)
-    images = [a for a in message.attachments if a.kind == "image"]
-    if message.role == "user" and images:
-        content: list[dict[str, Any]] = [{"type": "text", "text": text}]
-        for attachment in images:
-            found = db.get_file(attachment.id)
-            if found is None:
-                continue
-            with open(found[1], "rb") as file:
-                data = file.read()
-            content.append(
-                {
-                    "type": "image_url",
-                    "image_url": {
-                        "url": f"data:{attachment.mime_type};base64,"
-                        + base64.b64encode(data).decode("ascii")
-                    },
-                }
-            )
-        return {"role": message.role, "content": content}
     return {"role": message.role, "content": text}
 
 
@@ -57,11 +37,10 @@ def _attachments_note(history: list[Message], user_message: Message) -> str:
     lines = []
     for message in [*history, user_message]:
         for attachment in message.attachments:
-            if attachment.kind != "image":
-                lines.append(f"- {attachment.name} (file_id: {attachment.id}, {attachment.mime_type})")
+            lines.append(f"- {attachment.relative_path} ({attachment.mime_type}, {attachment.size} bytes)")
     if not lines:
         return ""
-    return "\n用户上传过以下文件（用 read_user_file 读取）：\n" + "\n".join(lines)
+    return "\n工作区内已上传以下文件，可使用 Hermes 原生文件工具读取：\n" + "\n".join(lines)
 
 
 def _flatten_response_output(output: Any) -> str | None:
@@ -208,14 +187,13 @@ class HermesEngine:
         self.model = model
 
     async def run(
-        self, session_id: str, history: list[Message], user_message: Message
+        self, session_id: str, workspace_id: str, history: list[Message], user_message: Message
     ) -> AsyncGenerator[dict[str, Any], None]:
         system = SYSTEM_PROMPT.format(
             session_id=session_id,
+            workspace_id=workspace_id,
             ui_show_artifact_tool=UI_SHOW_ARTIFACT_TOOL,
             ui_update_artifact_tool=UI_UPDATE_ARTIFACT_TOOL,
-            list_user_files_tool=LIST_USER_FILES_TOOL,
-            read_user_file_tool=READ_USER_FILE_TOOL,
             attachments_note=_attachments_note(history, user_message),
         )
         conversation_history = [_to_openai_message(m) for m in history if _text_of(m) or m.attachments]
@@ -225,6 +203,7 @@ class HermesEngine:
             "conversation_history": conversation_history,
             "input": [_to_openai_message(user_message)],
             "stream": True,
+            "workspace_id": workspace_id,
         }
         headers = {"authorization": f"Bearer {self.api_key}"}
         completed_tool_calls: set[str] = set()

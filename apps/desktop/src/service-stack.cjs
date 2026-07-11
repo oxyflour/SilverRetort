@@ -82,7 +82,7 @@ function buildUvicornEnv(config, hermesMode, pythonPort) {
         ...(hermesMode.mode === "disabled" ? {} : {
             HERMES_URL: hermesMode.url,
             HERMES_API_KEY: hermesMode.apiKey,
-            ...(hermesMode.mode === "docker" ? {
+            ...(["docker", "local"].includes(hermesMode.mode) ? {
                 HERMES_BRIDGE_URL: toWebSocketUrl(hermesMode.url, "bridge"),
             } : {}),
         }),

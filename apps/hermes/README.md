@@ -23,6 +23,15 @@
 - `HERMES_RELAY_ENABLED=1`: enable relay mode; public port becomes the relay and the internal gateway moves to `HERMES_GATEWAY_PORT`
 - `HERMES_GATEWAY_HOST` / `HERMES_GATEWAY_PORT`: internal gateway bind target in relay mode; default host is `127.0.0.1`, default port is `LISTEN_PORT + 1`
 - `OPENAI_*`: model configuration can be passed directly in env or via `HERMES_ENV_FILE`
+- `HERMES_WORKSPACES_DIR`: persistent root for workspace directories. Docker defaults to `/var/lib/silverretort/workspaces`.
+
+## Workspace API
+
+Relay mode exposes authenticated `/workspace-api` endpoints for capability discovery,
+idempotent workspace lifecycle, and streaming file transfer. Chat requests may include
+`workspace_id`; the relay resolves it to a server-owned directory and adds that location
+to Hermes instructions. Hermes Agent 0.14 does not expose a request-level cwd sandbox
+hook, so capability currently reports `cwdEnforced: false`.
 
 ## Desktop-Managed Docker
 

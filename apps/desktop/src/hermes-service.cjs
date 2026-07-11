@@ -65,6 +65,8 @@ function resolveHermesDockerConfig(
         "-e", `LISTEN_PORT=${containerPort}`,
         "-e", `HERMES_API_KEY=${effectiveApiKey}`,
         "-e", "HERMES_RELAY_ENABLED=1",
+        "-e", "HERMES_WORKSPACES_DIR=/var/lib/silverretort/workspaces",
+        "-v", `${identity.containerName}-workspaces:/var/lib/silverretort/workspaces`,
     ];
     for (const key of ["OPENAI_API_KEY", "OPENAI_BASE_URL", "OPENAI_MODEL", "OPENAI_MODEL_ID"]) {
         const value = `${config.desktopEnv[key] || config.processEnv[key] || ""}`.trim();
@@ -129,6 +131,8 @@ function resolveHermesMode(
             MCP_URL: `http://127.0.0.1:${pythonPort}/mcp/`,
             HERMES_HOME: ensureDir(path.join(config.dataDir, "hermes-home")),
             HERMES_ENV_FILE: config.envPath,
+            HERMES_RELAY_ENABLED: "1",
+            HERMES_WORKSPACES_DIR: ensureDir(path.join(config.dataDir, "hermes-workspaces")),
         },
     };
 }

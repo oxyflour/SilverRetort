@@ -7,6 +7,8 @@ import {
   Message,
   Session,
   ToolCall,
+  Workspace,
+  WorkspaceCapability,
 } from "silverretort-protocol";
 
 export interface SessionBucket {
@@ -24,6 +26,10 @@ export interface ArtifactWorkspaceState {
 
 interface ChatState {
   client: ApiClient;
+  workspaces: Workspace[];
+  workspaceCapability: WorkspaceCapability | null;
+  currentWorkspaceId: string | null;
+  collapsedWorkspaceIds: string[];
   sessions: Session[];
   currentSessionId: string | null;
   buckets: Record<string, SessionBucket>;
@@ -32,7 +38,12 @@ interface ChatState {
   pendingAttachments: Attachment[];
 
   refreshSessions: () => Promise<void>;
-  createSession: () => Promise<void>;
+  createWorkspace: (name: string) => Promise<void>;
+  renameWorkspace: (id: string, name: string) => Promise<void>;
+  deleteWorkspace: (id: string) => Promise<void>;
+  selectWorkspace: (id: string) => void;
+  toggleWorkspace: (id: string) => void;
+  createSession: (workspaceId?: string) => Promise<void>;
   selectSession: (id: string) => Promise<void>;
   renameSession: (id: string, title: string) => Promise<void>;
   deleteSession: (id: string) => Promise<void>;
@@ -294,6 +305,10 @@ export const useChatStore = create<ChatState>((set, get) => {
 
   return {
     client: new ApiClient(),
+    workspaces: [],
+    workspaceCapability: null,
+    currentWorkspaceId: null,
+    collapsedWorkspaceIds: [],
     sessions: [],
     currentSessionId: null,
     buckets: {},
@@ -302,21 +317,72 @@ export const useChatStore = create<ChatState>((set, get) => {
     pendingAttachments: [],
 
     refreshSessions: async () => {
-      const sessions = await get().client.listSessions();
-      set({ sessions });
+      const [workspaces, capability, sessions] = await Promise.all([
+        get().client.listWorkspaces(),
+        get().client.workspaceCapability(),
+        get().client.listSessions(),
+      ]);
+      const currentWorkspaceId = get().currentWorkspaceId ?? workspaces[0]?.id ?? null;
+      set({ workspaces, workspaceCapability: capability, sessions, currentWorkspaceId });
       if (!get().currentSessionId && sessions.length > 0) {
-        await get().selectSession(sessions[0].id);
+        const first = sessions.find((session) => session.workspaceId === currentWorkspaceId) ?? sessions[0];
+        await get().selectSession(first.id);
       }
     },
 
-    createSession: async () => {
-      const session = await get().client.createSession();
+    createWorkspace: async (name) => {
+      const workspace = await get().client.createWorkspace(name);
+      set((state) => ({
+        workspaces: [workspace, ...state.workspaces],
+        currentWorkspaceId: workspace.id,
+        collapsedWorkspaceIds: state.collapsedWorkspaceIds.filter((id) => id !== workspace.id),
+      }));
+      await get().createSession(workspace.id);
+    },
+
+    renameWorkspace: async (id, name) => {
+      const workspace = await get().client.renameWorkspace(id, name);
+      set((state) => ({ workspaces: state.workspaces.map((item) => item.id === id ? workspace : item) }));
+    },
+
+    deleteWorkspace: async (id) => {
+      await get().client.deleteWorkspace(id);
+      const removedIds = new Set(get().sessions.filter((session) => session.workspaceId === id).map((session) => session.id));
+      set((state) => {
+        const workspaces = state.workspaces.filter((workspace) => workspace.id !== id);
+        const sessions = state.sessions.filter((session) => !removedIds.has(session.id));
+        return {
+          workspaces,
+          sessions,
+          currentWorkspaceId: workspaces[0]?.id ?? null,
+          currentSessionId: sessions[0]?.id ?? null,
+          buckets: Object.fromEntries(Object.entries(state.buckets).filter(([key]) => !removedIds.has(key))),
+          artifactWorkspaces: Object.fromEntries(Object.entries(state.artifactWorkspaces).filter(([key]) => !removedIds.has(key))),
+          artifacts: Object.fromEntries(Object.entries(state.artifacts).filter(([, artifact]) => !removedIds.has(artifact.sessionId))),
+          pendingAttachments: [],
+        };
+      });
+      await get().refreshSessions();
+    },
+
+    selectWorkspace: (id) => set({ currentWorkspaceId: id }),
+    toggleWorkspace: (id) => set((state) => ({
+      collapsedWorkspaceIds: state.collapsedWorkspaceIds.includes(id)
+        ? state.collapsedWorkspaceIds.filter((item) => item !== id)
+        : [...state.collapsedWorkspaceIds, id],
+    })),
+
+    createSession: async (requestedWorkspaceId) => {
+      const workspaceId = requestedWorkspaceId ?? get().currentWorkspaceId;
+      if (!workspaceId) return;
+      const session = await get().client.createSession(workspaceId);
       set((state) => ({ sessions: [session, ...state.sessions] }));
       await get().selectSession(session.id);
     },
 
     selectSession: async (id) => {
-      set({ currentSessionId: id, pendingAttachments: [] });
+      const session = get().sessions.find((item) => item.id === id);
+      set({ currentSessionId: id, currentWorkspaceId: session?.workspaceId ?? get().currentWorkspaceId, pendingAttachments: [] });
       const bucket = get().buckets[id];
       if (bucket?.loaded) {
         return;
@@ -505,7 +571,9 @@ export const useChatStore = create<ChatState>((set, get) => {
     },
 
     addAttachment: async (file) => {
-      const attachment = await get().client.uploadFile(file);
+      const session = get().sessions.find((item) => item.id === get().currentSessionId);
+      if (!session) return;
+      const attachment = await get().client.uploadFile(session.workspaceId, file);
       set((state) => ({
         pendingAttachments: [...state.pendingAttachments, attachment],
       }));

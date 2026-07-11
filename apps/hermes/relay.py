@@ -6,6 +6,8 @@ reverse bridge connection from uvicorn for tool execution.
 """
 
 import asyncio
+import json
+import os
 import time
 import uuid
 from contextlib import asynccontextmanager
@@ -13,7 +15,7 @@ from typing import Any
 
 import httpx
 import uvicorn
-from fastapi import FastAPI
+from fastapi import FastAPI, HTTPException
 from mcp.server.fastmcp import FastMCP
 from starlette.requests import Request
 from starlette.responses import PlainTextResponse, Response, StreamingResponse
@@ -34,6 +36,8 @@ HOP_BY_HOP_HEADERS = {
 }
 TOOL_TIMEOUT_SECONDS = 60
 LOOPBACK_HOSTS = {"127.0.0.1", "::1", "localhost"}
+
+import workspaces
 
 
 def _strip_base_url(raw_url: str) -> str:
@@ -203,16 +207,6 @@ def _create_mcp_server(bridge: BridgeRegistry) -> FastMCP:
         result = await bridge.call_tool("ui_list_render_types", {})
         return list(result) if isinstance(result, list) else []
 
-    @mcp.tool()
-    async def list_user_files(session_id: str) -> list[dict[str, Any]]:
-        result = await bridge.call_tool("list_user_files", {"session_id": session_id})
-        return list(result) if isinstance(result, list) else []
-
-    @mcp.tool()
-    async def read_user_file(file_id: str) -> dict[str, Any]:
-        result = await bridge.call_tool("read_user_file", {"file_id": file_id})
-        return result if isinstance(result, dict) else {"error": "invalid bridge response"}
-
     return mcp
 
 
@@ -229,11 +223,28 @@ async def _proxy_request(request: Request) -> Response:
     target = f"{state.gateway_base_url}{request.url.path}"
     if request.url.query:
         target = f"{target}?{request.url.query}"
+    body = await request.body()
+    if request.url.path == "/v1/responses" and body:
+        try:
+            payload = json.loads(body)
+            workspace_id = str(payload.pop("workspace_id", ""))
+            if workspace_id:
+                workspace_path = workspaces.workspace_dir(workspace_id, create=False)
+                if not workspace_path.is_dir():
+                    raise HTTPException(404, "workspace not found")
+                suffix = (
+                    f"\nHermes workspace root: {workspace_path}. "
+                    "Use this as the working directory for all shell and file operations; do not access paths outside it."
+                )
+                payload["instructions"] = str(payload.get("instructions") or "") + suffix
+                body = json.dumps(payload, ensure_ascii=False).encode("utf-8")
+        except json.JSONDecodeError:
+            pass
     upstream = state.http.build_request(
         request.method,
         target,
         headers=_filter_headers(dict(request.headers.items())),
-        content=await request.body(),
+        content=body,
     )
     response = await state.http.send(upstream, stream=True)
     return StreamingResponse(
@@ -276,6 +287,78 @@ def create_relay_app(gateway_base_url: str, api_key: str) -> FastAPI:
             await app.state.relay_state.http.aclose()
 
     app = FastAPI(lifespan=lifespan)
+
+    @app.middleware("http")
+    async def protect_workspace_api(request: Request, call_next: Any):
+        if request.url.path.startswith("/workspace-api"):
+            client_host = request.client.host.lower() if request.client else ""
+            if api_key.strip() and client_host not in LOOPBACK_HOSTS and _bearer_token(request.headers) != api_key.strip():
+                return PlainTextResponse("unauthorized", status_code=401)
+        return await call_next(request)
+
+    @app.get("/workspace-api/capability")
+    async def workspace_capability() -> dict[str, Any]:
+        root = workspaces.root_dir()
+        return {"supported": True, "version": 1, "writable": os.access(root, os.W_OK), "cwdEnforced": False}
+
+    @app.put("/workspace-api/workspaces/{workspace_id}")
+    async def create_workspace(workspace_id: str) -> dict[str, str]:
+        try:
+            path = workspaces.workspace_dir(workspace_id, create=True)
+        except ValueError as exc:
+            raise HTTPException(400, str(exc)) from exc
+        return {"id": workspace_id, "path": str(path)}
+
+    @app.delete("/workspace-api/workspaces/{workspace_id}")
+    async def delete_workspace(workspace_id: str) -> dict[str, bool]:
+        try:
+            workspaces.delete_workspace(workspace_id)
+        except ValueError as exc:
+            raise HTTPException(400, str(exc)) from exc
+        return {"ok": True}
+
+    @app.post("/workspace-api/workspaces/{workspace_id}/files")
+    async def upload_workspace_file(workspace_id: str, request: Request) -> dict[str, Any]:
+        filename = request.headers.get("x-silverretort-filename", "upload")
+        try:
+            target, relative_path = workspaces.unique_upload_path(workspace_id, filename)
+        except ValueError as exc:
+            raise HTTPException(400, str(exc)) from exc
+        size = 0
+        try:
+            with target.open("xb") as output:
+                async for chunk in request.stream():
+                    output.write(chunk)
+                    size += len(chunk)
+        except Exception:
+            target.unlink(missing_ok=True)
+            raise
+        return {"relativePath": relative_path, "size": size}
+
+    @app.get("/workspace-api/workspaces/{workspace_id}/files")
+    async def list_workspace_files(workspace_id: str) -> list[dict[str, Any]]:
+        try:
+            root = workspaces.workspace_dir(workspace_id)
+        except ValueError as exc:
+            raise HTTPException(400, str(exc)) from exc
+        if not root.is_dir():
+            raise HTTPException(404, "workspace not found")
+        return [
+            {"relativePath": path.relative_to(root).as_posix(), "size": path.stat().st_size}
+            for path in root.rglob("*") if path.is_file() and not path.is_symlink()
+        ]
+
+    @app.get("/workspace-api/workspaces/{workspace_id}/files/{relative_path:path}")
+    async def download_workspace_file(workspace_id: str, relative_path: str):
+        try:
+            path = workspaces.file_path(workspace_id, relative_path)
+        except ValueError as exc:
+            raise HTTPException(400, str(exc)) from exc
+        if not path.is_file():
+            raise HTTPException(404, "file not found")
+        from starlette.responses import FileResponse
+        return FileResponse(path)
+
     app.mount("/mcp", protected_mcp)
     app.websocket("/bridge")(_bridge_endpoint)
     app.api_route("/", methods=HTTP_METHODS)(_proxy_request)

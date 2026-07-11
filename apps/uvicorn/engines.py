@@ -14,7 +14,7 @@ from models import Message
 
 class Engine(Protocol):
     def run(
-        self, session_id: str, history: list[Message], user_message: Message
+        self, session_id: str, workspace_id: str, history: list[Message], user_message: Message
     ) -> AsyncGenerator[dict[str, Any], None]: ...
 
 
@@ -22,7 +22,7 @@ class MockEngine:
     """开发/兜底引擎：回显 + 假工具事件；输入含 artifact 时产出示例 artifact。"""
 
     async def run(
-        self, session_id: str, history: list[Message], user_message: Message
+        self, session_id: str, workspace_id: str, history: list[Message], user_message: Message
     ) -> AsyncGenerator[dict[str, Any], None]:
         user_text = next((p.text for p in user_message.parts if p.type == "text"), "")
 

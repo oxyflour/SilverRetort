@@ -1,24 +1,28 @@
 """REST API + 常驻事件通道。路径与 packages/protocol 的 ApiClient 一一对应。"""
 
 import mimetypes
+import os
 from pathlib import Path
 import uuid
 from urllib.parse import unquote, urlparse
 from urllib.request import url2pathname
 
+import httpx
 from fastapi import APIRouter, HTTPException, UploadFile
-from fastapi.responses import FileResponse, HTMLResponse
+from fastapi.responses import FileResponse, HTMLResponse, StreamingResponse
 from sse_starlette.sse import EventSourceResponse
 
 import db
 import events
 import mcp_server
 import runs
+import workspace_service
 from engines import create_engine
 from models import (
     ApiModel,
     Artifact,
     Attachment,
+    CreateWorkspaceRequest,
     CreateSessionRequest,
     Message,
     RestartMessageRequest,
@@ -27,6 +31,9 @@ from models import (
     Session,
     TextPart,
     UpdateSessionRequest,
+    UpdateWorkspaceRequest,
+    Workspace,
+    WorkspaceCapability,
 )
 
 router = APIRouter(prefix="/api")
@@ -46,9 +53,78 @@ def list_sessions() -> list[Session]:
     return db.list_sessions()
 
 
-@router.post("/sessions")
-def create_session(body: CreateSessionRequest) -> Session:
-    return db.create_session(uuid.uuid4().hex, body.title or DEFAULT_TITLE)
+@router.get("/workspaces/capability")
+async def workspace_capability() -> WorkspaceCapability:
+    return WorkspaceCapability.model_validate(await workspace_service.capability())
+
+
+@router.get("/workspaces")
+async def list_workspaces() -> list[Workspace]:
+    workspaces = db.list_workspaces()
+    capability = await workspace_service.capability()
+    if capability.get("supported") and capability.get("writable"):
+        for workspace in workspaces:
+            try:
+                await workspace_service.create_remote(workspace.id)
+                db.set_workspace_status(workspace.id, "active")
+            except Exception:
+                db.set_workspace_status(workspace.id, "error")
+        workspaces = db.list_workspaces()
+    return workspaces
+
+
+@router.post("/workspaces")
+async def create_workspace(body: CreateWorkspaceRequest) -> Workspace:
+    name = body.name.strip()
+    if not name:
+        raise HTTPException(400, "workspace name is required")
+    workspace_id = uuid.uuid4().hex
+    try:
+        await workspace_service.create_remote(workspace_id)
+    except Exception as exc:
+        raise HTTPException(503, f"Hermes workspace unavailable: {exc}") from exc
+    try:
+        return db.create_workspace(workspace_id, name)
+    except Exception:
+        await workspace_service.delete_remote(workspace_id)
+        raise
+
+
+@router.patch("/workspaces/{workspace_id}")
+def rename_workspace(workspace_id: str, body: UpdateWorkspaceRequest) -> Workspace:
+    workspace = db.rename_workspace(workspace_id, body.name.strip())
+    if workspace is None:
+        raise HTTPException(404, "workspace not found")
+    return workspace
+
+
+@router.delete("/workspaces/{workspace_id}")
+async def delete_workspace(workspace_id: str) -> dict[str, bool]:
+    if db.get_workspace(workspace_id) is None:
+        raise HTTPException(404, "workspace not found")
+    for session in db.list_sessions():
+        if session.workspace_id == workspace_id:
+            runs.stop_run(session.id)
+    db.set_workspace_status(workspace_id, "deleting")
+    try:
+        await workspace_service.delete_remote(workspace_id)
+    except Exception as exc:
+        db.set_workspace_status(workspace_id, "error")
+        raise HTTPException(503, f"failed to delete Hermes workspace: {exc}") from exc
+    db.delete_workspace(workspace_id)
+    if not db.list_workspaces():
+        fallback_id = uuid.uuid4().hex
+        await workspace_service.create_remote(fallback_id)
+        db.create_workspace(fallback_id, "默认工作区")
+    return {"ok": True}
+
+
+@router.post("/workspaces/{workspace_id}/sessions")
+def create_session(workspace_id: str, body: CreateSessionRequest) -> Session:
+    workspace = db.get_workspace(workspace_id)
+    if workspace is None or workspace.status != "active":
+        raise HTTPException(409, "workspace is unavailable")
+    return db.create_session(uuid.uuid4().hex, workspace_id, body.title or DEFAULT_TITLE)
 
 
 @router.patch("/sessions/{session_id}")
@@ -140,7 +216,7 @@ async def send_chat(session_id: str, body: SendChatRequest) -> SendChatResponse:
         db.rename_session(session_id, _auto_title(body.text))
 
     run_id = uuid.uuid4().hex
-    runs.start_run(engine, session_id, run_id, history, user_message, assistant_message)
+    runs.start_run(engine, session_id, session.workspace_id, run_id, history, user_message, assistant_message)
     return SendChatResponse(
         run_id=run_id,
         user_message_id=user_message.id,
@@ -179,7 +255,7 @@ async def restart_message(
         db.rename_session(session_id, _auto_title(body.text))
 
     run_id = uuid.uuid4().hex
-    runs.start_run(engine, session_id, run_id, result.history, result.user_message, assistant_message)
+    runs.start_run(engine, session_id, session.workspace_id, run_id, result.history, result.user_message, assistant_message)
     return SendChatResponse(
         run_id=run_id,
         user_message_id=result.user_message.id,
@@ -194,31 +270,58 @@ async def stop_run(session_id: str) -> dict[str, bool]:
 
 # ---- files ----
 
-@router.post("/files")
-async def upload_file(file: UploadFile) -> Attachment:
-    content = await file.read()
+@router.post("/workspaces/{workspace_id}/files")
+async def upload_file(workspace_id: str, file: UploadFile) -> Attachment:
+    if db.get_workspace(workspace_id) is None:
+        raise HTTPException(404, "workspace not found")
     file_id = uuid.uuid4().hex
     mime = file.content_type or "application/octet-stream"
-    path = db.files_dir() / file_id
-    path.write_bytes(content)
+    try:
+        result = await workspace_service.upload_remote(workspace_id, file)
+    except Exception as exc:
+        raise HTTPException(503, f"file upload failed: {exc}") from exc
     attachment = Attachment(
         id=file_id,
+        workspace_id=workspace_id,
+        relative_path=str(result["relativePath"]),
         name=file.filename or file_id,
         mime_type=mime,
-        size=len(content),
+        size=int(result["size"]),
         kind="image" if mime.startswith("image/") else "file",
     )
-    db.insert_file(attachment, str(path))
+    db.insert_file(attachment)
     return attachment
 
 
-@router.get("/files/{file_id}")
-def get_file(file_id: str) -> FileResponse:
+@router.get("/workspaces/{workspace_id}/files")
+def list_workspace_files(workspace_id: str) -> list[Attachment]:
+    if db.get_workspace(workspace_id) is None:
+        raise HTTPException(404, "workspace not found")
+    return db.list_files(workspace_id)
+
+
+@router.get("/workspaces/{workspace_id}/files/{file_id}")
+async def get_file(workspace_id: str, file_id: str) -> StreamingResponse:
     found = db.get_file(file_id)
-    if found is None:
+    if found is None or found[0].workspace_id != workspace_id:
         raise HTTPException(404, "file not found")
-    attachment, path = found
-    return FileResponse(path, media_type=attachment.mime_type, filename=attachment.name)
+    attachment, _ = found
+    client = httpx.AsyncClient(timeout=httpx.Timeout(None, connect=10))
+    response = await client.send(client.build_request(
+        "GET", workspace_service.remote_file_url(workspace_id, attachment.relative_path),
+        headers={"authorization": f"Bearer {os.getenv('HERMES_API_KEY', '')}"},
+    ), stream=True)
+    if response.status_code != 200:
+        await response.aclose(); await client.aclose()
+        raise HTTPException(response.status_code, "file download failed")
+    async def stream():
+        try:
+            async for chunk in response.aiter_raw():
+                yield chunk
+        finally:
+            await response.aclose(); await client.aclose()
+    return StreamingResponse(stream(), media_type=attachment.mime_type,
+        headers={"content-disposition": f'attachment; filename="{attachment.name}"'})
 
 
 def _resolve_local_image_path(raw_path: str) -> Path:

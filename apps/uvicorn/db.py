@@ -11,7 +11,7 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 
-from models import Artifact, Attachment, Message, Session, TextPart
+from models import Artifact, Attachment, Message, Session, TextPart, Workspace
 
 _lock = threading.Lock()
 _conn: sqlite3.Connection | None = None
@@ -52,7 +52,15 @@ def now_iso() -> str:
 _SCHEMA = """
 CREATE TABLE IF NOT EXISTS sessions (
     id TEXT PRIMARY KEY,
+    workspace_id TEXT NOT NULL,
     title TEXT NOT NULL,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS workspaces (
+    id TEXT PRIMARY KEY,
+    name TEXT NOT NULL,
+    status TEXT NOT NULL DEFAULT 'active',
     created_at TEXT NOT NULL,
     updated_at TEXT NOT NULL
 );
@@ -69,6 +77,8 @@ CREATE TABLE IF NOT EXISTS messages (
 CREATE INDEX IF NOT EXISTS idx_messages_session ON messages(session_id, created_at);
 CREATE TABLE IF NOT EXISTS files (
     id TEXT PRIMARY KEY,
+    workspace_id TEXT NOT NULL,
+    relative_path TEXT NOT NULL,
     name TEXT NOT NULL,
     mime_type TEXT NOT NULL,
     size INTEGER NOT NULL,
@@ -94,8 +104,46 @@ def connect() -> sqlite3.Connection:
         _conn = sqlite3.connect(data_dir() / "silverretort.db", check_same_thread=False)
         _conn.row_factory = sqlite3.Row
         _conn.executescript(_SCHEMA)
+        _migrate(_conn)
         _conn.commit()
     return _conn
+
+
+def _columns(conn: sqlite3.Connection, table: str) -> set[str]:
+    return {str(row["name"]) for row in conn.execute(f"PRAGMA table_info({table})")}
+
+
+def _migrate(conn: sqlite3.Connection) -> None:
+    now = now_iso()
+    default_id = "default"
+    conn.execute(
+        "INSERT OR IGNORE INTO workspaces (id, name, status, created_at, updated_at) VALUES (?, ?, 'active', ?, ?)",
+        (default_id, "默认工作区", now, now),
+    )
+    if "workspace_id" not in _columns(conn, "sessions"):
+        conn.execute("ALTER TABLE sessions ADD COLUMN workspace_id TEXT")
+    conn.execute("UPDATE sessions SET workspace_id = ? WHERE workspace_id IS NULL OR workspace_id = ''", (default_id,))
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_sessions_workspace ON sessions(workspace_id, updated_at)")
+    file_columns = _columns(conn, "files")
+    if "workspace_id" not in file_columns:
+        conn.execute("ALTER TABLE files ADD COLUMN workspace_id TEXT")
+    if "relative_path" not in file_columns:
+        conn.execute("ALTER TABLE files ADD COLUMN relative_path TEXT")
+    conn.execute("UPDATE files SET workspace_id = ? WHERE workspace_id IS NULL OR workspace_id = ''", (default_id,))
+    conn.execute("UPDATE files SET relative_path = name WHERE relative_path IS NULL OR relative_path = ''")
+    for row in conn.execute("SELECT id, attachments FROM messages WHERE attachments != '[]'").fetchall():
+        attachments = json.loads(row["attachments"])
+        changed = False
+        for attachment in attachments:
+            if "workspaceId" not in attachment:
+                attachment["workspaceId"] = default_id
+                attachment["relativePath"] = attachment.get("name") or attachment.get("id")
+                changed = True
+        if changed:
+            conn.execute(
+                "UPDATE messages SET attachments = ? WHERE id = ?",
+                (json.dumps(attachments, ensure_ascii=False), row["id"]),
+            )
 
 
 def _execute(sql: str, params: tuple = ()) -> sqlite3.Cursor:
@@ -142,8 +190,56 @@ def _delete_artifacts_by_ids(conn: sqlite3.Connection, artifact_ids: list[str]) 
 
 # ---- sessions ----
 
+def _row_to_workspace(row: sqlite3.Row) -> Workspace:
+    return Workspace(
+        id=row["id"], name=row["name"], status=row["status"],
+        created_at=row["created_at"], updated_at=row["updated_at"],
+    )
+
+
+def list_workspaces() -> list[Workspace]:
+    return [_row_to_workspace(row) for row in _query("SELECT * FROM workspaces ORDER BY updated_at DESC")]
+
+
+def get_workspace(workspace_id: str) -> Workspace | None:
+    rows = _query("SELECT * FROM workspaces WHERE id = ?", (workspace_id,))
+    return _row_to_workspace(rows[0]) if rows else None
+
+
+def create_workspace(workspace_id: str, name: str, status: str = "active") -> Workspace:
+    now = now_iso()
+    _execute(
+        "INSERT INTO workspaces (id, name, status, created_at, updated_at) VALUES (?, ?, ?, ?, ?)",
+        (workspace_id, name, status, now, now),
+    )
+    return get_workspace(workspace_id)  # type: ignore[return-value]
+
+
+def rename_workspace(workspace_id: str, name: str) -> Workspace | None:
+    _execute("UPDATE workspaces SET name = ?, updated_at = ? WHERE id = ?", (name, now_iso(), workspace_id))
+    return get_workspace(workspace_id)
+
+
+def set_workspace_status(workspace_id: str, status: str) -> None:
+    _execute("UPDATE workspaces SET status = ?, updated_at = ? WHERE id = ?", (status, now_iso(), workspace_id))
+
+
+def delete_workspace(workspace_id: str) -> None:
+    with _lock:
+        conn = connect()
+        session_rows = conn.execute("SELECT id FROM sessions WHERE workspace_id = ?", (workspace_id,)).fetchall()
+        session_ids = [str(row["id"]) for row in session_rows]
+        if session_ids:
+            placeholders = ",".join("?" for _ in session_ids)
+            conn.execute(f"DELETE FROM messages WHERE session_id IN ({placeholders})", tuple(session_ids))
+            conn.execute(f"DELETE FROM artifacts WHERE session_id IN ({placeholders})", tuple(session_ids))
+        conn.execute("DELETE FROM files WHERE workspace_id = ?", (workspace_id,))
+        conn.execute("DELETE FROM sessions WHERE workspace_id = ?", (workspace_id,))
+        conn.execute("DELETE FROM workspaces WHERE id = ?", (workspace_id,))
+        conn.commit()
+
 def _row_to_session(row: sqlite3.Row) -> Session:
-    return Session(id=row["id"], title=row["title"], created_at=row["created_at"], updated_at=row["updated_at"])
+    return Session(id=row["id"], workspace_id=row["workspace_id"], title=row["title"], created_at=row["created_at"], updated_at=row["updated_at"])
 
 
 def list_sessions() -> list[Session]:
@@ -155,13 +251,13 @@ def get_session(session_id: str) -> Session | None:
     return _row_to_session(rows[0]) if rows else None
 
 
-def create_session(session_id: str, title: str) -> Session:
+def create_session(session_id: str, workspace_id: str, title: str) -> Session:
     now = now_iso()
     _execute(
-        "INSERT INTO sessions (id, title, created_at, updated_at) VALUES (?, ?, ?, ?)",
-        (session_id, title, now, now),
+        "INSERT INTO sessions (id, workspace_id, title, created_at, updated_at) VALUES (?, ?, ?, ?, ?)",
+        (session_id, workspace_id, title, now, now),
     )
-    return Session(id=session_id, title=title, created_at=now, updated_at=now)
+    return Session(id=session_id, workspace_id=workspace_id, title=title, created_at=now, updated_at=now)
 
 
 def rename_session(session_id: str, title: str) -> Session | None:
@@ -295,10 +391,10 @@ def restart_message(session_id: str, message_id: str, text: str) -> RestartMessa
 
 # ---- files ----
 
-def insert_file(attachment: Attachment, path: str) -> None:
+def insert_file(attachment: Attachment, path: str = "") -> None:
     _execute(
-        "INSERT INTO files (id, name, mime_type, size, kind, path, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)",
-        (attachment.id, attachment.name, attachment.mime_type, attachment.size, attachment.kind, path, now_iso()),
+        "INSERT INTO files (id, name, mime_type, size, kind, path, created_at, workspace_id, relative_path) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        (attachment.id, attachment.name, attachment.mime_type, attachment.size, attachment.kind, path, now_iso(), attachment.workspace_id, attachment.relative_path),
     )
 
 
@@ -308,9 +404,20 @@ def get_file(file_id: str) -> tuple[Attachment, str] | None:
         return None
     row = rows[0]
     attachment = Attachment(
-        id=row["id"], name=row["name"], mime_type=row["mime_type"], size=row["size"], kind=row["kind"]
+        id=row["id"], workspace_id=row["workspace_id"], relative_path=row["relative_path"],
+        name=row["name"], mime_type=row["mime_type"], size=row["size"], kind=row["kind"]
     )
     return attachment, row["path"]
+
+
+def list_files(workspace_id: str) -> list[Attachment]:
+    result: list[Attachment] = []
+    for row in _query("SELECT * FROM files WHERE workspace_id = ? ORDER BY created_at", (workspace_id,)):
+        result.append(Attachment(
+            id=row["id"], workspace_id=row["workspace_id"], relative_path=row["relative_path"],
+            name=row["name"], mime_type=row["mime_type"], size=row["size"], kind=row["kind"],
+        ))
+    return result
 
 
 # ---- artifacts ----

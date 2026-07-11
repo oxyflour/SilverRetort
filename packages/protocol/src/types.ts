@@ -4,6 +4,8 @@ import { z } from "zod";
 
 export const AttachmentSchema = z.object({
   id: z.string(),
+  workspaceId: z.string(),
+  relativePath: z.string(),
   name: z.string(),
   mimeType: z.string(),
   size: z.number(),
@@ -11,8 +13,18 @@ export const AttachmentSchema = z.object({
 });
 export type Attachment = z.infer<typeof AttachmentSchema>;
 
+export const WorkspaceSchema = z.object({
+  id: z.string(),
+  name: z.string(),
+  status: z.enum(["active", "creating", "deleting", "error"]),
+  createdAt: z.string(),
+  updatedAt: z.string(),
+});
+export type Workspace = z.infer<typeof WorkspaceSchema>;
+
 export const SessionSchema = z.object({
   id: z.string(),
+  workspaceId: z.string(),
   title: z.string(),
   createdAt: z.string(),
   updatedAt: z.string(),
@@ -125,6 +137,20 @@ export const UpdateSessionRequestSchema = z.object({
   title: z.string(),
 });
 export type UpdateSessionRequest = z.infer<typeof UpdateSessionRequestSchema>;
+
+export const CreateWorkspaceRequestSchema = z.object({ name: z.string() });
+export type CreateWorkspaceRequest = z.infer<typeof CreateWorkspaceRequestSchema>;
+
+export const UpdateWorkspaceRequestSchema = z.object({ name: z.string() });
+export type UpdateWorkspaceRequest = z.infer<typeof UpdateWorkspaceRequestSchema>;
+
+export const WorkspaceCapabilitySchema = z.object({
+  supported: z.boolean(),
+  version: z.number(),
+  writable: z.boolean(),
+  cwdEnforced: z.boolean(),
+});
+export type WorkspaceCapability = z.infer<typeof WorkspaceCapabilitySchema>;
 
 export const SendChatRequestSchema = z.object({
   text: z.string(),

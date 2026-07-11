@@ -1,6 +1,5 @@
 """Shared MCP tool implementations for HTTP and bridge transports."""
 
-import base64
 import uuid
 from typing import Any, Callable
 
@@ -9,17 +8,6 @@ import events
 from models import Artifact
 
 BUILTIN_RENDER_TYPES = ["iframe", "image", "markdown"]
-MAX_READ_BYTES = 5 * 1024 * 1024
-TEXT_MIME_PREFIXES = ("text/",)
-TEXT_MIME_EXACT = {
-    "application/json",
-    "application/xml",
-    "application/javascript",
-    "application/x-yaml",
-    "application/toml",
-    "text/csv",
-}
-
 _render_types: list[str] = list(BUILTIN_RENDER_TYPES)
 
 
@@ -85,44 +73,10 @@ def ui_list_render_types() -> list[str]:
     return supported_render_types()
 
 
-def list_user_files(session_id: str) -> list[dict[str, Any]]:
-    """List user-uploaded attachments in a session."""
-    seen: dict[str, dict[str, Any]] = {}
-    for message in db.list_messages(session_id):
-        for attachment in message.attachments:
-            seen[attachment.id] = attachment.model_dump(by_alias=True)
-    return list(seen.values())
-
-
-def read_user_file(file_id: str) -> dict[str, Any]:
-    """Read a user-uploaded attachment as UTF-8 text or base64."""
-    found = db.get_file(file_id)
-    if found is None:
-        return {"error": f"file not found: {file_id}"}
-    attachment, path = found
-    if attachment.size > MAX_READ_BYTES:
-        return {"error": f"file too large ({attachment.size} bytes), max {MAX_READ_BYTES}"}
-    data = open(path, "rb").read()
-    mime = attachment.mime_type
-    is_text = mime.startswith(TEXT_MIME_PREFIXES) or mime in TEXT_MIME_EXACT
-    if is_text:
-        try:
-            return {"name": attachment.name, "mimeType": mime, "text": data.decode("utf-8")}
-        except UnicodeDecodeError:
-            pass
-    return {
-        "name": attachment.name,
-        "mimeType": mime,
-        "base64": base64.b64encode(data).decode("ascii"),
-    }
-
-
 TOOL_FUNCTIONS: dict[str, Callable[..., Any]] = {
     "ui_show_artifact": ui_show_artifact,
     "ui_update_artifact": ui_update_artifact,
     "ui_list_render_types": ui_list_render_types,
-    "list_user_files": list_user_files,
-    "read_user_file": read_user_file,
 }
 
 

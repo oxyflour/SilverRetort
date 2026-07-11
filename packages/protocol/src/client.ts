@@ -12,6 +12,10 @@ import {
   SendChatResponseSchema,
   Session,
   SessionSchema,
+  Workspace,
+  WorkspaceCapability,
+  WorkspaceCapabilitySchema,
+  WorkspaceSchema,
 } from "./types";
 
 /** 类型化 REST 客户端；baseUrl 一般为空串（同源经 next 代理到 uvicorn） */
@@ -40,8 +44,35 @@ export class ApiClient {
     return this.request(z.array(SessionSchema), "/api/sessions");
   }
 
-  createSession(title?: string): Promise<Session> {
-    return this.request(SessionSchema, "/api/sessions", {
+  listWorkspaces(): Promise<Workspace[]> {
+    return this.request(z.array(WorkspaceSchema), "/api/workspaces");
+  }
+
+  workspaceCapability(): Promise<WorkspaceCapability> {
+    return this.request(WorkspaceCapabilitySchema, "/api/workspaces/capability");
+  }
+
+  createWorkspace(name: string): Promise<Workspace> {
+    return this.request(WorkspaceSchema, "/api/workspaces", {
+      method: "POST",
+      body: JSON.stringify({ name }),
+    });
+  }
+
+  renameWorkspace(id: string, name: string): Promise<Workspace> {
+    return this.request(WorkspaceSchema, `/api/workspaces/${id}`, {
+      method: "PATCH",
+      body: JSON.stringify({ name }),
+    });
+  }
+
+  async deleteWorkspace(id: string): Promise<void> {
+    const res = await fetch(`${this.baseUrl}/api/workspaces/${id}`, { method: "DELETE" });
+    if (!res.ok) throw new Error(`DELETE workspace failed: HTTP ${res.status}`);
+  }
+
+  createSession(workspaceId: string, title?: string): Promise<Session> {
+    return this.request(SessionSchema, `/api/workspaces/${workspaceId}/sessions`, {
       method: "POST",
       body: JSON.stringify({ title }),
     });
@@ -106,17 +137,21 @@ export class ApiClient {
     if (!res.ok) throw new Error(`stop run failed: HTTP ${res.status}`);
   }
 
-  uploadFile(file: File): Promise<Attachment> {
+  uploadFile(workspaceId: string, file: File): Promise<Attachment> {
     const form = new FormData();
     form.append("file", file);
-    return this.request(AttachmentSchema, "/api/files", {
+    return this.request(AttachmentSchema, `/api/workspaces/${workspaceId}/files`, {
       method: "POST",
       body: form,
     });
   }
 
-  fileUrl(id: string): string {
-    return `${this.baseUrl}/api/files/${id}`;
+  listWorkspaceFiles(workspaceId: string): Promise<Attachment[]> {
+    return this.request(z.array(AttachmentSchema), `/api/workspaces/${workspaceId}/files`);
+  }
+
+  fileUrl(workspaceId: string, id: string): string {
+    return `${this.baseUrl}/api/workspaces/${workspaceId}/files/${id}`;
   }
 
   eventsUrl(): string {

@@ -12,14 +12,25 @@ class ApiModel(BaseModel):
 
 class Attachment(ApiModel):
     id: str
+    workspace_id: str
+    relative_path: str
     name: str
     mime_type: str
     size: int
     kind: Literal["image", "file"]
 
 
+class Workspace(ApiModel):
+    id: str
+    name: str
+    status: Literal["active", "creating", "deleting", "error"] = "active"
+    created_at: str
+    updated_at: str
+
+
 class Session(ApiModel):
     id: str
+    workspace_id: str
     title: str
     created_at: str
     updated_at: str
@@ -72,6 +83,21 @@ class CreateSessionRequest(ApiModel):
 
 class UpdateSessionRequest(ApiModel):
     title: str
+
+
+class CreateWorkspaceRequest(ApiModel):
+    name: str
+
+
+class UpdateWorkspaceRequest(ApiModel):
+    name: str
+
+
+class WorkspaceCapability(ApiModel):
+    supported: bool
+    version: int
+    writable: bool
+    cwd_enforced: bool
 
 
 class SendChatRequest(ApiModel):
