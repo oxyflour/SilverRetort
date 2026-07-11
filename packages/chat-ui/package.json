@@ -19,6 +19,7 @@
     "rehype-highlight": "^7.0.2",
     "remark-gfm": "^4.0.1",
     "silverretort-protocol": "workspace:*",
+    "silverretort-setting-ui": "workspace:*",
     "zustand": "^5.0.5"
   },
   "peerDependencies": {

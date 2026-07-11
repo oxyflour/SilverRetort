@@ -9,6 +9,7 @@ import {
   PencilLine,
   Trash2,
 } from "lucide-react";
+import { UserSettingsPanel } from "silverretort-setting-ui";
 import { useChatStore } from "../store";
 import { AppIcon } from "./icons";
 
@@ -141,6 +142,7 @@ export function SessionSidebar() {
           );
         })}
       </div>
+      <UserSettingsPanel />
       {creating && (
         <Modal title="Create workspace" onClose={() => setCreating(false)}>
           <input

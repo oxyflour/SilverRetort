@@ -1,9 +1,11 @@
 @import "tailwindcss";
 @import "highlight.js/styles/github-dark.css";
 @plugin "@tailwindcss/typography";
+@custom-variant dark (&:where(.dark, .dark *));
 
 /* Tailwind 4 需显式声明 workspace 包源码目录才会扫描其中的 class */
 @source "../../../packages/chat-ui/src";
+@source "../../../packages/setting-ui/src";
 
 :root {
   --scrollbar-size: 10px;
@@ -12,12 +14,10 @@
   --scrollbar-thumb-hover: rgba(82, 82, 82, 0.72);
 }
 
-@media (prefers-color-scheme: dark) {
-  :root {
-    --scrollbar-track: rgba(255, 255, 255, 0.06);
-    --scrollbar-thumb: rgba(163, 163, 163, 0.38);
-    --scrollbar-thumb-hover: rgba(212, 212, 212, 0.54);
-  }
+.dark {
+  --scrollbar-track: rgba(255, 255, 255, 0.06);
+  --scrollbar-thumb: rgba(163, 163, 163, 0.38);
+  --scrollbar-thumb-hover: rgba(212, 212, 212, 0.54);
 }
 
 * {

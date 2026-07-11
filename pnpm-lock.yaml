@@ -39,6 +39,9 @@ importers:
       silverretort-protocol:
         specifier: workspace:*
         version: link:../../packages/protocol
+      silverretort-setting-ui:
+        specifier: workspace:*
+        version: link:../../packages/setting-ui
     devDependencies:
       '@tailwindcss/postcss':
         specifier: ^4
@@ -96,6 +99,9 @@ importers:
       silverretort-protocol:
         specifier: workspace:*
         version: link:../protocol
+      silverretort-setting-ui:
+        specifier: workspace:*
+        version: link:../setting-ui
       zustand:
         specifier: ^5.0.5
         version: 5.0.14(@types/react@19.2.17)(react@19.2.4)
@@ -128,6 +134,25 @@ importers:
         specifier: ^3.24.0
         version: 3.25.76
     devDependencies:
+      typescript:
+        specifier: ^5
+        version: 5.9.3
+
+  packages/setting-ui:
+    dependencies:
+      lucide-react:
+        specifier: ^1.24.0
+        version: 1.24.0(react@19.2.4)
+      react:
+        specifier: ^19
+        version: 19.2.4
+      react-dom:
+        specifier: ^19
+        version: 19.2.4(react@19.2.4)
+    devDependencies:
+      '@types/react':
+        specifier: ^19
+        version: 19.2.17
       typescript:
         specifier: ^5
         version: 5.9.3
