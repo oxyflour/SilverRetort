@@ -30,7 +30,6 @@ If desktop should start the container for you, put these fields in `DATA_DIR/set
 
 ```json
 {
-  "hermesUrl": "http://127.0.0.1:23002",
   "hermesDockerImage": "silverretort-hermes"
 }
 ```
@@ -38,22 +37,41 @@ If desktop should start the container for you, put these fields in `DATA_DIR/set
 Optional fields:
 
 - `hermesApiKey`
-- `hermesDockerContainerName`
+- `hermesDockerUser` (defaults to the desktop OS username)
+- `hermesDockerHost` (a hostname or IP address reachable from the desktop)
+- `hermesDockerContainerPrefix` (defaults to `silverretort-hermes`)
 - `hermesDockerContainerPort`
 
 Behavior:
 
 - desktop treats this as a remote Hermes service, not a special local mode
+- desktop derives a stable, user-scoped container name from `hermesDockerUser`
+- Docker publishes `hermesDockerContainerPort` on an ephemeral host port, so users do not contend for one fixed port
+- desktop discovers the published port and passes the resulting URL to local uvicorn
 - desktop starts the container with `HERMES_RELAY_ENABLED=1`
 - if `hermesApiKey` is omitted here, desktop generates a random per-launch key and passes the same key to both the container and uvicorn
-- local uvicorn still talks to `hermesUrl`
-- bridge still uses `<hermesUrl>/bridge`
-- `DOCKER_HOST` only selects which Docker daemon receives `docker run`; it does not replace `hermesUrl`
+- `hermesUrl` is ignored in desktop-managed Docker mode; it is reserved for externally managed remote Hermes
+- `hermesDockerContainerName` is no longer supported; use `hermesDockerContainerPrefix`
+- stale containers are removed only when their SilverRetort ownership label matches the current user
 
-This matters for remote daemons:
+For a shared remote Docker daemon:
 
-- if `DOCKER_HOST=ssh://my-box`, published ports are on `my-box`
-- `hermesUrl` must point to the address your desktop can actually reach, for example `http://my-box:23002`
+- if `hermesDockerHost` is omitted, desktop derives the host from `DOCKER_HOST` or the active Docker context
+- local `npipe` and `unix` endpoints resolve to `127.0.0.1`; `ssh` and `tcp` endpoints use their hostname
+- set `hermesDockerHost` explicitly when the Docker endpoint hostname is not reachable from the desktop
+- users with the same OS username on different machines must set distinct `hermesDockerUser` values
+
+Example:
+
+```json
+{
+  "hermesDockerImage": "silverretort-hermes",
+  "hermesDockerHost": "my-box",
+  "hermesDockerUser": "alice"
+}
+```
+
+Published ports bind to all Docker host interfaces by default. Restrict access with the host firewall; Hermes API authentication remains enabled.
 
 ## Local Docker
 

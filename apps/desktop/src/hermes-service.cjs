@@ -3,6 +3,13 @@ const crypto = require("node:crypto");
 const path = require("node:path");
 const { spawn: nodeSpawn } = require("node:child_process");
 const { ensureDir, joinUrl, normalizeBaseUrl } = require("./desktop-config.cjs");
+const {
+    MANAGED_LABEL,
+    OWNER_LABEL,
+    normalizeDockerHost,
+    resolveDockerIdentity,
+    startManagedDocker,
+} = require("./docker-runtime.cjs");
 
 const DEFAULT_HERMES_CONTAINER_PORT = 23002;
 
@@ -25,39 +32,34 @@ function resolveHermesRuntime(config) {
     return null;
 }
 
-function resolveHermesDockerConfig(config, hermesUrl, hermesApiKey, randomApiKeyFn = randomApiKey) {
+function resolveHermesDockerConfig(
+    config,
+    hermesApiKey,
+    randomApiKeyFn = randomApiKey,
+    getUsername,
+) {
     const { settings } = config;
     const image = `${settings.hermesDockerImage || ""}`.trim();
     if (!image) {
         return null;
     }
-    if (!hermesUrl) {
-        throw new Error("DATA_DIR/settings.json has hermesDockerImage but missing hermesUrl");
+    if (`${settings.hermesUrl || ""}`.trim()) {
+        console.warn("[main] hermesUrl is ignored in desktop-managed Docker mode");
     }
-
+    const identity = resolveDockerIdentity(settings, hashSuffix, getUsername);
     const effectiveApiKey = hermesApiKey || randomApiKeyFn();
-    const parsed = new URL(`${hermesUrl}/`);
-    const publicPort = parsed.port
-        ? Number(parsed.port)
-        : parsed.protocol === "https:"
-            ? 443
-            : 80;
-    if (!Number.isInteger(publicPort) || publicPort <= 0) {
-        throw new Error(`invalid hermesUrl port: ${hermesUrl}`);
-    }
-
     const containerPort = Number(settings.hermesDockerContainerPort || DEFAULT_HERMES_CONTAINER_PORT);
-    if (!Number.isInteger(containerPort) || containerPort <= 0) {
+    if (!Number.isInteger(containerPort) || containerPort <= 0 || containerPort > 65535) {
         throw new Error(`invalid hermesDockerContainerPort: ${settings.hermesDockerContainerPort}`);
     }
-    const containerName = `${settings.hermesDockerContainerName || `silverretort-hermes-${hashSuffix(hermesUrl)}`}`.trim();
-    if (!containerName) {
-        throw new Error("hermesDockerContainerName must not be empty");
-    }
-
+    const configuredHost = Object.prototype.hasOwnProperty.call(settings, "hermesDockerHost")
+        ? normalizeDockerHost(settings.hermesDockerHost)
+        : null;
     const args = [
-        "run", "--rm", "-d", "--name", containerName,
-        "-p", `${publicPort}:${containerPort}`,
+        "run", "--rm", "-d", "--name", identity.containerName,
+        "--label", `${MANAGED_LABEL}=true`,
+        "--label", `${OWNER_LABEL}=${identity.ownerHash}`,
+        "-p", `${containerPort}`,
         "-e", "WATCH_STDIN=0",
         "-e", "LISTEN_HOST=0.0.0.0",
         "-e", `LISTEN_PORT=${containerPort}`,
@@ -72,32 +74,30 @@ function resolveHermesDockerConfig(config, hermesUrl, hermesApiKey, randomApiKey
     }
     args.push(image);
     return {
+        ...identity,
         image,
         apiKey: effectiveApiKey,
-        containerName,
-        publicPort,
+        configuredHost,
         containerPort,
         command: "docker",
         runArgs: args,
-        removeArgs: ["rm", "-f", containerName],
-        logsArgs: ["logs", "-f", containerName],
-        waitArgs: ["wait", containerName],
     };
 }
 
-function resolveHermesMode(config, pythonPort, hermesPort, randomApiKeyFn = randomApiKey) {
-    const hermesUrl = normalizeBaseUrl(config.settings.hermesUrl);
+function resolveHermesMode(
+    config,
+    pythonPort,
+    hermesPort,
+    randomApiKeyFn = randomApiKey,
+    getUsername,
+) {
     const hermesApiKey = `${config.settings.hermesApiKey || ""}`.trim();
-    const docker = resolveHermesDockerConfig(config, hermesUrl, hermesApiKey, randomApiKeyFn);
+    const docker = resolveHermesDockerConfig(config, hermesApiKey, randomApiKeyFn, getUsername);
     if (docker) {
-        return {
-            mode: "docker",
-            url: hermesUrl,
-            apiKey: docker.apiKey,
-            healthUrl: joinUrl(hermesUrl, "health"),
-            docker,
-        };
+        return { mode: "docker", apiKey: docker.apiKey, docker };
     }
+
+    const hermesUrl = normalizeBaseUrl(config.settings.hermesUrl);
     if (hermesUrl) {
         if (!hermesApiKey) {
             throw new Error("DATA_DIR/settings.json has hermesUrl but missing hermesApiKey");
@@ -133,48 +133,6 @@ function resolveHermesMode(config, pythonPort, hermesPort, randomApiKeyFn = rand
     };
 }
 
-function waitForExit(proc) {
-    return new Promise((resolve, reject) => {
-        proc.once("error", reject);
-        proc.once("exit", (code, signal) => resolve({ code, signal }));
-    });
-}
-
-async function startHermesDocker(mode, config, supervisor, spawn) {
-    const docker = mode.docker;
-    const spawnDocker = (args) => spawn(docker.command, args, {
-        cwd: config.serviceRoot,
-        env: config.buildChildEnv(),
-        stdio: "pipe",
-    });
-
-    const removeExisting = spawnDocker(docker.removeArgs);
-    supervisor.monitor("hermes-docker-rm", removeExisting, { critical: false });
-    await waitForExit(removeExisting);
-
-    const run = spawnDocker(docker.runArgs);
-    let stdout = "";
-    let stderr = "";
-    run.stdout?.on("data", (data) => { stdout += `${data}`; });
-    run.stderr?.on("data", (data) => { stderr += `${data}`; });
-    supervisor.monitor("hermes-docker", run, { critical: false });
-    const { code } = await waitForExit(run);
-    if (code !== 0) {
-        throw new Error(`docker run failed (${code}): ${(stderr || stdout).trim() || "unknown error"}`);
-    }
-
-    supervisor.addCleanup(async () => {
-        const stop = spawnDocker(docker.removeArgs);
-        supervisor.monitor("hermes-docker-stop", stop, { critical: false });
-        await waitForExit(stop);
-    });
-    const logsProc = spawnDocker(docker.logsArgs);
-    supervisor.monitor("hermes-docker-logs", logsProc, { critical: false });
-    const waitProc = spawnDocker(docker.waitArgs);
-    supervisor.monitor(`hermes docker container ${docker.containerName}`, waitProc);
-    return { logsProc, waitProc };
-}
-
 async function startHermes(mode, config, supervisor, spawn = nodeSpawn) {
     if (mode.mode === "local") {
         const proc = spawn(mode.runtime.command, mode.runtime.args, {
@@ -183,12 +141,18 @@ async function startHermes(mode, config, supervisor, spawn = nodeSpawn) {
             stdio: "pipe",
         });
         supervisor.monitor("hermes", proc);
-        return proc;
+        return mode;
     }
     if (mode.mode === "docker") {
-        return startHermesDocker(mode, config, supervisor, spawn);
+        const runtime = await startManagedDocker(mode.docker, config, supervisor, spawn);
+        return {
+            ...mode,
+            url: runtime.url,
+            healthUrl: joinUrl(runtime.url, "health"),
+            docker: { ...mode.docker, ...runtime },
+        };
     }
-    return null;
+    return mode;
 }
 
 module.exports = {

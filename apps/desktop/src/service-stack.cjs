@@ -75,6 +75,20 @@ function startNextServer(config, utilityProcess, nextPort, pythonPort) {
     });
 }
 
+function buildUvicornEnv(config, hermesMode, pythonPort) {
+    return config.buildChildEnv({
+        LISTEN_PORT: `${pythonPort}`,
+        DATA_DIR: config.dataDir,
+        ...(hermesMode.mode === "disabled" ? {} : {
+            HERMES_URL: hermesMode.url,
+            HERMES_API_KEY: hermesMode.apiKey,
+            ...(hermesMode.mode === "docker" ? {
+                HERMES_BRIDGE_URL: toWebSocketUrl(hermesMode.url, "bridge"),
+            } : {}),
+        }),
+    });
+}
+
 /**
  * @param {{
  *   config: ReturnType<import("./desktop-config.cjs").loadDesktopConfig>,
@@ -87,27 +101,22 @@ async function startServiceStack({ config, supervisor, utilityProcess, ports = {
     const nextPort = ports.next ?? DEFAULT_NEXT_PORT;
     const pythonPort = ports.python ?? DEFAULT_PYTHON_PORT;
     const hermesPort = ports.hermes ?? DEFAULT_HERMES_PORT;
-    const hermesMode = resolveHermesMode(config, pythonPort, hermesPort);
+    const configuredHermesMode = resolveHermesMode(config, pythonPort, hermesPort);
+    const hermesMode = configuredHermesMode.mode === "docker"
+        ? await startHermes(configuredHermesMode, config, supervisor)
+        : configuredHermesMode;
     const pythonRuntime = resolvePythonRuntime(config, pythonPort);
 
     const uvicorn = spawn(pythonRuntime.command, pythonRuntime.args, {
         cwd: pythonRuntime.cwd,
-        env: config.buildChildEnv({
-            LISTEN_PORT: `${pythonPort}`,
-            DATA_DIR: config.dataDir,
-            ...(hermesMode.mode === "disabled" ? {} : {
-                HERMES_URL: hermesMode.url,
-                HERMES_API_KEY: hermesMode.apiKey,
-                ...(hermesMode.mode === "docker" ? {
-                    HERMES_BRIDGE_URL: toWebSocketUrl(hermesMode.url, "bridge"),
-                } : {}),
-            }),
-        }),
+        env: buildUvicornEnv(config, hermesMode, pythonPort),
         stdio: "pipe",
     });
     supervisor.monitor("uvicorn", uvicorn);
 
-    await startHermes(hermesMode, config, supervisor);
+    if (hermesMode.mode === "local") {
+        await startHermes(hermesMode, config, supervisor);
+    }
     const nextjs = startNextServer(config, utilityProcess, nextPort, pythonPort);
     supervisor.monitor("nextjs", nextjs);
 
@@ -128,6 +137,7 @@ async function startServiceStack({ config, supervisor, utilityProcess, ports = {
 
 module.exports = {
     assertUrl,
+    buildUvicornEnv,
     resolveNextEntry,
     resolvePythonRuntime,
     startServiceStack,

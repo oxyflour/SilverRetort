@@ -39,9 +39,9 @@ function createProcessSupervisor({ onUnexpectedExit, logger = console }) {
     /**
      * @param {string} label
      * @param {NodeJS.EventEmitter & {stdout?: NodeJS.ReadableStream | null, stderr?: NodeJS.ReadableStream | null, killed?: boolean, kill?: () => unknown}} proc
-     * @param {{critical?: boolean, stop?: (proc: any) => void | Promise<void>}=} options
+     * @param {{critical?: boolean, cleanup?: boolean, stop?: (proc: any) => void | Promise<void>}=} options
      */
-    function monitor(label, proc, { critical = true, stop = defaultStop } = {}) {
+    function monitor(label, proc, { critical = true, cleanup = true, stop = defaultStop } = {}) {
         let exited = false;
         proc.stdout?.on("data", (data) => logWithLabel(label, data, logger));
         proc.stderr?.on("data", (data) => logWithLabel(label, data, logger));
@@ -55,11 +55,13 @@ function createProcessSupervisor({ onUnexpectedExit, logger = console }) {
                 onUnexpectedExit({ label, code, signal });
             }
         });
-        addCleanup(async () => {
-            if (!exited) {
-                await stop(proc);
-            }
-        });
+        if (cleanup) {
+            addCleanup(async () => {
+                if (!exited) {
+                    await stop(proc);
+                }
+            });
+        }
         return proc;
     }
 
