@@ -5,6 +5,7 @@ const { existsSync, mkdirSync, readFileSync } = require("node:fs");
 const { spawn } = require("node:child_process");
 const { app, BrowserWindow, utilityProcess } = require("electron/main");
 
+const APP_ID = "com.silverretort.app";
 const DEFAULT_NEXT_PORT = 23000;
 const DEFAULT_PYTHON_PORT = 23001;
 const DEFAULT_HERMES_PORT = 23002;
@@ -89,6 +90,7 @@ const serviceRoot = app.isPackaged
     ? process.resourcesPath
     : path.resolve(__dirname, "..", "..");
 const desktopEnvPath = path.join(desktopRoot, ".env");
+const desktopIconPath = path.join(desktopRoot, "assets", "icon.png");
 
 function stripEnvValue(rawValue) {
     const value = rawValue.trim();
@@ -576,12 +578,14 @@ async function createMainWindow() {
         width: 640,
         height: 480,
         show: false,
+        icon: existsSync(desktopIconPath) ? desktopIconPath : undefined,
         webPreferences: {
             allowRunningInsecureContent: true,
             webSecurity: false,
         }
     });
 
+    mainWindow.setMenuBarVisibility(false);
     mainWindow.once("ready-to-show", () => {
         mainWindow?.show();
     });
@@ -594,6 +598,10 @@ async function createMainWindow() {
 
     const url = await startServer();
     await mainWindow.loadURL(url);
+}
+
+if (process.platform === "win32") {
+    app.setAppUserModelId(APP_ID);
 }
 
 app.whenReady().then(async () => {

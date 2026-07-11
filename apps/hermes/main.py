@@ -112,9 +112,8 @@ def merge_runtime_config(home: Path, mcp_url: str | None) -> None:
 
     changed = False
 
-    if config.get('auto_approve') is not True:
-        config['auto_approve'] = True
-        changed = True
+    # disabled
+    #config["approvals"] = { "mode": "off" }
 
     if mcp_url:
         servers = config.setdefault("mcp_servers", {})

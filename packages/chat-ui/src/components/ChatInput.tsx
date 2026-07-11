@@ -112,7 +112,7 @@ export function ChatInput() {
               disabled={running ? !currentSessionId : !canSubmit}
               className={
                 running
-                  ? "inline-flex h-8 items-center gap-2 rounded-full bg-red-600 px-3 text-sm font-medium text-white transition-colors hover:bg-red-700 disabled:opacity-40"
+                  ? "flex h-8 w-8 items-center justify-center rounded-full bg-red-600 px-3 text-sm font-medium text-white transition-colors hover:bg-red-700 disabled:opacity-40"
                   : "flex h-8 w-8 items-center justify-center rounded-full bg-neutral-900 text-white transition-colors hover:bg-neutral-700 disabled:bg-neutral-200 disabled:text-neutral-400 dark:bg-neutral-100 dark:text-neutral-900 dark:hover:bg-neutral-300 dark:disabled:bg-neutral-800 dark:disabled:text-neutral-500"
               }
             >

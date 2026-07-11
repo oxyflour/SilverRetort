@@ -18,7 +18,8 @@
     "files": [
       "package.json",
       "index.html",
-      "src/**/*"
+      "src/**/*",
+      "assets/**/*"
     ],
     "extraResources": [
       {
@@ -37,12 +38,16 @@
       }
     ],
     "win": {
+      "icon": "assets/icon.ico",
       "signAndEditExecutable": false,
       "target": [
         "nsis"
       ]
     },
     "nsis": {
+      "installerIcon": "assets/icon.ico",
+      "uninstallerIcon": "assets/icon.ico",
+      "installerHeaderIcon": "assets/icon.ico",
       "oneClick": false,
       "allowToChangeInstallationDirectory": true
     }
