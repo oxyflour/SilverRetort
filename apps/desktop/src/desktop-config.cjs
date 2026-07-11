@@ -1,0 +1,125 @@
+// @ts-check
+const path = require("node:path");
+const { existsSync, mkdirSync, readFileSync } = require("node:fs");
+
+function stripEnvValue(rawValue) {
+    const value = rawValue.trim();
+    if (value.length >= 2 && value[0] === value[value.length - 1] && (`"'`).includes(value[0])) {
+        return value.slice(1, -1);
+    }
+    return value;
+}
+
+function parseDesktopEnv(text) {
+    /** @type {Record<string, string>} */
+    const env = {};
+    for (const rawLine of text.split(/\r?\n/u)) {
+        const line = rawLine.trim();
+        if (!line || line.startsWith("#")) {
+            continue;
+        }
+        const separator = line.indexOf("=");
+        if (separator <= 0) {
+            continue;
+        }
+        const key = line.slice(0, separator).trim();
+        if (key) {
+            env[key] = stripEnvValue(line.slice(separator + 1));
+        }
+    }
+    return env;
+}
+
+function readJsonObject(filePath) {
+    if (!existsSync(filePath)) {
+        return {};
+    }
+    const raw = readFileSync(filePath, "utf8").trim();
+    if (!raw) {
+        return {};
+    }
+    const parsed = JSON.parse(raw);
+    if (parsed === null || Array.isArray(parsed) || typeof parsed !== "object") {
+        throw new Error(`expected JSON object in ${filePath}`);
+    }
+    return parsed;
+}
+
+function ensureDir(dirPath) {
+    mkdirSync(dirPath, { recursive: true });
+    return dirPath;
+}
+
+function normalizeBaseUrl(url) {
+    return `${url || ""}`.trim().replace(/\/+$/u, "");
+}
+
+function joinUrl(baseUrl, route) {
+    return new URL(route, `${normalizeBaseUrl(baseUrl)}/`).toString();
+}
+
+function toWebSocketUrl(baseUrl, route = "") {
+    const url = new URL(route, `${normalizeBaseUrl(baseUrl)}/`);
+    url.protocol = url.protocol === "https:" ? "wss:" : "ws:";
+    return url.toString();
+}
+
+/**
+ * @param {{
+ *   app: Pick<import("electron").App, "isPackaged" | "getPath">,
+ *   sourceDir?: string,
+ *   resourcesPath?: string,
+ *   processEnv?: NodeJS.ProcessEnv,
+ * }} options
+ */
+function loadDesktopConfig({
+    app,
+    sourceDir = __dirname,
+    resourcesPath = process.resourcesPath,
+    processEnv = process.env,
+}) {
+    const desktopRoot = path.resolve(sourceDir, "..");
+    const serviceRoot = app.isPackaged
+        ? resourcesPath
+        : path.resolve(sourceDir, "..", "..");
+    const envPath = path.join(desktopRoot, ".env");
+    const iconPath = path.join(desktopRoot, "assets", "icon.png");
+    const desktopEnv = existsSync(envPath)
+        ? parseDesktopEnv(readFileSync(envPath, "utf8"))
+        : {};
+
+    const configuredDataDir = `${processEnv.SILVERRETORT_DATA_DIR || ""}`.trim();
+    const dataDir = ensureDir(configuredDataDir
+        ? path.resolve(configuredDataDir)
+        : path.join(app.getPath("userData"), "data"));
+    const settings = readJsonObject(path.join(dataDir, "settings.json"));
+
+    return {
+        isPackaged: app.isPackaged,
+        desktopRoot,
+        serviceRoot,
+        envPath,
+        iconPath,
+        desktopEnv,
+        processEnv,
+        dataDir,
+        settings,
+        buildChildEnv(overrides = {}) {
+            return {
+                ...processEnv,
+                ...desktopEnv,
+                ...overrides,
+            };
+        },
+    };
+}
+
+module.exports = {
+    ensureDir,
+    joinUrl,
+    loadDesktopConfig,
+    normalizeBaseUrl,
+    parseDesktopEnv,
+    readJsonObject,
+    toWebSocketUrl,
+};

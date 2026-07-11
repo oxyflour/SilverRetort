@@ -1,665 +1,66 @@
 // @ts-check
-const crypto = require("node:crypto");
-const path = require("node:path");
-const { existsSync, mkdirSync, readFileSync } = require("node:fs");
-const { spawn } = require("node:child_process");
 const { app, BrowserWindow, utilityProcess } = require("electron/main");
 const { shell } = require("electron");
+const { loadDesktopConfig } = require("./desktop-config.cjs");
+const { createDesktopWindow } = require("./desktop-window.cjs");
+const { createProcessSupervisor } = require("./process-supervisor.cjs");
+const { startServiceStack } = require("./service-stack.cjs");
 
 const APP_ID = "com.silverretort.app";
-const DEFAULT_NEXT_PORT = 23000;
-const DEFAULT_PYTHON_PORT = 23001;
-const DEFAULT_HERMES_PORT = 23002;
-const DEFAULT_HERMES_CONTAINER_PORT = 23002;
-
-/**
- * 
- * @param { string } label 
- * @param { string } data 
- */
-function logWithLabel(label, data) {
-    for (const line of `${data}`.split("\n")) {
-        if (line) {
-            console.log(`[${label}] ${line}`);
-        }
-    }
-}
-
-/**
- * 
- * @param { string } label 
- * @param { import("node:child_process").ChildProcess } proc 
- */
-function watchProc(label, proc) {
-    proc.stdout?.on("data", (data) => logWithLabel(label, data));
-    proc.stderr?.on("data", (data) => logWithLabel(label, data));
-    proc.addListener("error", (error) => {
-        console.error(`[main] ERR: ${label} failed`, error);
-    });
-    proc.addListener("exit", (code, signal) => {
-        console.log(`[main] BYE: ${label} quit (code=${code}, signal=${signal})`);
-        app.quit();
-    });
-}
-
-/**
- *
- * @param { string } label
- * @param { import("node:child_process").ChildProcess } proc
- */
-function pipeProcLogs(label, proc) {
-    proc.stdout?.on("data", (data) => logWithLabel(label, data));
-    proc.stderr?.on("data", (data) => logWithLabel(label, data));
-    proc.addListener("error", (error) => {
-        console.error(`[main] ERR: ${label} failed`, error);
-    });
-}
-
-/**
- * @type {null | import("electron").BrowserWindow}
- */
+let runtime = null;
 let mainWindow = null;
-/** @type {Array<() => void | Promise<void>>} */
-let shutdownHooks = [];
+let windowPromise = null;
 let isShuttingDown = false;
 
-/**
- * 
- * @param { string } url 
- * @param { number } retry 
- * @returns 
- */
-async function assertUrl(url, retry = 30) {
-    while (retry-- > 0) {
-        await new Promise((resolve) => setTimeout(resolve, 1000));
-        try {
-            const req = await fetch(url);
-            const text = await req.text();
-            if (req.status === 200) {
-                return text;
-            }
-            throw new Error(`${req.status}: ${text}`);
-        } catch {
-            console.warn(`[main] waiting for url ${url} (${retry} retries left)`);
-        }
-    }
-    throw new Error(`failed to request ${url}`);
-}
-
-const desktopRoot = path.resolve(__dirname, "..");
-const serviceRoot = app.isPackaged
-    ? process.resourcesPath
-    : path.resolve(__dirname, "..", "..");
-const desktopEnvPath = path.join(desktopRoot, ".env");
-const desktopIconPath = path.join(desktopRoot, "assets", "icon.png");
-
-function stripEnvValue(rawValue) {
-    const value = rawValue.trim();
-    if (value.length >= 2 && value[0] === value[value.length - 1] && (`"'`).includes(value[0])) {
-        return value.slice(1, -1);
-    }
-    return value;
-}
-
-function loadDesktopEnv() {
-    if (!existsSync(desktopEnvPath)) {
-        return {};
-    }
-
-    /** @type {Record<string, string>} */
-    const env = {};
-    const text = readFileSync(desktopEnvPath, "utf8");
-    for (const rawLine of text.split(/\r?\n/u)) {
-        const line = rawLine.trim();
-        if (!line || line.startsWith("#")) {
-            continue;
-        }
-        const separator = line.indexOf("=");
-        if (separator <= 0) {
-            continue;
-        }
-        const key = line.slice(0, separator).trim();
-        const value = stripEnvValue(line.slice(separator + 1));
-        if (key) {
-            env[key] = value;
-        }
-    }
-    return env;
-}
-
-const desktopEnv = loadDesktopEnv();
-
-function buildChildEnv(overrides = {}) {
-    return {
-        ...process.env,
-        ...desktopEnv,
-        ...overrides,
-    };
-}
-
-function ensureDir(dirPath) {
-    mkdirSync(dirPath, { recursive: true });
-    return dirPath;
-}
-
-function resolveDataDir() {
-    const configured = `${process.env.SILVERRETORT_DATA_DIR || ""}`.trim();
-    const dataDir = configured
-        ? path.resolve(configured)
-        : path.join(app.getPath("userData"), "data");
-    return ensureDir(dataDir);
-}
-
-function readJsonObject(filePath) {
-    if (!existsSync(filePath)) {
-        return {};
-    }
-
-    const raw = readFileSync(filePath, "utf8").trim();
-    if (!raw) {
-        return {};
-    }
-
-    const parsed = JSON.parse(raw);
-    if (parsed === null || Array.isArray(parsed) || typeof parsed !== "object") {
-        throw new Error(`expected JSON object in ${filePath}`);
-    }
-    return parsed;
-}
-
-function readSettings(dataDir) {
-    return readJsonObject(path.join(dataDir, "settings.json"));
-}
-
-function normalizeBaseUrl(url) {
-    return `${url || ""}`.trim().replace(/\/+$/u, "");
-}
-
-function joinUrl(baseUrl, route) {
-    return new URL(route, `${normalizeBaseUrl(baseUrl)}/`).toString();
-}
-
-function toWebSocketUrl(baseUrl, route = "") {
-    const url = new URL(route, `${normalizeBaseUrl(baseUrl)}/`);
-    url.protocol = url.protocol === "https:" ? "wss:" : "ws:";
-    return url.toString();
-}
-
-function isArtifactViewerPath(pathname) {
-    return pathname.startsWith("/artifacts/");
-}
-
-function configureWindowOpenHandler(window, baseUrl) {
-    const appOrigin = new URL(baseUrl).origin;
-    const sharedWindowOptions = {
-        allowRunningInsecureContent: true,
-        webSecurity: false,
-    };
-
-    window.webContents.setWindowOpenHandler(({ url }) => {
-        let targetUrl;
-        try {
-            targetUrl = new URL(url);
-        } catch {
-            return { action: "deny" };
-        }
-
-        if (targetUrl.origin === appOrigin && isArtifactViewerPath(targetUrl.pathname)) {
-            return {
-                action: "allow",
-                overrideBrowserWindowOptions: {
-                    width: 1000,
-                    height: 760,
-                    minWidth: 640,
-                    minHeight: 480,
-                    autoHideMenuBar: true,
-                    title: "Artifact",
-                    icon: existsSync(desktopIconPath) ? desktopIconPath : undefined,
-                    webPreferences: sharedWindowOptions,
-                },
-            };
-        }
-
-        if ((targetUrl.protocol === "http:" || targetUrl.protocol === "https:") && targetUrl.origin !== appOrigin) {
-            void shell.openExternal(targetUrl.toString());
-        }
-        return { action: "deny" };
-    });
-}
-
-function randomApiKey() {
-    return crypto.randomBytes(32).toString("hex");
-}
-
-function hashSuffix(input) {
-    return crypto.createHash("sha256").update(input).digest("hex").slice(0, 12);
-}
-
-function registerShutdownHook(fn) {
-    shutdownHooks.push(fn);
-}
-
-async function runShutdownHooks() {
-    const hooks = shutdownHooks;
-    shutdownHooks = [];
-    for (const hook of hooks.reverse()) {
-        try {
-            await hook();
-        } catch (error) {
-            console.error("[main] shutdown hook failed", error);
-        }
-    }
-}
-
-function resolveNextEntry() {
-    const target = app.isPackaged
-        ? path.join(serviceRoot, "next", "apps", "next", "server.js")
-        : path.join(serviceRoot, "next", "node_modules", "next", "dist", "bin", "next");
-    if (!existsSync(target)) {
-        throw new Error(`missing next entrypoint: ${target}`);
-    }
-    return target;
-}
-
-function resolveHermesRuntime() {
-    if (!app.isPackaged) {
-        return {
-            command: "uv",
-            args: ["run", "--project", ".", "python", "main.py"],
-            cwd: path.join(serviceRoot, "hermes"),
-        };
-    }
-    return null;
-}
-
-function resolveHermesDockerConfig(settings, hermesUrl, hermesApiKey) {
-    const image = `${settings.hermesDockerImage || ""}`.trim();
-    if (!image) {
-        return null;
-    }
-
-    if (!hermesUrl) {
-        throw new Error("DATA_DIR/settings.json has hermesDockerImage but missing hermesUrl");
-    }
-    const effectiveApiKey = hermesApiKey || randomApiKey();
-
-    const parsed = new URL(`${hermesUrl}/`);
-    const publicPort = parsed.port
-        ? Number(parsed.port)
-        : parsed.protocol === "https:"
-            ? 443
-            : 80;
-    if (!Number.isInteger(publicPort) || publicPort <= 0) {
-        throw new Error(`invalid hermesUrl port: ${hermesUrl}`);
-    }
-
-    const containerPort = Number(settings.hermesDockerContainerPort || DEFAULT_HERMES_CONTAINER_PORT);
-    if (!Number.isInteger(containerPort) || containerPort <= 0) {
-        throw new Error(`invalid hermesDockerContainerPort: ${settings.hermesDockerContainerPort}`);
-    }
-
-    const containerName = `${settings.hermesDockerContainerName || `silverretort-hermes-${hashSuffix(hermesUrl)}`}`.trim();
-    if (!containerName) {
-        throw new Error("hermesDockerContainerName must not be empty");
-    }
-
-    const forwardedEnvKeys = [
-        "OPENAI_API_KEY",
-        "OPENAI_BASE_URL",
-        "OPENAI_MODEL",
-        "OPENAI_MODEL_ID",
-    ];
-
-    /** @type {string[]} */
-    const args = [
-        "run",
-        "--rm",
-        "-d",
-        "--name",
-        containerName,
-        "-p",
-        `${publicPort}:${containerPort}`,
-        "-e",
-        "WATCH_STDIN=0",
-        "-e",
-        "LISTEN_HOST=0.0.0.0",
-        "-e",
-        `LISTEN_PORT=${containerPort}`,
-        "-e",
-        `HERMES_API_KEY=${effectiveApiKey}`,
-        "-e",
-        "HERMES_RELAY_ENABLED=1",
-    ];
-
-    for (const key of forwardedEnvKeys) {
-        const value = `${desktopEnv[key] || process.env[key] || ""}`.trim();
-        if (value) {
-            args.push("-e", `${key}=${value}`);
-        }
-    }
-
-    args.push(image);
-    return {
-        image,
-        apiKey: effectiveApiKey,
-        containerName,
-        publicPort,
-        containerPort,
-        command: "docker",
-        runArgs: args,
-        removeArgs: ["rm", "-f", containerName],
-        logsArgs: ["logs", "-f", containerName],
-        waitArgs: ["wait", containerName],
-    };
-}
-
-/**
- * 
- * @param { number } pythonPort 
- * @returns 
- */
-function resolvePythonRuntime(pythonPort) {
-    if (!app.isPackaged) {
-        return {
-            command: "uv",
-            args: ["run", "uvicorn", "main:app", "--host", "127.0.0.1", "--port", `${pythonPort}`],
-            cwd: path.join(serviceRoot, "uvicorn"),
-        };
-    }
-
-    const executable = path.join(
-        serviceRoot,
-        "uvicorn",
-        "silverretort-uvicorn",
-        process.platform === "win32" ? "silverretort-uvicorn.exe" : "silverretort-uvicorn",
-    );
-    if (!existsSync(executable)) {
-        throw new Error(`missing packaged python executable: ${executable}`);
-    }
-
-    return {
-        command: executable,
-        args: [],
-        cwd: path.dirname(executable),
-    };
-}
-
-function resolveHermesMode(dataDir, pythonPort, hermesPort) {
-    const settings = readSettings(dataDir);
-    const hermesUrl = normalizeBaseUrl(settings.hermesUrl);
-    const hermesApiKey = `${settings.hermesApiKey || ""}`.trim();
-    const docker = resolveHermesDockerConfig(settings, hermesUrl, hermesApiKey);
-
-    if (docker) {
-        return {
-            mode: "docker",
-            url: hermesUrl,
-            apiKey: docker.apiKey,
-            healthUrl: joinUrl(hermesUrl, "health"),
-            docker,
-        };
-    }
-
-    if (hermesUrl) {
-        if (!hermesApiKey) {
-            throw new Error("DATA_DIR/settings.json has hermesUrl but missing hermesApiKey");
-        }
-        return {
-            mode: "remote",
-            url: hermesUrl,
-            apiKey: hermesApiKey,
-            healthUrl: joinUrl(hermesUrl, "health"),
-        };
-    }
-
-    const runtime = resolveHermesRuntime();
-    if (runtime === null) {
-        console.warn("[main] packaged local hermes is not bundled yet; falling back to mock engine");
-        return { mode: "disabled" };
-    }
-
-    const apiKey = randomApiKey();
-    const url = `http://127.0.0.1:${hermesPort}`;
-    return {
-        mode: "local",
-        url,
-        apiKey,
-        healthUrl: `${url}/health`,
-        runtime,
-        env: {
-            LISTEN_PORT: `${hermesPort}`,
-            HERMES_API_KEY: apiKey,
-            MCP_URL: `http://127.0.0.1:${pythonPort}/mcp/`,
-            HERMES_HOME: ensureDir(path.join(dataDir, "hermes-home")),
-            HERMES_ENV_FILE: desktopEnvPath,
-        },
-    };
-}
-
-function startHermesProcess(hermesMode) {
-    if (hermesMode.mode !== "local") {
-        return null;
-    }
-
-    const proc = spawn(hermesMode.runtime.command, hermesMode.runtime.args, {
-        cwd: hermesMode.runtime.cwd,
-        env: buildChildEnv(hermesMode.env),
-        stdio: "pipe",
-    });
-    watchProc("hermes", proc);
-    return proc;
-}
-
-function startHermesDocker(hermesMode) {
-    if (hermesMode.mode !== "docker") {
-        return null;
-    }
-
-    return new Promise((resolve, reject) => {
-        const removeExisting = spawn(hermesMode.docker.command, hermesMode.docker.removeArgs, {
-            cwd: serviceRoot,
-            env: buildChildEnv(),
-            stdio: "pipe",
+function getRuntime() {
+    if (!runtime) {
+        const config = loadDesktopConfig({ app, sourceDir: __dirname });
+        const supervisor = createProcessSupervisor({
+            onUnexpectedExit: () => app.quit(),
         });
-        pipeProcLogs("hermes-docker-rm", removeExisting);
-        removeExisting.addListener("error", reject);
-        removeExisting.addListener("exit", () => {
-            const run = spawn(hermesMode.docker.command, hermesMode.docker.runArgs, {
-                cwd: serviceRoot,
-                env: buildChildEnv(),
-                stdio: "pipe",
-            });
-            pipeProcLogs("hermes-docker", run);
-
-            let settled = false;
-            let stdout = "";
-            let stderr = "";
-
-            const finish = (fn) => {
-                if (!settled) {
-                    settled = true;
-                    fn();
-                }
-            };
-
-            run.stdout?.on("data", (data) => {
-                stdout += `${data}`;
-            });
-            run.stderr?.on("data", (data) => {
-                stderr += `${data}`;
-            });
-            run.addListener("error", (error) => finish(() => reject(error)));
-            run.addListener("exit", (code) => {
-                if (code !== 0) {
-                    finish(() =>
-                        reject(new Error(`docker run failed (${code}): ${(stderr || stdout).trim() || "unknown error"}`))
-                    );
-                    return;
-                }
-
-                const logsProc = spawn(hermesMode.docker.command, hermesMode.docker.logsArgs, {
-                    cwd: serviceRoot,
-                    env: buildChildEnv(),
-                    stdio: "pipe",
-                });
-                pipeProcLogs("hermes-docker-logs", logsProc);
-
-                const waitProc = spawn(hermesMode.docker.command, hermesMode.docker.waitArgs, {
-                    cwd: serviceRoot,
-                    env: buildChildEnv(),
-                    stdio: "pipe",
-                });
-                pipeProcLogs("hermes-docker-wait", waitProc);
-                waitProc.addListener("exit", () => {
-                    console.log(`[main] BYE: hermes docker container ${hermesMode.docker.containerName} exited`);
-                    app.quit();
-                });
-
-                registerShutdownHook(() => {
-                    if (!logsProc.killed) {
-                        logsProc.kill();
-                    }
-                    if (!waitProc.killed) {
-                        waitProc.kill();
-                    }
-                    return new Promise((done) => {
-                        const stop = spawn(hermesMode.docker.command, hermesMode.docker.removeArgs, {
-                            cwd: serviceRoot,
-                            env: buildChildEnv(),
-                            stdio: "pipe",
-                        });
-                        pipeProcLogs("hermes-docker-stop", stop);
-                        stop.addListener("exit", () => done());
-                        stop.addListener("error", () => done());
-                    });
-                });
-
-                finish(() => resolve({ logsProc, waitProc }));
-            });
-        });
-    });
-}
-
-/**
- * 
- * @param { number } nextJsPort 
- * @param { number } pythonPort 
- * @returns 
- */
-function startNextServer(nextJsPort, pythonPort) {
-    const command = resolveNextEntry();
-    const cwd = app.isPackaged
-        ? path.join(serviceRoot, "next", "apps", "next")
-        : path.join(serviceRoot, "next");
-    const args = app.isPackaged
-        ? []
-        : ["dev", "-H", "127.0.0.1", "-p", `${nextJsPort}`];
-
-    return utilityProcess.fork(command, args, {
-        cwd,
-        env: buildChildEnv({
-            PORT: `${nextJsPort}`,
-            HOSTNAME: "127.0.0.1",
-            API_REWRITE: `http://127.0.0.1:${pythonPort}/`,
-        }),
-        stdio: "pipe",
-    });
-}
-
-async function startServer(
-    nextJsPort = DEFAULT_NEXT_PORT,
-    pythonPort = DEFAULT_PYTHON_PORT,
-    hermesPort = DEFAULT_HERMES_PORT,
-) {
-    const dataDir = resolveDataDir();
-    const hermesMode = resolveHermesMode(dataDir, pythonPort, hermesPort);
-    const pythonRuntime = resolvePythonRuntime(pythonPort);
-    watchProc("uvicorn", spawn(pythonRuntime.command, pythonRuntime.args, {
-        cwd: pythonRuntime.cwd,
-        env: buildChildEnv({
-            LISTEN_PORT: `${pythonPort}`,
-            DATA_DIR: dataDir,
-            ...(hermesMode.mode === "disabled"
-                ? {}
-                : {
-                    HERMES_URL: hermesMode.url,
-                    HERMES_API_KEY: hermesMode.apiKey,
-                    ...(hermesMode.mode === "docker"
-                        ? {
-                            HERMES_BRIDGE_URL: toWebSocketUrl(hermesMode.url, "bridge"),
-                        }
-                        : {}),
-                }),
-        }),
-        stdio: "pipe",
-    }));
-
-    startHermesProcess(hermesMode);
-    await startHermesDocker(hermesMode);
-    const nextjs = startNextServer(nextJsPort, pythonPort);
-    // @ts-ignore
-    watchProc("nextjs", nextjs);
-
-    const healthChecks = [
-        assertUrl(`http://127.0.0.1:${pythonPort}/health`),
-        assertUrl(`http://127.0.0.1:${nextJsPort}/health`),
-    ];
-    if (hermesMode.mode !== "disabled") {
-        healthChecks.push(assertUrl(hermesMode.healthUrl));
+        runtime = {
+            config,
+            supervisor,
+            serviceUrlPromise: startServiceStack({ config, supervisor, utilityProcess }),
+        };
     }
-
-    const [apiHealth, nextHealth, hermesHealth] = await Promise.all(healthChecks);
-    const hermesSummary = hermesMode.mode === "disabled"
-        ? "hermes=mock"
-        : `hermes=${hermesHealth}`;
-    console.log(`[main] HEALTH: api=${apiHealth}; web=${nextHealth}; ${hermesSummary}; data=${dataDir}`);
-    return `http://127.0.0.1:${nextJsPort}`;
+    return runtime;
 }
 
-async function createMainWindow() {
-    const sharedWindowOptions = {
-        allowRunningInsecureContent: true,
-        webSecurity: false,
-    };
-
-    mainWindow = new BrowserWindow({
-        width: 640,
-        height: 480,
-        show: false,
-        icon: existsSync(desktopIconPath) ? desktopIconPath : undefined,
-        webPreferences: {
-            ...sharedWindowOptions,
-        }
+async function openMainWindow() {
+    if (mainWindow || windowPromise) {
+        return;
+    }
+    const { config, serviceUrlPromise } = getRuntime();
+    windowPromise = createDesktopWindow({
+        BrowserWindow,
+        shell,
+        desktopRoot: config.desktopRoot,
+        iconPath: config.iconPath,
+        serviceUrlPromise,
+        onClosed: () => { mainWindow = null; },
     });
+    try {
+        mainWindow = await windowPromise;
+    } finally {
+        windowPromise = null;
+    }
+}
 
-    mainWindow.setMenuBarVisibility(false);
-    mainWindow.once("ready-to-show", () => {
-        mainWindow?.show();
-    });
-
-    mainWindow.on("closed", () => {
-        mainWindow = null;
-    });
-
-    await mainWindow.loadFile(path.join(desktopRoot, "index.html"));
-
-    const url = await startServer();
-    configureWindowOpenHandler(mainWindow, url);
-    await mainWindow.loadURL(url);
+async function startDesktop() {
+    try {
+        await openMainWindow();
+    } catch (error) {
+        console.error("Failed to start desktop app:", error);
+        app.quit();
+    }
 }
 
 if (process.platform === "win32") {
     app.setAppUserModelId(APP_ID);
 }
 
-app.whenReady().then(async () => {
-    try {
-        await createMainWindow();
-    } catch (error) {
-        console.error("Failed to start desktop app:", error);
-        app.quit();
-    }
-});
+app.whenReady().then(startDesktop);
 
 app.on("window-all-closed", () => {
     if (process.platform !== "darwin") {
@@ -673,11 +74,11 @@ app.on("before-quit", (event) => {
     }
     isShuttingDown = true;
     event.preventDefault();
-    void runShutdownHooks().finally(() => app.quit());
+    void (runtime?.supervisor.shutdown() ?? Promise.resolve()).finally(() => app.quit());
 });
 
-app.on("activate", async () => {
+app.on("activate", () => {
     if (BrowserWindow.getAllWindows().length === 0) {
-        await createMainWindow();
+        void startDesktop();
     }
 });
