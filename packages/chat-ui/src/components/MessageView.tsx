@@ -177,30 +177,29 @@ function ToolCard({
   return (
     <div className="my-1 rounded-md border border-neutral-200 bg-neutral-50 text-sm dark:border-neutral-700 dark:bg-neutral-800/50">
       <div className="flex items-center gap-2 px-3 py-1.5">
-        <button
-          type="button"
-          onClick={() => {
-            if (shownArtifactId) {
-              openArtifact(shownArtifactId, sessionId);
-            }
-          }}
-          className={`flex min-w-0 flex-1 items-center gap-2 text-left ${
-            shownArtifactId ? "cursor-pointer" : "cursor-default"
-          }`}
-        >
+        <span className="flex min-w-0 flex-1 items-center gap-2 text-left">
           <ToolStatusIcon status={toolCall.status} />
-          <span className="font-mono text-xs">{toolCall.name}</span>
+          <span className={ `font-mono text-xs ${
+            shownArtifactId ? "cursor-pointer" : "cursor-default"
+          }` } onClick={() => { shownArtifactId && openArtifact(shownArtifactId, sessionId) }}>
+            {toolCall.name}
+          </span>
           {toolCall.detail && (
             <span className="min-w-0 flex-1 truncate text-xs text-neutral-500">
               {toolCall.detail}
             </span>
           )}
           {shownArtifactId && (
-            <span className="shrink-0 text-[11px] text-neutral-400">
-              open artifact
-            </span>
+            <button
+              type="button"
+              title="Open in new window"
+              onClick={() => openArtifactInNewWindow(shownArtifactId)}
+              className="border-l border-neutral-300 px-2 py-1 text-neutral-500 hover:bg-neutral-100 hover:text-neutral-900 dark:border-neutral-600 dark:hover:bg-neutral-800 dark:hover:text-neutral-100"
+            >
+              <AppIcon icon={ExternalLink} className="h-3.5 w-3.5" />
+            </button>
           )}
-        </button>
+        </span>
         <button
           type="button"
           aria-expanded={expanded}
@@ -359,15 +358,15 @@ export function MessageView({ message }: { message: Message }) {
             {message.attachments.map((attachment) =>
               attachment.kind === "image" ? (
                 <img
-                  key={attachment.id}
-                  src={client.fileUrl(attachment.workspaceId, attachment.id)}
+                  key={`${attachment.workspaceId}:${attachment.relativePath}`}
+                  src={client.fileUrl(attachment.workspaceId, attachment.relativePath)}
                   alt={attachment.name}
                   className="max-h-40 rounded-md border border-neutral-200 dark:border-neutral-700"
                 />
               ) : (
                 <a
-                  key={attachment.id}
-                  href={client.fileUrl(attachment.workspaceId, attachment.id)}
+                  key={`${attachment.workspaceId}:${attachment.relativePath}`}
+                  href={client.fileUrl(attachment.workspaceId, attachment.relativePath)}
                   target="_blank"
                   rel="noreferrer"
                   className="rounded-full border border-neutral-300 px-3 py-1 text-xs hover:bg-neutral-100 dark:border-neutral-600 dark:hover:bg-neutral-800"
