@@ -77,6 +77,30 @@ def _flatten_response_output(output: Any) -> str | None:
     return str(output)
 
 
+def _tool_result_status(result: str | None) -> str:
+    if result is None:
+        return "done"
+    try:
+        payload = json.loads(result)
+    except (json.JSONDecodeError, TypeError):
+        return "done"
+    if not isinstance(payload, dict):
+        return "done"
+
+    error = payload.get("error")
+    error_is_empty = (
+        error is None
+        or error is False
+        or error == ""
+        or (isinstance(error, (dict, list)) and not error)
+    )
+    exit_code = payload.get("exit_code")
+    has_failed_exit_code = (
+        isinstance(exit_code, int) and not isinstance(exit_code, bool) and exit_code != 0
+    )
+    return "error" if not error_is_empty or has_failed_exit_code else "done"
+
+
 def _extract_failed_response_message(payload: Any) -> str:
     if isinstance(payload, dict):
         error = payload.get("error")
@@ -166,12 +190,13 @@ def _normalize_response_event(
             if tool_id in completed_tool_calls:
                 return []
             completed_tool_calls.add(tool_id)
+            result = _flatten_response_output(item.get("output"))
             return [
                 {
                     "kind": "tool-end",
                     "id": tool_id,
-                    "status": "done",
-                    "result": _flatten_response_output(item.get("output")),
+                    "status": _tool_result_status(result),
+                    "result": result,
                 }
             ]
 
