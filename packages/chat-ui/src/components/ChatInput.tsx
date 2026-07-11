@@ -1,7 +1,9 @@
 "use client";
 
 import { useRef, useState } from "react";
+import { Paperclip, SendHorizontal, Square, X } from "lucide-react";
 import { useChatStore } from "../store";
+import { AppIcon } from "./icons";
 
 export function ChatInput() {
   const currentSessionId = useChatStore((s) => s.currentSessionId);
@@ -58,7 +60,7 @@ export function ChatInput() {
                   aria-label={`Remove ${attachment.name}`}
                   className="text-neutral-400 transition-colors hover:text-red-500"
                 >
-                  <CloseIcon />
+                  <AppIcon icon={X} className="h-3.5 w-3.5" />
                 </button>
               </span>
             ))}
@@ -73,7 +75,7 @@ export function ChatInput() {
             disabled={!currentSessionId}
             className="grid h-8 w-8 shrink-0 place-items-center rounded-full text-neutral-500 transition-colors hover:bg-neutral-100 hover:text-neutral-900 focus-visible:bg-neutral-100 focus-visible:text-neutral-900 disabled:opacity-40 dark:text-neutral-400 dark:hover:bg-neutral-800 dark:hover:text-neutral-100 dark:focus-visible:bg-neutral-800 dark:focus-visible:text-neutral-100"
           >
-            <PlusIcon />
+            <AppIcon icon={Paperclip} className="h-4 w-4" />
           </button>
           <input
             type="text"
@@ -117,82 +119,14 @@ export function ChatInput() {
               }
             >
               {running ? (
-                <StopIcon />
+                <AppIcon icon={Square} className="h-3.5 w-3.5 fill-current" />
               ) : (
-                <SendIcon />
+                <AppIcon icon={SendHorizontal} className="h-4 w-4" />
               )}
             </button>
           </div>
         </div>
       </div>
     </div>
-  );
-}
-
-function PlusIcon() {
-  return (
-    <svg
-      viewBox="0 0 20 20"
-      fill="none"
-      aria-hidden="true"
-      className="h-4 w-4"
-    >
-      <path
-        d="M10 4.167v11.666M4.167 10h11.666"
-        stroke="currentColor"
-        strokeWidth="1.75"
-        strokeLinecap="round"
-      />
-    </svg>
-  );
-}
-
-function SendIcon() {
-  return (
-    <svg
-      viewBox="0 0 20 20"
-      fill="none"
-      aria-hidden="true"
-      className="h-4 w-4"
-    >
-      <path
-        d="M10 15.833V4.167M5.833 8.333L10 4.167l4.167 4.166"
-        stroke="currentColor"
-        strokeWidth="1.75"
-        strokeLinecap="round"
-        strokeLinejoin="round"
-      />
-    </svg>
-  );
-}
-
-function StopIcon() {
-  return (
-    <svg
-      viewBox="0 0 20 20"
-      fill="currentColor"
-      aria-hidden="true"
-      className="h-3.5 w-3.5"
-    >
-      <rect x="5" y="5" width="10" height="10" rx="2" />
-    </svg>
-  );
-}
-
-function CloseIcon() {
-  return (
-    <svg
-      viewBox="0 0 20 20"
-      fill="none"
-      aria-hidden="true"
-      className="h-3.5 w-3.5"
-    >
-      <path
-        d="M6 6l8 8M14 6l-8 8"
-        stroke="currentColor"
-        strokeWidth="1.75"
-        strokeLinecap="round"
-      />
-    </svg>
   );
 }

@@ -1,8 +1,10 @@
 "use client";
 
+import { ExternalLink, X } from "lucide-react";
 import { openArtifactInNewWindow } from "../openArtifactInNewWindow";
 import { useChatStore } from "../store";
 import { ArtifactContent } from "./ArtifactContent";
+import { AppIcon } from "./icons";
 
 const EMPTY_TAB_IDS: string[] = [];
 
@@ -37,18 +39,18 @@ export function ArtifactPanel() {
             type="button"
             title="Open in new window"
             onClick={() => popOutArtifact(activeArtifactId)}
-            className="rounded px-1.5 text-xs text-neutral-500 hover:text-neutral-900 dark:hover:text-neutral-100"
+            className="rounded p-1.5 text-neutral-500 transition-colors hover:bg-neutral-100 hover:text-neutral-900 dark:hover:bg-neutral-800 dark:hover:text-neutral-100"
           >
-            Open
+            <AppIcon icon={ExternalLink} className="h-4 w-4" />
           </button>
         )}
         <button
           type="button"
           title="Close panel"
           onClick={() => setPanelOpen(false)}
-          className="rounded px-1.5 text-xs text-neutral-500 hover:text-neutral-900 dark:hover:text-neutral-100"
+          className="rounded p-1.5 text-neutral-500 transition-colors hover:bg-neutral-100 hover:text-neutral-900 dark:hover:bg-neutral-800 dark:hover:text-neutral-100"
         >
-          Close
+          <AppIcon icon={X} className="h-4 w-4" />
         </button>
       </div>
 
@@ -80,13 +82,13 @@ export function ArtifactPanel() {
                     event.stopPropagation();
                     closeArtifact(id);
                   }}
-                  className={`rounded-full px-2 py-1 text-[11px] ${
+                  className={`rounded-full p-1.5 ${
                     active
                       ? "text-white/80 hover:text-white dark:text-neutral-700 dark:hover:text-neutral-900"
                       : "text-neutral-400 hover:text-neutral-700 dark:hover:text-neutral-200"
                   }`}
                 >
-                  Close
+                  <AppIcon icon={X} className="h-3.5 w-3.5" />
                 </button>
               </div>
             );

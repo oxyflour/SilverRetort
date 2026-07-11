@@ -1,12 +1,21 @@
 "use client";
 
 import { useState } from "react";
+import {
+  Check,
+  ChevronDown,
+  ChevronRight,
+  ExternalLink,
+  PencilLine,
+  X,
+} from "lucide-react";
 import ReactMarkdown from "react-markdown";
 import rehypeHighlight from "rehype-highlight";
 import remarkGfm from "remark-gfm";
 import { Message, ToolCall } from "silverretort-protocol";
 import { openArtifactInNewWindow } from "../openArtifactInNewWindow";
 import { useChatStore } from "../store";
+import { AppIcon } from "./icons";
 
 function isShowArtifactTool(toolName: string): boolean {
   return toolName.includes("ui_show_artifact");
@@ -105,16 +114,16 @@ function messageText(message: Message): string {
 
 function toRestartErrorMessage(error: unknown): string {
   if (!(error instanceof Error)) {
-    return "保存失败，请稍后重试";
+    return "Save failed. Please try again.";
   }
   if (error.message.includes("HTTP 409")) {
-    return "当前会话正在生成，稍后再试";
+    return "This session is still running. Try again after it stops.";
   }
   if (error.message.includes("HTTP 400")) {
-    return "只能编辑并重开用户消息";
+    return "Only user messages can be edited and restarted.";
   }
   if (error.message.includes("HTTP 404")) {
-    return "目标消息不存在";
+    return "The target message no longer exists.";
   }
   return error.message;
 }
@@ -130,39 +139,10 @@ function ToolStatusIcon({ status }: { status: ToolCall["status"] }) {
   }
 
   if (status === "done") {
-    return (
-      <svg
-        aria-hidden="true"
-        viewBox="0 0 16 16"
-        className="h-3.5 w-3.5 shrink-0 text-emerald-600"
-        fill="none"
-      >
-        <path
-          d="M3.5 8.5 6.5 11.5 12.5 4.5"
-          stroke="currentColor"
-          strokeWidth="2"
-          strokeLinecap="round"
-          strokeLinejoin="round"
-        />
-      </svg>
-    );
+    return <AppIcon icon={Check} className="h-3.5 w-3.5 shrink-0 text-emerald-600" />;
   }
 
-  return (
-    <svg
-      aria-hidden="true"
-      viewBox="0 0 16 16"
-      className="h-3.5 w-3.5 shrink-0 text-red-500"
-      fill="none"
-    >
-      <path
-        d="M4.5 4.5 11.5 11.5M11.5 4.5 4.5 11.5"
-        stroke="currentColor"
-        strokeWidth="2"
-        strokeLinecap="round"
-      />
-    </svg>
-  );
+  return <AppIcon icon={X} className="h-3.5 w-3.5 shrink-0 text-red-500" />;
 }
 
 function ToolCard({
@@ -182,8 +162,8 @@ function ToolCard({
 }) {
   const [expanded, setExpanded] = useState(false);
   const openArtifact = useChatStore((state) => state.openArtifact);
-  const detailText = toolCall.detail?.trim() ? toolCall.detail : "暂无详情";
-  const resultText = toolCall.result?.trim() ? toolCall.result : "暂无返回结果";
+  const detailText = toolCall.detail?.trim() ? toolCall.detail : "No details";
+  const resultText = toolCall.result?.trim() ? toolCall.result : "No result";
   const shownArtifactId =
     getShownArtifactId(toolCall) ??
     inferArtifactIdFromMessageWindow(
@@ -225,9 +205,12 @@ function ToolCard({
           type="button"
           aria-expanded={expanded}
           onClick={() => setExpanded((value) => !value)}
-          className="shrink-0 rounded px-1 text-xs text-neutral-400 hover:text-neutral-700 dark:hover:text-neutral-200"
+          className="shrink-0 rounded p-1 text-neutral-400 hover:text-neutral-700 dark:hover:text-neutral-200"
         >
-          {expanded ? "v" : ">"}
+          <AppIcon
+            icon={expanded ? ChevronDown : ChevronRight}
+            className="h-4 w-4"
+          />
         </button>
       </div>
       {expanded && (
@@ -266,9 +249,7 @@ export function MessageView({ message }: { message: Message }) {
   const client = useChatStore((state) => state.client);
   const openArtifact = useChatStore((state) => state.openArtifact);
   const closeArtifact = useChatStore((state) => state.closeArtifact);
-  const restartFromMessage = useChatStore(
-    (state) => state.restartFromMessage,
-  );
+  const restartFromMessage = useChatStore((state) => state.restartFromMessage);
   const artifacts = useChatStore((state) => state.artifacts);
   const sessionMessages = useChatStore(
     (state) => state.buckets[message.sessionId]?.messages ?? [],
@@ -322,7 +303,9 @@ export function MessageView({ message }: { message: Message }) {
     }
     if (
       hasFollowingMessages &&
-      !window.confirm("后续消息和生成内容将被清除，确认保存并重开？")
+      !window.confirm(
+        "Later messages and generated content will be removed. Save and restart?",
+      )
     ) {
       return;
     }
@@ -348,26 +331,24 @@ export function MessageView({ message }: { message: Message }) {
     >
       <div className="mx-auto max-w-3xl">
         <div className="mb-1 flex items-center gap-2 text-xs font-semibold text-neutral-500">
-          <span>{isUser ? "用户" : "助手"}</span>
+          <span>{isUser ? "User" : "Assistant"}</span>
           {message.status === "streaming" && (
-            <span className="animate-pulse text-emerald-600">生成中</span>
+            <span className="animate-pulse text-emerald-600">Streaming</span>
           )}
-          {message.status === "error" && (
-            <span className="text-red-500">出错</span>
-          )}
+          {message.status === "error" && <span className="text-red-500">Error</span>}
           {message.status === "stopped" && (
-            <span className="text-neutral-400">已停止</span>
+            <span className="text-neutral-400">Stopped</span>
           )}
           {isUser && (
-            <span className="ml-auto hidden shrink-0 group-hover:flex">
+            <span className="ml-auto flex shrink-0 opacity-0 transition-opacity pointer-events-none group-hover:opacity-100 group-hover:pointer-events-auto">
               <button
                 type="button"
-                title="编辑重开"
+                title="Edit and restart"
                 onClick={beginEditing}
                 disabled={running || saving || editing}
-                className="rounded px-1 text-neutral-500 hover:text-neutral-900 disabled:cursor-not-allowed disabled:opacity-40 dark:hover:text-neutral-100"
+                className="rounded p-1 text-neutral-500 hover:text-neutral-900 disabled:cursor-not-allowed disabled:opacity-40 dark:hover:text-neutral-100"
               >
-                ✎
+                <AppIcon icon={PencilLine} className="h-4 w-4" />
               </button>
             </span>
           )}
@@ -379,14 +360,14 @@ export function MessageView({ message }: { message: Message }) {
               attachment.kind === "image" ? (
                 <img
                   key={attachment.id}
-                  src={client.fileUrl(attachment.id)}
+                  src={client.fileUrl(attachment.workspaceId, attachment.id)}
                   alt={attachment.name}
                   className="max-h-40 rounded-md border border-neutral-200 dark:border-neutral-700"
                 />
               ) : (
                 <a
                   key={attachment.id}
-                  href={client.fileUrl(attachment.id)}
+                  href={client.fileUrl(attachment.workspaceId, attachment.id)}
                   target="_blank"
                   rel="noreferrer"
                   className="rounded-full border border-neutral-300 px-3 py-1 text-xs hover:bg-neutral-100 dark:border-neutral-600 dark:hover:bg-neutral-800"
@@ -418,7 +399,7 @@ export function MessageView({ message }: { message: Message }) {
               className="w-full resize-y rounded-md border border-neutral-300 bg-white px-3 py-2 text-sm outline-none focus:border-neutral-500 disabled:opacity-60 dark:border-neutral-600 dark:bg-neutral-950"
             />
             <div className="mt-2 text-xs text-neutral-500">
-              本次仅支持修改文本，附件将保持不变。
+              Editing currently supports text only. Existing attachments stay unchanged.
             </div>
             {submitError && (
               <div className="mt-2 text-xs text-red-500">{submitError}</div>
@@ -430,7 +411,7 @@ export function MessageView({ message }: { message: Message }) {
                 disabled={saving}
                 className="rounded-md border border-neutral-300 px-3 py-1.5 text-sm hover:bg-neutral-100 disabled:opacity-40 dark:border-neutral-600 dark:hover:bg-neutral-800"
               >
-                取消
+                Cancel
               </button>
               <button
                 type="button"
@@ -438,7 +419,7 @@ export function MessageView({ message }: { message: Message }) {
                 disabled={!draft.trim() || saving || running}
                 className="rounded-md bg-neutral-900 px-3 py-1.5 text-sm text-white hover:bg-neutral-700 disabled:opacity-40 dark:bg-neutral-100 dark:text-neutral-900 dark:hover:bg-neutral-300"
               >
-                {saving ? "重开中..." : "保存并重开"}
+                {saving ? "Restarting..." : "Save and restart"}
               </button>
             </div>
           </div>
@@ -479,15 +460,15 @@ export function MessageView({ message }: { message: Message }) {
                   onClick={() => openArtifact(artifactId, message.sessionId)}
                   className="px-3 py-1 text-xs hover:bg-neutral-100 dark:hover:bg-neutral-800"
                 >
-                {artifacts[artifactId]?.title ?? "查看内容"}
+                  {artifacts[artifactId]?.title ?? "View artifact"}
                 </button>
                 <button
                   type="button"
                   title="Open in new window"
                   onClick={() => popOutArtifact(artifactId)}
-                  className="border-l border-neutral-300 px-2 py-1 text-[11px] text-neutral-500 hover:bg-neutral-100 hover:text-neutral-900 dark:border-neutral-600 dark:hover:bg-neutral-800 dark:hover:text-neutral-100"
+                  className="border-l border-neutral-300 px-2 py-1 text-neutral-500 hover:bg-neutral-100 hover:text-neutral-900 dark:border-neutral-600 dark:hover:bg-neutral-800 dark:hover:text-neutral-100"
                 >
-                  Open
+                  <AppIcon icon={ExternalLink} className="h-3.5 w-3.5" />
                 </button>
               </div>
             ))}

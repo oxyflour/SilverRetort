@@ -9,6 +9,7 @@
     ".": "./src/index.ts"
   },
   "dependencies": {
+    "lucide-react": "^1.24.0",
     "react-markdown": "^10.1.0",
     "react-resizable-panels": "^3.0.3",
     "rehype-highlight": "^7.0.2",
