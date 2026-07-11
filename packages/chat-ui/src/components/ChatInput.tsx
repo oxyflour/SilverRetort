@@ -117,10 +117,7 @@ export function ChatInput() {
               }
             >
               {running ? (
-                <>
-                  <StopIcon />
-                  <span>{"\u505c\u6b62"}</span>
-                </>
+                <StopIcon />
               ) : (
                 <SendIcon />
               )}
