@@ -119,12 +119,14 @@ function resolveHermesMode(
     }
     const apiKey = randomApiKeyFn();
     const url = `http://127.0.0.1:${hermesPort}`;
+    const workspacesDir = ensureDir(path.join(config.dataDir, "hermes-workspaces"));
     return {
         mode: "local",
         url,
         apiKey,
         healthUrl: `${url}/health`,
         runtime,
+        workspacesDir,
         env: {
             LISTEN_PORT: `${hermesPort}`,
             HERMES_API_KEY: apiKey,
@@ -132,7 +134,7 @@ function resolveHermesMode(
             HERMES_HOME: ensureDir(path.join(config.dataDir, "hermes-home")),
             HERMES_ENV_FILE: config.envPath,
             HERMES_RELAY_ENABLED: "1",
-            HERMES_WORKSPACES_DIR: ensureDir(path.join(config.dataDir, "hermes-workspaces")),
+            HERMES_WORKSPACES_DIR: workspacesDir,
         },
     };
 }

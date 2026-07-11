@@ -1,6 +1,8 @@
-"""Coordinates local workspace metadata with Hermes-side storage."""
+"""Local/remote workspace storage access with one confinement policy."""
 
+import mimetypes
 import os
+from pathlib import Path, PurePosixPath
 from typing import AsyncIterator
 from urllib.parse import quote
 
@@ -17,7 +19,70 @@ def _headers() -> dict[str, str]:
     return {"authorization": f"Bearer {key}"} if key else {}
 
 
+def _local_root() -> Path | None:
+    value = os.getenv("LOCAL_HERMES_WORKSPACES_DIR", "").strip()
+    return Path(value).resolve() if value else None
+
+
+def normalize_relative_path(raw: str) -> str:
+    value = raw.replace("\\", "/").strip()
+    path = PurePosixPath(value)
+    if not value or path.is_absolute() or any(part in {"", ".", ".."} for part in path.parts):
+        raise ValueError("invalid workspace-relative path")
+    if len(path.parts[0]) == 2 and path.parts[0][1] == ":":
+        raise ValueError("absolute paths are not allowed")
+    return path.as_posix()
+
+
+def resolve_artifact_asset(entry_path: str, asset_path: str | None = None) -> str:
+    entry = PurePosixPath(normalize_relative_path(entry_path))
+    if not asset_path:
+        return entry.as_posix()
+    asset = PurePosixPath(normalize_relative_path(asset_path))
+    resolved = entry.parent / asset
+    if not resolved.is_relative_to(entry.parent):
+        raise ValueError("artifact asset escapes entry directory")
+    return resolved.as_posix()
+
+
+def local_file_path(workspace_id: str, relative_path: str) -> Path | None:
+    root = _local_root()
+    if root is None:
+        return None
+    if not workspace_id or any(char not in "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_-" for char in workspace_id):
+        raise ValueError("invalid workspace id")
+    workspace = (root / workspace_id).resolve()
+    if (root / workspace_id).is_symlink() or not workspace.is_relative_to(root):
+        raise ValueError("workspace escapes local root")
+    candidate = workspace.joinpath(*PurePosixPath(normalize_relative_path(relative_path)).parts)
+    resolved = candidate.resolve()
+    if not resolved.is_relative_to(workspace) or candidate.is_symlink():
+        raise ValueError("path escapes workspace")
+    return resolved
+
+
+def _metadata(workspace_id: str, relative_path: str, size: int, mime_type: str | None = None) -> dict:
+    normalized = normalize_relative_path(relative_path)
+    name = PurePosixPath(normalized).name
+    mime = mime_type or mimetypes.guess_type(name)[0] or "application/octet-stream"
+    return {
+        "workspaceId": workspace_id,
+        "relativePath": normalized,
+        "name": name,
+        "mimeType": mime,
+        "size": size,
+        "kind": "image" if mime.startswith("image/") else "file",
+    }
+
+
+def remote_file_url(workspace_id: str, relative_path: str) -> str:
+    encoded = "/".join(quote(part, safe="") for part in normalize_relative_path(relative_path).split("/"))
+    return f"{_base_url()}/workspace-api/workspaces/{quote(workspace_id)}/files/{encoded}"
+
+
 async def capability() -> dict:
+    if _local_root() is not None:
+        return {"supported": True, "version": 1, "writable": True, "cwdEnforced": False}
     if not _base_url():
         return {"supported": False, "version": 0, "writable": False, "cwdEnforced": False}
     try:
@@ -30,30 +95,57 @@ async def capability() -> dict:
 
 
 async def create_remote(workspace_id: str) -> None:
+    local_root = _local_root()
+    if local_root is not None:
+        (local_root / workspace_id).mkdir(parents=True, exist_ok=True)
+        return
     async with httpx.AsyncClient(timeout=15) as client:
-        response = await client.put(
-            f"{_base_url()}/workspace-api/workspaces/{quote(workspace_id)}", headers=_headers()
-        )
+        response = await client.put(f"{_base_url()}/workspace-api/workspaces/{quote(workspace_id)}", headers=_headers())
         response.raise_for_status()
 
 
 async def delete_remote(workspace_id: str) -> None:
+    local_root = _local_root()
+    if local_root is not None:
+        import shutil
+        path = local_root / workspace_id
+        if path.is_dir():
+            shutil.rmtree(path)
+        return
     async with httpx.AsyncClient(timeout=30) as client:
-        response = await client.delete(
-            f"{_base_url()}/workspace-api/workspaces/{quote(workspace_id)}", headers=_headers()
-        )
+        response = await client.delete(f"{_base_url()}/workspace-api/workspaces/{quote(workspace_id)}", headers=_headers())
         response.raise_for_status()
 
 
-async def upload_remote(workspace_id: str, file: UploadFile) -> dict:
+async def upload_file(workspace_id: str, file: UploadFile) -> dict:
+    root = _local_root()
+    filename = Path((file.filename or "upload").replace("\\", "/")).name or "upload"
+    if root is not None:
+        upload_dir = root / workspace_id / "uploads"
+        upload_dir.mkdir(parents=True, exist_ok=True)
+        target = upload_dir / filename
+        counter = 2
+        while target.exists():
+            target = upload_dir / f"{Path(filename).stem}-{counter}{Path(filename).suffix}"
+            counter += 1
+        size = 0
+        try:
+            with target.open("xb") as output:
+                while chunk := await file.read(1024 * 1024):
+                    output.write(chunk)
+                    size += len(chunk)
+        except Exception:
+            target.unlink(missing_ok=True)
+            raise
+        return _metadata(workspace_id, target.relative_to(root / workspace_id).as_posix(), size, file.content_type)
+
     async def chunks() -> AsyncIterator[bytes]:
         while chunk := await file.read(1024 * 1024):
             yield chunk
 
-    filename = file.filename or "upload"
     headers = _headers() | {
         "content-type": file.content_type or "application/octet-stream",
-        "x-silverretort-filename": filename,
+        "x-silverretort-filename": quote(filename, safe=""),
     }
     async with httpx.AsyncClient(timeout=httpx.Timeout(None, connect=10)) as client:
         response = await client.post(
@@ -61,9 +153,65 @@ async def upload_remote(workspace_id: str, file: UploadFile) -> dict:
             headers=headers, content=chunks(),
         )
         response.raise_for_status()
-        return response.json()
+        result = response.json()
+    return _metadata(workspace_id, str(result["relativePath"]), int(result["size"]), file.content_type)
 
 
-def remote_file_url(workspace_id: str, relative_path: str) -> str:
-    encoded = "/".join(quote(part, safe="") for part in relative_path.split("/"))
-    return f"{_base_url()}/workspace-api/workspaces/{quote(workspace_id)}/files/{encoded}"
+async def stat_workspace_file(workspace_id: str, relative_path: str) -> dict:
+    local = local_file_path(workspace_id, relative_path)
+    if local is not None:
+        if not local.is_file():
+            raise FileNotFoundError(relative_path)
+        return _metadata(workspace_id, relative_path, local.stat().st_size)
+    async with httpx.AsyncClient(timeout=15) as client:
+        response = await client.head(remote_file_url(workspace_id, relative_path), headers=_headers())
+        if response.status_code == 404:
+            raise FileNotFoundError(relative_path)
+        response.raise_for_status()
+        return _metadata(
+            workspace_id, relative_path, int(response.headers.get("content-length", "0")),
+            response.headers.get("content-type", "").split(";", 1)[0] or None,
+        )
+
+
+def stat_workspace_file_sync(workspace_id: str, relative_path: str) -> dict:
+    local = local_file_path(workspace_id, relative_path)
+    if local is not None:
+        if not local.is_file():
+            raise FileNotFoundError(relative_path)
+        return _metadata(workspace_id, relative_path, local.stat().st_size)
+    with httpx.Client(timeout=15) as client:
+        response = client.head(remote_file_url(workspace_id, relative_path), headers=_headers())
+        if response.status_code == 404:
+            raise FileNotFoundError(relative_path)
+        response.raise_for_status()
+        return _metadata(
+            workspace_id, relative_path, int(response.headers.get("content-length", "0")),
+            response.headers.get("content-type", "").split(";", 1)[0] or None,
+        )
+
+
+async def list_workspace_files(workspace_id: str) -> list[dict]:
+    root = _local_root()
+    if root is not None:
+        workspace = (root / workspace_id).resolve()
+        if not workspace.is_dir():
+            raise FileNotFoundError(workspace_id)
+        return [
+            await stat_workspace_file(workspace_id, path.relative_to(workspace).as_posix())
+            for path in workspace.rglob("*") if path.is_file() and not path.is_symlink()
+        ]
+    async with httpx.AsyncClient(timeout=30) as client:
+        response = await client.get(
+            f"{_base_url()}/workspace-api/workspaces/{quote(workspace_id)}/files", headers=_headers()
+        )
+        response.raise_for_status()
+        return list(response.json())
+
+
+async def open_remote_file(workspace_id: str, relative_path: str) -> tuple[httpx.AsyncClient, httpx.Response]:
+    client = httpx.AsyncClient(timeout=httpx.Timeout(None, connect=10))
+    response = await client.send(
+        client.build_request("GET", remote_file_url(workspace_id, relative_path), headers=_headers()), stream=True
+    )
+    return client, response

@@ -104,8 +104,9 @@ export class ApiClient {
     return this.request(ArtifactSchema, `/api/artifacts/${artifactId}`);
   }
 
-  artifactContentUrl(artifactId: string): string {
-    return `${this.baseUrl}/api/artifacts/${artifactId}/content`;
+  artifactContentUrl(artifactId: string, assetPath?: string): string {
+    const base = `${this.baseUrl}/api/artifacts/${encodeURIComponent(artifactId)}/content/`;
+    return assetPath ? `${base}/${encodePath(assetPath)}` : base;
   }
 
   sendChat(sessionId: string, body: SendChatRequest): Promise<SendChatResponse> {
@@ -150,11 +151,15 @@ export class ApiClient {
     return this.request(z.array(AttachmentSchema), `/api/workspaces/${workspaceId}/files`);
   }
 
-  fileUrl(workspaceId: string, id: string): string {
-    return `${this.baseUrl}/api/workspaces/${workspaceId}/files/${id}`;
+  fileUrl(workspaceId: string, relativePath: string): string {
+    return `${this.baseUrl}/api/workspaces/${encodeURIComponent(workspaceId)}/files/content/${encodePath(relativePath)}`;
   }
 
   eventsUrl(): string {
     return `${this.baseUrl}/api/events`;
   }
+}
+
+function encodePath(path: string): string {
+  return path.split("/").map((part) => encodeURIComponent(part)).join("/");
 }

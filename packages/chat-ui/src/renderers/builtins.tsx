@@ -1,17 +1,20 @@
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
+import { IframeArtifactPayloadSchema } from "silverretort-protocol";
 import { registerArtifactRenderer, ArtifactRendererProps } from "../registry";
 
-/** iframe artifact payload：{ url } 或 { html } 二选一 */
 function IframeRenderer({ artifact }: ArtifactRendererProps) {
-  const payload = artifact.payload as { url?: string; html?: string };
+  const parsed = IframeArtifactPayloadSchema.safeParse(artifact.payload);
+  if (!parsed.success) {
+    return <div className="flex h-full items-center justify-center p-4 text-sm text-red-500">Invalid iframe artifact path</div>;
+  }
 
   return (
     <iframe
       title={artifact.title}
       className="h-full w-full border-0 bg-white"
-      sandbox="allow-scripts allow-forms allow-popups allow-modals allow-downloads allow-same-origin"
-      src={payload.url ?? `/api/artifacts/${encodeURIComponent(artifact.id)}/content`}
+      sandbox="allow-scripts allow-forms allow-popups allow-modals allow-downloads"
+      src={`/api/artifacts/${encodeURIComponent(artifact.id)}/content/`}
     />
   );
 }

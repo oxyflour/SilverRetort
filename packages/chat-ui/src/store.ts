@@ -51,7 +51,7 @@ interface ChatState {
   restartFromMessage: (messageId: string, text: string) => Promise<void>;
   stopRun: (sessionId: string) => Promise<void>;
   addAttachment: (file: File) => Promise<void>;
-  removeAttachment: (id: string) => void;
+  removeAttachment: (workspaceId: string, relativePath: string) => void;
   openArtifact: (id: string, sessionId?: string) => void;
   closeArtifact: (id: string) => void;
   setPanelOpen: (open: boolean) => void;
@@ -441,7 +441,7 @@ export const useChatStore = create<ChatState>((set, get) => {
       set({ pendingAttachments: [] });
       const response = await get().client.sendChat(sessionId, {
         text,
-        attachmentIds: attachments.map((attachment) => attachment.id),
+        attachments,
       });
       const now = new Date().toISOString();
       withBucket(sessionId, (bucket) => ({
@@ -575,14 +575,20 @@ export const useChatStore = create<ChatState>((set, get) => {
       if (!session) return;
       const attachment = await get().client.uploadFile(session.workspaceId, file);
       set((state) => ({
-        pendingAttachments: [...state.pendingAttachments, attachment],
+        pendingAttachments: [
+          ...state.pendingAttachments.filter((current) =>
+            current.workspaceId !== attachment.workspaceId ||
+            current.relativePath !== attachment.relativePath
+          ),
+          attachment,
+        ],
       }));
     },
 
-    removeAttachment: (id) => {
+    removeAttachment: (workspaceId, relativePath) => {
       set((state) => ({
         pendingAttachments: state.pendingAttachments.filter(
-          (attachment) => attachment.id !== id,
+          (attachment) => attachment.workspaceId !== workspaceId || attachment.relativePath !== relativePath,
         ),
       }));
     },

@@ -5,6 +5,7 @@
 
 import json
 import os
+import shutil
 import sqlite3
 import threading
 from dataclasses import dataclass
@@ -39,12 +40,6 @@ def data_dir() -> Path:
     return path
 
 
-def files_dir() -> Path:
-    path = data_dir() / "files"
-    path.mkdir(parents=True, exist_ok=True)
-    return path
-
-
 def now_iso() -> str:
     return datetime.now(timezone.utc).isoformat()
 
@@ -75,17 +70,6 @@ CREATE TABLE IF NOT EXISTS messages (
     created_at TEXT NOT NULL
 );
 CREATE INDEX IF NOT EXISTS idx_messages_session ON messages(session_id, created_at);
-CREATE TABLE IF NOT EXISTS files (
-    id TEXT PRIMARY KEY,
-    workspace_id TEXT NOT NULL,
-    relative_path TEXT NOT NULL,
-    name TEXT NOT NULL,
-    mime_type TEXT NOT NULL,
-    size INTEGER NOT NULL,
-    kind TEXT NOT NULL,
-    path TEXT NOT NULL,
-    created_at TEXT NOT NULL
-);
 CREATE TABLE IF NOT EXISTS artifacts (
     id TEXT PRIMARY KEY,
     session_id TEXT NOT NULL,
@@ -124,17 +108,14 @@ def _migrate(conn: sqlite3.Connection) -> None:
         conn.execute("ALTER TABLE sessions ADD COLUMN workspace_id TEXT")
     conn.execute("UPDATE sessions SET workspace_id = ? WHERE workspace_id IS NULL OR workspace_id = ''", (default_id,))
     conn.execute("CREATE INDEX IF NOT EXISTS idx_sessions_workspace ON sessions(workspace_id, updated_at)")
-    file_columns = _columns(conn, "files")
-    if "workspace_id" not in file_columns:
-        conn.execute("ALTER TABLE files ADD COLUMN workspace_id TEXT")
-    if "relative_path" not in file_columns:
-        conn.execute("ALTER TABLE files ADD COLUMN relative_path TEXT")
-    conn.execute("UPDATE files SET workspace_id = ? WHERE workspace_id IS NULL OR workspace_id = ''", (default_id,))
-    conn.execute("UPDATE files SET relative_path = name WHERE relative_path IS NULL OR relative_path = ''")
+    conn.execute("DROP TABLE IF EXISTS files")
     for row in conn.execute("SELECT id, attachments FROM messages WHERE attachments != '[]'").fetchall():
         attachments = json.loads(row["attachments"])
         changed = False
         for attachment in attachments:
+            if "id" in attachment:
+                attachment.pop("id", None)
+                changed = True
             if "workspaceId" not in attachment:
                 attachment["workspaceId"] = default_id
                 attachment["relativePath"] = attachment.get("name") or attachment.get("id")
@@ -144,6 +125,9 @@ def _migrate(conn: sqlite3.Connection) -> None:
                 "UPDATE messages SET attachments = ? WHERE id = ?",
                 (json.dumps(attachments, ensure_ascii=False), row["id"]),
             )
+    legacy_files = data_dir() / "files"
+    if legacy_files.is_dir():
+        shutil.rmtree(legacy_files)
 
 
 def _execute(sql: str, params: tuple = ()) -> sqlite3.Cursor:
@@ -233,7 +217,6 @@ def delete_workspace(workspace_id: str) -> None:
             placeholders = ",".join("?" for _ in session_ids)
             conn.execute(f"DELETE FROM messages WHERE session_id IN ({placeholders})", tuple(session_ids))
             conn.execute(f"DELETE FROM artifacts WHERE session_id IN ({placeholders})", tuple(session_ids))
-        conn.execute("DELETE FROM files WHERE workspace_id = ?", (workspace_id,))
         conn.execute("DELETE FROM sessions WHERE workspace_id = ?", (workspace_id,))
         conn.execute("DELETE FROM workspaces WHERE id = ?", (workspace_id,))
         conn.commit()
@@ -387,37 +370,6 @@ def restart_message(session_id: str, message_id: str, text: str) -> RestartMessa
         old_text=old_text,
         was_first_user_message=target_index == first_user_index,
     )
-
-
-# ---- files ----
-
-def insert_file(attachment: Attachment, path: str = "") -> None:
-    _execute(
-        "INSERT INTO files (id, name, mime_type, size, kind, path, created_at, workspace_id, relative_path) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
-        (attachment.id, attachment.name, attachment.mime_type, attachment.size, attachment.kind, path, now_iso(), attachment.workspace_id, attachment.relative_path),
-    )
-
-
-def get_file(file_id: str) -> tuple[Attachment, str] | None:
-    rows = _query("SELECT * FROM files WHERE id = ?", (file_id,))
-    if not rows:
-        return None
-    row = rows[0]
-    attachment = Attachment(
-        id=row["id"], workspace_id=row["workspace_id"], relative_path=row["relative_path"],
-        name=row["name"], mime_type=row["mime_type"], size=row["size"], kind=row["kind"]
-    )
-    return attachment, row["path"]
-
-
-def list_files(workspace_id: str) -> list[Attachment]:
-    result: list[Attachment] = []
-    for row in _query("SELECT * FROM files WHERE workspace_id = ? ORDER BY created_at", (workspace_id,)):
-        result.append(Attachment(
-            id=row["id"], workspace_id=row["workspace_id"], relative_path=row["relative_path"],
-            name=row["name"], mime_type=row["mime_type"], size=row["size"], kind=row["kind"],
-        ))
-    return result
 
 
 # ---- artifacts ----

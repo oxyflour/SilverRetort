@@ -5,6 +5,7 @@ from typing import Any, Callable
 
 import db
 import events
+import workspace_service
 from models import Artifact
 
 BUILTIN_RENDER_TYPES = ["iframe", "image", "markdown"]
@@ -27,6 +28,21 @@ def validate_render_type(type: str) -> str | None:
     return f"error: unsupported artifact type: {type}; supported types: {supported}"
 
 
+def validate_iframe_payload(session_id: str, payload: Any) -> str | None:
+    if not isinstance(payload, dict) or set(payload) != {"path"} or not isinstance(payload.get("path"), str):
+        return "error: iframe payload must be exactly {path: <workspace-relative path>}"
+    session = db.get_session(session_id)
+    if session is None:
+        return f"error: session not found: {session_id}"
+    try:
+        workspace_service.stat_workspace_file_sync(session.workspace_id, payload["path"])
+    except (ValueError, FileNotFoundError):
+        return f"error: workspace file not found: {payload['path']}"
+    except Exception as exc:
+        return f"error: workspace file unavailable: {exc}"
+    return None
+
+
 def ui_show_artifact(
     session_id: str, type: str, title: str, payload: dict[str, Any] | None = None
 ) -> str:
@@ -36,6 +52,10 @@ def ui_show_artifact(
     type_error = validate_render_type(type)
     if type_error is not None:
         return type_error
+    if type == "iframe":
+        payload_error = validate_iframe_payload(session_id, payload)
+        if payload_error is not None:
+            return payload_error
     artifact = Artifact(
         id=uuid.uuid4().hex,
         session_id=session_id,
@@ -57,6 +77,10 @@ def ui_update_artifact(artifact_id: str, payload: dict[str, Any]) -> str:
     artifact = db.get_artifact(artifact_id)
     if artifact is None:
         return f"error: artifact not found: {artifact_id}"
+    if artifact.type == "iframe":
+        payload_error = validate_iframe_payload(artifact.session_id, payload)
+        if payload_error is not None:
+            return payload_error
     artifact.payload = payload
     db.upsert_artifact(artifact)
     events.broadcast(

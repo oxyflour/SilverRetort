@@ -1,6 +1,7 @@
 """Hermes-side workspace storage with strict path confinement."""
 
 import os
+import mimetypes
 import re
 import shutil
 from pathlib import Path, PurePosixPath
@@ -20,6 +21,8 @@ def workspace_dir(workspace_id: str, create: bool = False) -> Path:
     path = root_dir() / workspace_id
     if create:
         path.mkdir(parents=True, exist_ok=True)
+    if path.is_symlink() or not path.resolve().is_relative_to(root_dir()):
+        raise ValueError("workspace escapes storage root")
     return path
 
 
@@ -35,10 +38,38 @@ def file_path(workspace_id: str, relative_path: str) -> Path:
     workspace = workspace_dir(workspace_id)
     relative = safe_relative_path(relative_path)
     candidate = workspace.joinpath(*relative.parts)
-    resolved_parent = candidate.parent.resolve()
-    if not resolved_parent.is_relative_to(workspace.resolve()):
+    resolved = candidate.resolve()
+    if not resolved.is_relative_to(workspace.resolve()):
         raise ValueError("path escapes workspace")
-    return candidate
+    if candidate.is_symlink():
+        raise ValueError("symbolic links are not allowed")
+    return resolved
+
+
+def file_metadata(workspace_id: str, relative_path: str) -> dict:
+    path = file_path(workspace_id, relative_path)
+    if not path.is_file():
+        raise FileNotFoundError(relative_path)
+    mime_type = mimetypes.guess_type(path.name)[0] or "application/octet-stream"
+    return {
+        "workspaceId": workspace_id,
+        "relativePath": safe_relative_path(relative_path).as_posix(),
+        "name": path.name,
+        "mimeType": mime_type,
+        "size": path.stat().st_size,
+        "kind": "image" if mime_type.startswith("image/") else "file",
+    }
+
+
+def list_files(workspace_id: str) -> list[dict]:
+    root = workspace_dir(workspace_id)
+    if not root.is_dir():
+        raise FileNotFoundError(workspace_id)
+    result = []
+    for path in root.rglob("*"):
+        if path.is_file() and not path.is_symlink():
+            result.append(file_metadata(workspace_id, path.relative_to(root).as_posix()))
+    return result
 
 
 def unique_upload_path(workspace_id: str, filename: str) -> tuple[Path, str]:

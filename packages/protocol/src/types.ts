@@ -3,7 +3,6 @@ import { z } from "zod";
 // ---- 基础实体 ----
 
 export const AttachmentSchema = z.object({
-  id: z.string(),
   workspaceId: z.string(),
   relativePath: z.string(),
   name: z.string(),
@@ -12,6 +11,13 @@ export const AttachmentSchema = z.object({
   kind: z.enum(["image", "file"]),
 });
 export type Attachment = z.infer<typeof AttachmentSchema>;
+export const WorkspaceFileSchema = AttachmentSchema;
+export type WorkspaceFile = Attachment;
+
+export const IframeArtifactPayloadSchema = z.object({
+  path: z.string().min(1),
+});
+export type IframeArtifactPayload = z.infer<typeof IframeArtifactPayloadSchema>;
 
 export const WorkspaceSchema = z.object({
   id: z.string(),
@@ -154,7 +160,7 @@ export type WorkspaceCapability = z.infer<typeof WorkspaceCapabilitySchema>;
 
 export const SendChatRequestSchema = z.object({
   text: z.string(),
-  attachmentIds: z.array(z.string()).default([]),
+  attachments: z.array(AttachmentSchema).default([]),
 });
 export type SendChatRequest = z.infer<typeof SendChatRequestSchema>;
 

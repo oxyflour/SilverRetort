@@ -1,15 +1,14 @@
 """REST API + 常驻事件通道。路径与 packages/protocol 的 ApiClient 一一对应。"""
 
 import mimetypes
-import os
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 import uuid
-from urllib.parse import unquote, urlparse
+from urllib.parse import quote, unquote, urlparse
 from urllib.request import url2pathname
 
 import httpx
 from fastapi import APIRouter, HTTPException, UploadFile
-from fastapi.responses import FileResponse, HTMLResponse, StreamingResponse
+from fastapi.responses import FileResponse, StreamingResponse
 from sse_starlette.sse import EventSourceResponse
 
 import db
@@ -160,18 +159,70 @@ def get_artifact(artifact_id: str) -> Artifact:
     return artifact
 
 
+async def _workspace_file_response(
+    workspace_id: str,
+    relative_path: str,
+    *,
+    download_name: str | None = None,
+    no_cache: bool = False,
+):
+    try:
+        metadata = await workspace_service.stat_workspace_file(workspace_id, relative_path)
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from exc
+    except FileNotFoundError as exc:
+        raise HTTPException(404, "file not found") from exc
+    headers = {"X-Content-Type-Options": "nosniff"}
+    if no_cache:
+        headers["Cache-Control"] = "no-cache"
+        headers["Access-Control-Allow-Origin"] = "*"
+        headers["Cross-Origin-Resource-Policy"] = "cross-origin"
+    if download_name:
+        headers["Content-Disposition"] = f"attachment; filename*=UTF-8''{quote(Path(download_name).name)}"
+    local_path = workspace_service.local_file_path(workspace_id, relative_path)
+    if local_path is not None:
+        return FileResponse(local_path, media_type=metadata["mimeType"], headers=headers)
+    try:
+        client, response = await workspace_service.open_remote_file(workspace_id, relative_path)
+    except httpx.HTTPError as exc:
+        raise HTTPException(503, f"workspace file service unavailable: {exc}") from exc
+    if response.status_code == 404:
+        await response.aclose(); await client.aclose()
+        raise HTTPException(404, "file not found")
+    if response.status_code != 200:
+        status = response.status_code
+        await response.aclose(); await client.aclose()
+        raise HTTPException(503, f"workspace file service returned {status}")
+    async def stream():
+        try:
+            async for chunk in response.aiter_raw():
+                yield chunk
+        finally:
+            await response.aclose(); await client.aclose()
+    headers["Content-Length"] = str(metadata["size"])
+    return StreamingResponse(stream(), media_type=metadata["mimeType"], headers=headers)
+
+
 @router.get("/artifacts/{artifact_id}/content")
-def get_artifact_content(artifact_id: str) -> HTMLResponse:
+@router.get("/artifacts/{artifact_id}/content/")
+@router.get("/artifacts/{artifact_id}/content/{asset_path:path}")
+async def get_artifact_content(artifact_id: str, asset_path: str | None = None):
     artifact = db.get_artifact(artifact_id)
     if artifact is None:
         raise HTTPException(404, "artifact not found")
+    if artifact.type != "iframe":
+        raise HTTPException(400, "artifact is not an iframe")
     payload = artifact.payload
-    if not isinstance(payload, dict):
-        raise HTTPException(400, "artifact does not contain inline HTML")
-    html = payload.get("html")
-    if not isinstance(html, str):
-        raise HTTPException(400, "artifact does not contain inline HTML")
-    return HTMLResponse(html)
+    if not isinstance(payload, dict) or not isinstance(payload.get("path"), str):
+        raise HTTPException(400, "iframe artifact requires payload.path")
+    session = db.get_session(artifact.session_id)
+    if session is None:
+        raise HTTPException(404, "artifact session not found")
+    try:
+        relative_path = workspace_service.resolve_artifact_asset(payload["path"], asset_path)
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from exc
+    return await _workspace_file_response(session.workspace_id, relative_path, no_cache=True)
 
 
 # ---- chat run ----
@@ -185,11 +236,14 @@ async def send_chat(session_id: str, body: SendChatRequest) -> SendChatResponse:
         raise HTTPException(409, "session already has an active run")
 
     attachments = []
-    for file_id in body.attachment_ids:
-        found = db.get_file(file_id)
-        if found is None:
-            raise HTTPException(400, f"attachment not found: {file_id}")
-        attachments.append(found[0])
+    for requested in body.attachments:
+        if requested.workspace_id != session.workspace_id:
+            raise HTTPException(400, "attachment belongs to another workspace")
+        try:
+            metadata = await workspace_service.stat_workspace_file(session.workspace_id, requested.relative_path)
+        except (ValueError, FileNotFoundError) as exc:
+            raise HTTPException(400, f"attachment not found: {requested.relative_path}") from exc
+        attachments.append(Attachment.model_validate(metadata))
 
     history = db.list_messages(session_id)
     now = db.now_iso()
@@ -274,54 +328,32 @@ async def stop_run(session_id: str) -> dict[str, bool]:
 async def upload_file(workspace_id: str, file: UploadFile) -> Attachment:
     if db.get_workspace(workspace_id) is None:
         raise HTTPException(404, "workspace not found")
-    file_id = uuid.uuid4().hex
-    mime = file.content_type or "application/octet-stream"
     try:
-        result = await workspace_service.upload_remote(workspace_id, file)
+        result = await workspace_service.upload_file(workspace_id, file)
     except Exception as exc:
         raise HTTPException(503, f"file upload failed: {exc}") from exc
-    attachment = Attachment(
-        id=file_id,
-        workspace_id=workspace_id,
-        relative_path=str(result["relativePath"]),
-        name=file.filename or file_id,
-        mime_type=mime,
-        size=int(result["size"]),
-        kind="image" if mime.startswith("image/") else "file",
-    )
-    db.insert_file(attachment)
-    return attachment
+    return Attachment.model_validate(result)
 
 
 @router.get("/workspaces/{workspace_id}/files")
-def list_workspace_files(workspace_id: str) -> list[Attachment]:
+async def list_workspace_files(workspace_id: str) -> list[Attachment]:
     if db.get_workspace(workspace_id) is None:
         raise HTTPException(404, "workspace not found")
-    return db.list_files(workspace_id)
+    try:
+        return [Attachment.model_validate(item) for item in await workspace_service.list_workspace_files(workspace_id)]
+    except FileNotFoundError as exc:
+        raise HTTPException(404, "workspace not found") from exc
+    except httpx.HTTPError as exc:
+        raise HTTPException(503, f"workspace file service unavailable: {exc}") from exc
 
 
-@router.get("/workspaces/{workspace_id}/files/{file_id}")
-async def get_file(workspace_id: str, file_id: str) -> StreamingResponse:
-    found = db.get_file(file_id)
-    if found is None or found[0].workspace_id != workspace_id:
-        raise HTTPException(404, "file not found")
-    attachment, _ = found
-    client = httpx.AsyncClient(timeout=httpx.Timeout(None, connect=10))
-    response = await client.send(client.build_request(
-        "GET", workspace_service.remote_file_url(workspace_id, attachment.relative_path),
-        headers={"authorization": f"Bearer {os.getenv('HERMES_API_KEY', '')}"},
-    ), stream=True)
-    if response.status_code != 200:
-        await response.aclose(); await client.aclose()
-        raise HTTPException(response.status_code, "file download failed")
-    async def stream():
-        try:
-            async for chunk in response.aiter_raw():
-                yield chunk
-        finally:
-            await response.aclose(); await client.aclose()
-    return StreamingResponse(stream(), media_type=attachment.mime_type,
-        headers={"content-disposition": f'attachment; filename="{attachment.name}"'})
+@router.get("/workspaces/{workspace_id}/files/content/{relative_path:path}")
+async def get_file(workspace_id: str, relative_path: str):
+    if db.get_workspace(workspace_id) is None:
+        raise HTTPException(404, "workspace not found")
+    return await _workspace_file_response(
+        workspace_id, relative_path, download_name=PurePosixPath(relative_path).name
+    )
 
 
 def _resolve_local_image_path(raw_path: str) -> Path:

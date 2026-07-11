@@ -12,6 +12,7 @@ import time
 import uuid
 from contextlib import asynccontextmanager
 from typing import Any
+from urllib.parse import unquote
 
 import httpx
 import uvicorn
@@ -319,7 +320,7 @@ def create_relay_app(gateway_base_url: str, api_key: str) -> FastAPI:
 
     @app.post("/workspace-api/workspaces/{workspace_id}/files")
     async def upload_workspace_file(workspace_id: str, request: Request) -> dict[str, Any]:
-        filename = request.headers.get("x-silverretort-filename", "upload")
+        filename = unquote(request.headers.get("x-silverretort-filename", "upload"))
         try:
             target, relative_path = workspaces.unique_upload_path(workspace_id, filename)
         except ValueError as exc:
@@ -338,18 +339,13 @@ def create_relay_app(gateway_base_url: str, api_key: str) -> FastAPI:
     @app.get("/workspace-api/workspaces/{workspace_id}/files")
     async def list_workspace_files(workspace_id: str) -> list[dict[str, Any]]:
         try:
-            root = workspaces.workspace_dir(workspace_id)
+            return workspaces.list_files(workspace_id)
         except ValueError as exc:
             raise HTTPException(400, str(exc)) from exc
-        if not root.is_dir():
-            raise HTTPException(404, "workspace not found")
-        return [
-            {"relativePath": path.relative_to(root).as_posix(), "size": path.stat().st_size}
-            for path in root.rglob("*") if path.is_file() and not path.is_symlink()
-        ]
+        except FileNotFoundError as exc:
+            raise HTTPException(404, "workspace not found") from exc
 
-    @app.get("/workspace-api/workspaces/{workspace_id}/files/{relative_path:path}")
-    async def download_workspace_file(workspace_id: str, relative_path: str):
+    async def workspace_file_response(workspace_id: str, relative_path: str):
         try:
             path = workspaces.file_path(workspace_id, relative_path)
         except ValueError as exc:
@@ -357,7 +353,13 @@ def create_relay_app(gateway_base_url: str, api_key: str) -> FastAPI:
         if not path.is_file():
             raise HTTPException(404, "file not found")
         from starlette.responses import FileResponse
-        return FileResponse(path)
+        return FileResponse(path, headers={"X-Content-Type-Options": "nosniff"})
+
+    app.add_api_route(
+        "/workspace-api/workspaces/{workspace_id}/files/{relative_path:path}",
+        workspace_file_response,
+        methods=["GET", "HEAD"],
+    )
 
     app.mount("/mcp", protected_mcp)
     app.websocket("/bridge")(_bridge_endpoint)

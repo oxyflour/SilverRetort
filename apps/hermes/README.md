@@ -33,6 +33,17 @@ idempotent workspace lifecycle, and streaming file transfer. Chat requests may i
 to Hermes instructions. Hermes Agent 0.14 does not expose a request-level cwd sandbox
 hook, so capability currently reports `cwdEnforced: false`.
 
+Workspace storage is the sole source of truth for files. Attachments are
+identified by `workspaceId + relativePath`; SilverRetort no longer maintains a
+separate file database or file IDs. Existing legacy `DATA_DIR/files` content is
+discarded during migration and is not copied into workspaces.
+
+Iframe artifacts reference a static-site entry inside the workspace, for
+example `{"path":"artifacts/demo/index.html"}`. Inline HTML and external iframe
+URLs are not supported. Relative CSS, JavaScript, image, and font assets are
+served from the entry file's directory. Local-process mode lets uvicorn read
+the shared directory directly; Docker and remote modes stream through relay.
+
 ## Desktop-Managed Docker
 
 If desktop should start the container for you, put these fields in `DATA_DIR/settings.json`:

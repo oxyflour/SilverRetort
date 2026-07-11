@@ -47,7 +47,7 @@ export function ChatInput() {
           <div className="mb-2 flex flex-wrap gap-2">
             {pendingAttachments.map((attachment) => (
               <span
-                key={attachment.id}
+                key={`${attachment.workspaceId}:${attachment.relativePath}`}
                 className="inline-flex items-center gap-2 rounded-full border border-neutral-300 bg-neutral-50 px-3 py-1 text-xs text-neutral-700 dark:border-neutral-600 dark:bg-neutral-800 dark:text-neutral-200"
               >
                 <span className="rounded-full bg-neutral-200 px-1.5 py-0.5 text-[10px] font-medium tracking-wide text-neutral-700 dark:bg-neutral-700 dark:text-neutral-200">
@@ -56,7 +56,7 @@ export function ChatInput() {
                 <span className="max-w-52 truncate">{attachment.name}</span>
                 <button
                   type="button"
-                  onClick={() => removeAttachment(attachment.id)}
+                  onClick={() => removeAttachment(attachment.workspaceId, attachment.relativePath)}
                   aria-label={`Remove ${attachment.name}`}
                   className="text-neutral-400 transition-colors hover:text-red-500"
                 >

@@ -11,7 +11,6 @@ class ApiModel(BaseModel):
 
 
 class Attachment(ApiModel):
-    id: str
     workspace_id: str
     relative_path: str
     name: str
@@ -77,6 +76,10 @@ class Artifact(ApiModel):
     created_at: str
 
 
+class IframeArtifactPayload(ApiModel):
+    path: str
+
+
 class CreateSessionRequest(ApiModel):
     title: str | None = None
 
@@ -102,7 +105,7 @@ class WorkspaceCapability(ApiModel):
 
 class SendChatRequest(ApiModel):
     text: str
-    attachment_ids: list[str] = Field(default_factory=list)
+    attachments: list[Attachment] = Field(default_factory=list)
 
 
 class RestartMessageRequest(ApiModel):
