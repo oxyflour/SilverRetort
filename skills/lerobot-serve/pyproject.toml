@@ -1,7 +1,7 @@
 [project]
 name = "lerobot-serve-skill"
 version = "0.1.0"
-description = "Standalone ovphysx to ROS 2 bridge bundled with the lerobot-serve skill"
+description = "Standalone ovphysx ROS 2 bridge with USD physics authoring"
 requires-python = ">=3.10,<3.11"
 dependencies = [
     "numpy>=2.0,<3",

@@ -12,6 +12,7 @@ from pathlib import Path
 import numpy as np
 from ovphysx import PhysX, TensorType
 
+from cartesian import FingertipIK
 from control import (
     APPROACH_LEFT,
     APPROACH_RIGHT,
@@ -44,17 +45,23 @@ class PickupSim:
         self.position = self.bind("/World/**", TensorType.ARTICULATION_DOF_POSITION)
         self.target = self.bind("/World/**", TensorType.ARTICULATION_DOF_POSITION_TARGET)
         self.link_pose = self.bind("/World/**", TensorType.ARTICULATION_LINK_POSE)
+        self.root_pose = self.bind("/World/**", TensorType.ARTICULATION_ROOT_POSE)
+        self.root_velocity = self.bind("/World/**", TensorType.ARTICULATION_ROOT_VELOCITY)
         self.cube_pose = self.bind("/World/TargetCube", TensorType.RIGID_BODY_POSE)
         self.cube_velocity = self.bind("/World/TargetCube", TensorType.RIGID_BODY_VELOCITY)
         self.state = np.empty(self.position.shape, dtype=np.float32)
         self.command = np.empty(self.target.shape, dtype=np.float32)
         self.cube = np.empty(self.cube_pose.shape, dtype=np.float32)
         self.links = np.empty(self.link_pose.shape, dtype=np.float32)
+        self.initial_roots = np.empty(self.root_pose.shape, dtype=np.float32)
+        self.zero_root_velocity = np.zeros(self.root_velocity.shape, dtype=np.float32)
         self.zero_cube_velocity = np.zeros(self.cube_velocity.shape, dtype=np.float32)
         self.position.read(self.state)
         self.target.read(self.command)
+        self.root_pose.read(self.initial_roots)
         self.names = list(self.position.dof_names)
         self.index = {name: i for i, name in enumerate(self.names)}
+        self.fingertip_ik = FingertipIK(self)
         self.rng = np.random.default_rng(seed)
         self.baseline_z = 0.695
 
@@ -65,7 +72,11 @@ class PickupSim:
 
     def step_physics(self, count: int = 1) -> None:
         for _ in range(count):
+            self.root_pose.write(self.initial_roots)
+            self.root_velocity.write(self.zero_root_velocity)
             self.physx.step_sync(self.dt, self.sim_time)
+            self.root_pose.write(self.initial_roots)
+            self.root_velocity.write(self.zero_root_velocity)
             self.sim_time += self.dt
 
     def read_state(self) -> np.ndarray:
@@ -126,6 +137,9 @@ class PickupSim:
             for joint, value in enumerate(values):
                 approach[self.index[f"{prefix}_{joint}"]] = value
         self.interpolate(approach, 100)
+        cube = self.read_cube()
+        self.fingertip_ik.move_to(np.array([cube[0], cube[1], 0.76]))
+        self.fingertip_ik.move_to(np.array([cube[0], cube[1], cube[2] + 0.015]))
         return self.read_state()
 
     def goals(self) -> tuple[np.ndarray, np.ndarray]:
@@ -137,15 +151,35 @@ class PickupSim:
         return grip, lift
 
     def expert_frames(self):
-        grip, lift = self.goals()
+        grip, _ = self.goals()
         start = self.read_state()
-        for goal, count in ((grip, 40), (lift, 40), (lift, 20)):
-            phase_start = self.read_state() if goal is lift else start
-            for frame in range(count):
-                blend = 1.0 if count == 20 else smoothstep((frame + 1) / count)
-                action = phase_start + (goal - phase_start) * blend
-                applied = self.write_action(action)
-                yield self.read_state(), self.read_cube(), applied
+        grasp_height = self.baseline_z + 0.006
+        cube = self.read_cube()
+        grasp_target = np.array([cube[0], cube[1], grasp_height])
+        gripper_columns = [
+            column for name, column in self.index.items() if name.startswith("right_hand_")
+        ]
+        for frame in range(50):
+            blend = smoothstep((frame + 1) / 50)
+            action, _, _ = self.fingertip_ik.action_toward(grasp_target, align_axis=False)
+            action[gripper_columns] = (
+                start[gripper_columns]
+                + (grip[gripper_columns] - start[gripper_columns]) * blend
+            )
+            applied = self.write_action(action)
+            yield self.read_state(), self.read_cube(), applied
+
+        lift_start = applied.copy()
+        lift = lift_start.copy()
+        lift[self.index["RightArm_3"]] += 0.05
+        applied = lift_start
+        for frame in range(35):
+            blend = smoothstep((frame + 1) / 35)
+            applied = self.write_action(lift_start + (lift - lift_start) * blend)
+            yield self.read_state(), self.read_cube(), applied
+        for _ in range(15):
+            applied = self.write_action(applied)
+            yield self.read_state(), self.read_cube(), applied
 
     def close(self) -> None:
         for binding in reversed(self.bindings):

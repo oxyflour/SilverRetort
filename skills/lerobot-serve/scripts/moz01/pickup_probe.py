@@ -111,14 +111,15 @@ def main() -> int:
         def fingertip_snapshot() -> dict[str, list[float]]:
             link_pose.read(links)
             offsets = {
-                "right_hand_narrow3_Link": np.array([-0.00556935, 0.01699005, 0.00068409]),
-                "right_hand_wide3_Link": np.array([-0.00668161, 0.00346272, 0.00138786]),
+                # Centroids of the USD-authored fingertip convex hulls.
+                "right_hand_narrow3_Link": np.array([0.04395, -0.0194, 0.0]),
+                "right_hand_wide3_Link": np.array([0.0439, 0.0207, 0.0]),
             }
             result = {}
             for name, offset in offsets.items():
                 pose = links[0, body_index[name]]
                 xyz = pose[:3]
-                q_w, q_xyz = pose[3], pose[4:7]
+                q_xyz, q_w = pose[3:6], pose[6]
                 twice_cross = 2.0 * np.cross(q_xyz, offset)
                 rotated = offset + q_w * twice_cross + np.cross(q_xyz, twice_cross)
                 result[name] = (xyz + rotated).astype(float).tolist()
@@ -315,4 +316,3 @@ def main() -> int:
 
 if __name__ == "__main__":
     raise SystemExit(main())
-

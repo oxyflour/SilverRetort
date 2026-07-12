@@ -1,4 +1,4 @@
 interface:
   display_name: "LeRobot ROS Virtual Robot"
-  short_description: "Serve USD robots and run MOZ01 pickup workflows"
-  default_prompt: "Use $lerobot-serve to run or inspect a USD robot, including the MOZ01 cube-pick workflow."
+  short_description: "Serve USD robots and generate MOZ01 pickups"
+  default_prompt: "Use $lerobot-serve to patch and serve a USD robot or generate a MOZ01 pickup demonstration."

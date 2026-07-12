@@ -10,7 +10,7 @@ import numpy as np
 WRIST_JOINT = "RightArm_4"
 WRIST_HORIZONTAL = -np.pi / 2.0
 OPEN_ANGLE = 0.30
-GRIP_ANGLE = 0.30
+GRIP_ANGLE = 0.50
 
 RAISE_RIGHT = (0.15, -0.30, -0.60, 0.50, WRIST_HORIZONTAL, 0.0, 0.0)
 RAISE_LEFT = (-0.15, 0.30, -0.60, -0.50, 0.0, 0.0, 0.0)
@@ -34,8 +34,10 @@ def set_open(goal: np.ndarray, index: Mapping[str, int], angle: float = OPEN_ANG
 
 
 def set_grip(goal: np.ndarray, index: Mapping[str, int], angle: float = GRIP_ANGLE) -> None:
-    set_four_bar(goal, index, "narrow", angle)
-    set_four_bar(goal, index, "wide", -angle)
+    # On the imported mechanism, increasing the magnitude in the opening
+    # direction closes the distal fingertip hulls around the object.
+    set_four_bar(goal, index, "narrow", -angle)
+    set_four_bar(goal, index, "wide", angle)
 
 
 def normalize_action(action: np.ndarray, index: Mapping[str, int]) -> np.ndarray:
