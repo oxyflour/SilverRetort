@@ -27,13 +27,18 @@ from models import (
     RestartMessageRequest,
     SendChatRequest,
     SendChatResponse,
+    SetModelRequest,
     Session,
+    SessionModel,
+    SlashCommand,
     TextPart,
     ToolCall,
     UpdateSessionRequest,
     UpdateWorkspaceRequest,
     Workspace,
     WorkspaceCapability,
+    HermesModel,
+    HermesModelsResponse,
 )
 
 router = APIRouter(prefix="/api")
@@ -46,6 +51,22 @@ def _auto_title(text: str) -> str:
     return text[:30] or DEFAULT_TITLE
 
 
+def _require_hermes_method(name: str):
+    method = getattr(engine, name, None)
+    if method is None:
+        raise HTTPException(503, "Hermes is unavailable")
+    return method
+
+
+def _models_response(payload: dict) -> HermesModelsResponse:
+    default = payload.get("default") if isinstance(payload.get("default"), dict) else {}
+    return HermesModelsResponse(
+        models=[HermesModel.model_validate(item) for item in payload.get("models", [])],
+        default_provider=str(default.get("provider") or ""),
+        default_model=str(default.get("model") or ""),
+    )
+
+
 # ---- sessions ----
 
 @router.get("/sessions")
@@ -56,6 +77,68 @@ def list_sessions() -> list[Session]:
 @router.get("/workspaces/capability")
 async def workspace_capability() -> WorkspaceCapability:
     return WorkspaceCapability.model_validate(await workspace_service.capability())
+
+
+@router.get("/hermes/slash-commands")
+async def hermes_slash_commands() -> list[SlashCommand]:
+    method = _require_hermes_method("list_slash_commands")
+    try:
+        return [SlashCommand.model_validate(item) for item in await method()]
+    except httpx.HTTPStatusError as exc:
+        if exc.response.status_code == 404:
+            return []
+        raise HTTPException(503, f"Hermes slash commands unavailable: {exc}") from exc
+    except Exception as exc:
+        raise HTTPException(503, f"Hermes slash commands unavailable: {exc}") from exc
+
+
+@router.get("/hermes/models")
+async def hermes_models() -> HermesModelsResponse:
+    method = _require_hermes_method("list_models")
+    try:
+        return _models_response(await method())
+    except Exception as exc:
+        raise HTTPException(503, f"Hermes models unavailable: {exc}") from exc
+
+
+@router.get("/hermes/default-model")
+async def hermes_default_model() -> SessionModel:
+    method = _require_hermes_method("get_default_model")
+    try:
+        payload = await method()
+        provider = str(payload.get("provider") or "")
+        model = str(payload.get("model") or "")
+        return SessionModel(
+            source="default",
+            provider=provider,
+            model=model,
+            model_id=str(payload.get("modelId") or ""),
+            default_provider=provider,
+            default_model=model,
+        )
+    except Exception as exc:
+        raise HTTPException(503, f"Hermes default model unavailable: {exc}") from exc
+
+
+@router.put("/hermes/default-model")
+async def set_hermes_default_model(body: SetModelRequest) -> SessionModel:
+    if not body.provider or not body.model:
+        raise HTTPException(400, "provider and model are required")
+    method = _require_hermes_method("set_default_model")
+    try:
+        payload = await method(body.provider, body.model, body.model_id)
+        provider = str(payload.get("provider") or body.provider)
+        model = str(payload.get("model") or body.model)
+        return SessionModel(
+            source="default",
+            provider=provider,
+            model=model,
+            model_id=str(payload.get("modelId") or body.model_id or ""),
+            default_provider=provider,
+            default_model=model,
+        )
+    except Exception as exc:
+        raise HTTPException(503, f"failed to set Hermes default model: {exc}") from exc
 
 
 @router.get("/workspaces")
@@ -133,6 +216,30 @@ def rename_session(session_id: str, body: UpdateSessionRequest) -> Session:
     if session is None:
         raise HTTPException(404, "session not found")
     return session
+
+
+@router.get("/sessions/{session_id}/model")
+async def get_session_model(session_id: str) -> SessionModel:
+    if db.get_session(session_id) is None:
+        raise HTTPException(404, "session not found")
+    method = _require_hermes_method("get_session_model")
+    try:
+        return SessionModel.model_validate(await method(session_id))
+    except Exception as exc:
+        raise HTTPException(503, f"Hermes session model unavailable: {exc}") from exc
+
+
+@router.put("/sessions/{session_id}/model")
+async def set_session_model(session_id: str, body: SetModelRequest) -> SessionModel:
+    if db.get_session(session_id) is None:
+        raise HTTPException(404, "session not found")
+    method = _require_hermes_method("set_session_model")
+    try:
+        return SessionModel.model_validate(
+            await method(session_id, body.provider, body.model, body.model_id)
+        )
+    except Exception as exc:
+        raise HTTPException(503, f"failed to set Hermes session model: {exc}") from exc
 
 
 @router.delete("/sessions/{session_id}")

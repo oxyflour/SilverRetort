@@ -18,6 +18,13 @@ import {
   WorkspaceCapability,
   WorkspaceCapabilitySchema,
   WorkspaceSchema,
+  HermesModelsResponse,
+  HermesModelsResponseSchema,
+  SessionModel,
+  SessionModelSchema,
+  SetModelRequest,
+  SlashCommand,
+  SlashCommandSchema,
 } from "./types";
 
 /** 类型化 REST 客户端；baseUrl 一般为空串（同源经 next 代理到 uvicorn） */
@@ -54,6 +61,25 @@ export class ApiClient {
     return this.request(WorkspaceCapabilitySchema, "/api/workspaces/capability");
   }
 
+  listSlashCommands(): Promise<SlashCommand[]> {
+    return this.request(z.array(SlashCommandSchema), "/api/hermes/slash-commands");
+  }
+
+  listHermesModels(): Promise<HermesModelsResponse> {
+    return this.request(HermesModelsResponseSchema, "/api/hermes/models");
+  }
+
+  getDefaultModel(): Promise<SessionModel> {
+    return this.request(SessionModelSchema, "/api/hermes/default-model");
+  }
+
+  setDefaultModel(body: SetModelRequest): Promise<SessionModel> {
+    return this.request(SessionModelSchema, "/api/hermes/default-model", {
+      method: "PUT",
+      body: JSON.stringify(body),
+    });
+  }
+
   createWorkspace(name: string): Promise<Workspace> {
     return this.request(WorkspaceSchema, "/api/workspaces", {
       method: "POST",
@@ -84,6 +110,17 @@ export class ApiClient {
     return this.request(SessionSchema, `/api/sessions/${id}`, {
       method: "PATCH",
       body: JSON.stringify({ title }),
+    });
+  }
+
+  getSessionModel(sessionId: string): Promise<SessionModel> {
+    return this.request(SessionModelSchema, `/api/sessions/${sessionId}/model`);
+  }
+
+  setSessionModel(sessionId: string, body: SetModelRequest): Promise<SessionModel> {
+    return this.request(SessionModelSchema, `/api/sessions/${sessionId}/model`, {
+      method: "PUT",
+      body: JSON.stringify(body),
     });
   }
 

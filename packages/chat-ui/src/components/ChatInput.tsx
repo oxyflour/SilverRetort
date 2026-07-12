@@ -1,9 +1,10 @@
 "use client";
 
-import { useRef, useState } from "react";
+import { useMemo, useRef, useState } from "react";
 import { Paperclip, SendHorizontal, Square, X } from "lucide-react";
 import { useChatStore } from "../store";
 import { AppIcon } from "./icons";
+import { SessionModelSelector } from "./SessionModelSelector";
 
 export function ChatInput() {
   const currentSessionId = useChatStore((s) => s.currentSessionId);
@@ -15,6 +16,8 @@ export function ChatInput() {
   const stopRun = useChatStore((s) => s.stopRun);
   const addAttachment = useChatStore((s) => s.addAttachment);
   const removeAttachment = useChatStore((s) => s.removeAttachment);
+  const slashCommands = useChatStore((s) => s.slashCommands);
+  const refreshHermesControls = useChatStore((s) => s.refreshHermesControls);
   const [text, setText] = useState("");
   const fileInputRef = useRef<HTMLInputElement>(null);
 
@@ -28,6 +31,19 @@ export function ChatInput() {
     if (!canSubmit) return;
     setText("");
     void sendMessage(trimmedText);
+  };
+
+  const slashSuggestions = useMemo(() => {
+    const match = text.match(/^\/[A-Za-z0-9_-]*$/);
+    if (!match) return [];
+    const prefix = text.toLowerCase();
+    return slashCommands
+      .filter((command) => command.command.toLowerCase().startsWith(prefix))
+      .slice(0, 8);
+  }, [slashCommands, text]);
+
+  const insertSlashCommand = (command: string) => {
+    setText(`${command} `);
   };
 
   return (
@@ -66,7 +82,32 @@ export function ChatInput() {
             ))}
           </div>
         )}
-        <div className="flex items-center gap-2 rounded-[1.25rem] bg-neutral-100 px-3 py-2 transition-colors dark:bg-neutral-800">
+        <div className="relative flex items-center gap-2 rounded-[1.25rem] bg-neutral-100 px-3 py-2 transition-colors dark:bg-neutral-800">
+          {slashSuggestions.length > 0 && (
+            <div className="absolute bottom-full left-10 right-3 mb-2 overflow-hidden rounded-lg border border-neutral-200 bg-white shadow-lg dark:border-neutral-700 dark:bg-neutral-900">
+              {slashSuggestions.map((command) => (
+                <button
+                  key={command.command}
+                  type="button"
+                  onMouseDown={(event) => {
+                    event.preventDefault();
+                    insertSlashCommand(command.command);
+                  }}
+                  className="flex w-full items-center gap-3 px-3 py-2 text-left text-sm hover:bg-neutral-100 dark:hover:bg-neutral-800"
+                >
+                  <span className="font-mono text-xs text-neutral-500">
+                    {command.command}
+                  </span>
+                  <span className="min-w-0 flex-1 truncate text-neutral-700 dark:text-neutral-200">
+                    {command.description || command.name}
+                  </span>
+                  <span className="rounded bg-neutral-100 px-1.5 py-0.5 text-[10px] uppercase tracking-wide text-neutral-500 dark:bg-neutral-800">
+                    {command.kind}
+                  </span>
+                </button>
+              ))}
+            </div>
+          )}
           <button
             type="button"
             title="\u6dfb\u52a0\u9644\u4ef6"
@@ -80,8 +121,17 @@ export function ChatInput() {
           <input
             type="text"
             value={text}
-            onChange={(e) => setText(e.target.value)}
+            onChange={(e) => {
+              const next = e.target.value;
+              setText(next);
+              if (next === "/") void refreshHermesControls();
+            }}
             onKeyDown={(e) => {
+              if (e.key === "Tab" && slashSuggestions[0]) {
+                e.preventDefault();
+                insertSlashCommand(slashSuggestions[0].command);
+                return;
+              }
               if (e.key === "Enter" && !e.nativeEvent.isComposing) {
                 e.preventDefault();
                 submit();
@@ -102,6 +152,7 @@ export function ChatInput() {
             className="min-w-0 flex-1 bg-transparent text-sm text-neutral-900 outline-none placeholder:text-neutral-400 disabled:opacity-40 dark:text-neutral-100 dark:placeholder:text-neutral-500"
           />
           <div className="flex shrink-0 items-center gap-2">
+            <SessionModelSelector />
             <button
               type="button"
               title={running ? "\u505c\u6b62\u751f\u6210" : "\u53d1\u9001\u6d88\u606f"}

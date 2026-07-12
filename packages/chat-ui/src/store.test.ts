@@ -37,6 +37,7 @@ beforeEach(() => {
 });
 
 afterEach(() => {
+  vi.restoreAllMocks();
   vi.runOnlyPendingTimers();
   vi.useRealTimers();
 });
@@ -191,5 +192,40 @@ describe("chat event routing", () => {
     expect(useChatStore.getState().buckets["session-b"]?.messages[0]?.parts).toEqual([
       { type: "text", text: "background" },
     ]);
+  });
+});
+
+describe("session model state", () => {
+  it("stores the selected session model returned by the API", async () => {
+    const model = {
+      id: "openrouter:anthropic/claude-sonnet-4",
+      provider: "openrouter",
+      providerLabel: "OpenRouter",
+      model: "anthropic/claude-sonnet-4",
+      label: "claude-sonnet-4",
+      available: true,
+      current: false,
+    };
+    const sessionModel = {
+      sessionKey: "silverretort:session-a",
+      source: "session" as const,
+      provider: "openrouter",
+      model: "anthropic/claude-sonnet-4",
+      modelId: model.id,
+      defaultProvider: "custom",
+      defaultModel: "default-model",
+    };
+    const spy = vi
+      .spyOn(useChatStore.getState().client, "setSessionModel")
+      .mockResolvedValue(sessionModel);
+
+    await useChatStore.getState().setSessionModel(sessionId, model);
+
+    expect(spy).toHaveBeenCalledWith(sessionId, {
+      modelId: model.id,
+      provider: model.provider,
+      model: model.model,
+    });
+    expect(useChatStore.getState().sessionModels[sessionId]).toEqual(sessionModel);
   });
 });

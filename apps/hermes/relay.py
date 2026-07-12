@@ -291,11 +291,14 @@ def create_relay_app(gateway_base_url: str, api_key: str) -> FastAPI:
 
     @app.middleware("http")
     async def protect_workspace_api(request: Request, call_next: Any):
-        if request.url.path.startswith("/workspace-api"):
+        if request.url.path.startswith("/workspace-api") or request.url.path.startswith("/silverretort/"):
             client_host = request.client.host.lower() if request.client else ""
             if api_key.strip() and client_host not in LOOPBACK_HOSTS and _bearer_token(request.headers) != api_key.strip():
                 return PlainTextResponse("unauthorized", status_code=401)
         return await call_next(request)
+
+    from silverretort_api import register_silverretort_routes
+    register_silverretort_routes(app, api_key)
 
     @app.get("/workspace-api/capability")
     async def workspace_capability() -> dict[str, Any]:

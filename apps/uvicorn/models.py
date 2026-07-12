@@ -105,6 +105,45 @@ class WorkspaceCapability(ApiModel):
     cwd_enforced: bool
 
 
+class SlashCommand(ApiModel):
+    command: str
+    name: str
+    description: str = ""
+    kind: Literal["skill", "bundle"]
+
+
+class HermesModel(ApiModel):
+    id: str
+    provider: str
+    provider_label: str = ""
+    model: str
+    label: str = ""
+    available: bool = True
+    current: bool = False
+
+
+class HermesModelsResponse(ApiModel):
+    models: list[HermesModel] = Field(default_factory=list)
+    default_provider: str = ""
+    default_model: str = ""
+
+
+class SessionModel(ApiModel):
+    session_key: str = ""
+    source: Literal["default", "session"] = "default"
+    provider: str = ""
+    model: str = ""
+    model_id: str = ""
+    default_provider: str = ""
+    default_model: str = ""
+
+
+class SetModelRequest(ApiModel):
+    model_id: str | None = None
+    provider: str | None = None
+    model: str | None = None
+
+
 class SendChatRequest(ApiModel):
     text: str
     attachments: list[Attachment] = Field(default_factory=list)

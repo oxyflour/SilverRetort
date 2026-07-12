@@ -7,7 +7,7 @@ from typing import Any, AsyncGenerator
 import httpx
 
 import db
-from models import Message
+from models import Message, TextPart
 
 MCP_TOOL_PREFIX = "mcp__silverretort_ui__"
 UI_SHOW_ARTIFACT_TOOL = f"{MCP_TOOL_PREFIX}ui_show_artifact"
@@ -212,9 +212,119 @@ class HermesEngine:
         self.api_key = api_key
         self.model = model
 
+    def session_key(self, session_id: str) -> str:
+        return f"silverretort:{session_id}"
+
+    def _headers(self, session_id: str | None = None) -> dict[str, str]:
+        headers = {"authorization": f"Bearer {self.api_key}"}
+        if session_id:
+            headers["X-Hermes-Session-Key"] = self.session_key(session_id)
+        return headers
+
+    async def _expand_slash(self, session_id: str, text: str) -> str:
+        if not text.lstrip().startswith("/"):
+            return text
+        try:
+            async with httpx.AsyncClient(timeout=httpx.Timeout(20, connect=5)) as client:
+                response = await client.post(
+                    f"{self.base_url}/silverretort/slash/expand",
+                    json={"text": text, "sessionKey": self.session_key(session_id)},
+                    headers=self._headers(),
+                )
+                if response.status_code == 404:
+                    return text
+                response.raise_for_status()
+                payload = response.json()
+                if payload.get("handled") and isinstance(payload.get("expandedText"), str):
+                    return payload["expandedText"]
+        except Exception:
+            return text
+        return text
+
+    async def list_slash_commands(self) -> list[dict[str, Any]]:
+        async with httpx.AsyncClient(timeout=httpx.Timeout(20, connect=5)) as client:
+            response = await client.get(
+                f"{self.base_url}/silverretort/slash/commands",
+                headers=self._headers(),
+            )
+            response.raise_for_status()
+            payload = response.json()
+            return list(payload.get("commands") or [])
+
+    async def list_models(self) -> dict[str, Any]:
+        async with httpx.AsyncClient(timeout=httpx.Timeout(30, connect=5)) as client:
+            response = await client.get(
+                f"{self.base_url}/silverretort/models",
+                headers=self._headers(),
+            )
+            response.raise_for_status()
+            return dict(response.json())
+
+    async def get_default_model(self) -> dict[str, Any]:
+        async with httpx.AsyncClient(timeout=httpx.Timeout(20, connect=5)) as client:
+            response = await client.get(
+                f"{self.base_url}/silverretort/default-model",
+                headers=self._headers(),
+            )
+            response.raise_for_status()
+            return dict(response.json())
+
+    async def set_default_model(self, provider: str, model: str, model_id: str | None = None) -> dict[str, Any]:
+        body = {"provider": provider, "model": model}
+        if model_id is not None:
+            body["modelId"] = model_id
+        async with httpx.AsyncClient(timeout=httpx.Timeout(30, connect=5)) as client:
+            response = await client.put(
+                f"{self.base_url}/silverretort/default-model",
+                json=body,
+                headers=self._headers(),
+            )
+            response.raise_for_status()
+            return dict(response.json())
+
+    async def get_session_model(self, session_id: str) -> dict[str, Any]:
+        async with httpx.AsyncClient(timeout=httpx.Timeout(20, connect=5)) as client:
+            response = await client.get(
+                f"{self.base_url}/silverretort/session-model",
+                params={"sessionKey": self.session_key(session_id)},
+                headers=self._headers(),
+            )
+            response.raise_for_status()
+            return dict(response.json())
+
+    async def set_session_model(
+        self,
+        session_id: str,
+        provider: str | None,
+        model: str | None,
+        model_id: str | None = None,
+    ) -> dict[str, Any]:
+        body: dict[str, Any] = {"sessionKey": self.session_key(session_id)}
+        if provider is not None:
+            body["provider"] = provider
+        if model is not None:
+            body["model"] = model
+        if model_id is not None:
+            body["modelId"] = model_id
+        async with httpx.AsyncClient(timeout=httpx.Timeout(30, connect=5)) as client:
+            response = await client.put(
+                f"{self.base_url}/silverretort/session-model",
+                json=body,
+                headers=self._headers(),
+            )
+            response.raise_for_status()
+            return dict(response.json())
+
     async def run(
         self, session_id: str, workspace_id: str, history: list[Message], user_message: Message
     ) -> AsyncGenerator[dict[str, Any], None]:
+        expanded_user_message = user_message
+        original_text = _text_of(user_message)
+        expanded_text = await self._expand_slash(session_id, original_text)
+        if expanded_text != original_text:
+            expanded_user_message = user_message.model_copy(deep=True)
+            expanded_user_message.parts = [TextPart(text=expanded_text)]
+
         system = SYSTEM_PROMPT.format(
             session_id=session_id,
             workspace_id=workspace_id,
@@ -227,11 +337,11 @@ class HermesEngine:
             "model": self.model,
             "instructions": system,
             "conversation_history": conversation_history,
-            "input": [_to_openai_message(user_message)],
+            "input": [_to_openai_message(expanded_user_message)],
             "stream": True,
             "workspace_id": workspace_id,
         }
-        headers = {"authorization": f"Bearer {self.api_key}"}
+        headers = self._headers(session_id)
         completed_tool_calls: set[str] = set()
 
         async with httpx.AsyncClient(timeout=httpx.Timeout(None, connect=10)) as client:

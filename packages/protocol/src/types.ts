@@ -160,6 +160,50 @@ export const WorkspaceCapabilitySchema = z.object({
 });
 export type WorkspaceCapability = z.infer<typeof WorkspaceCapabilitySchema>;
 
+export const SlashCommandSchema = z.object({
+  command: z.string(),
+  name: z.string(),
+  description: z.string().default(""),
+  kind: z.enum(["skill", "bundle"]),
+});
+export type SlashCommand = z.infer<typeof SlashCommandSchema>;
+
+export const HermesModelSchema = z.object({
+  id: z.string(),
+  provider: z.string(),
+  providerLabel: z.string().default(""),
+  model: z.string(),
+  label: z.string().default(""),
+  available: z.boolean().default(true),
+  current: z.boolean().default(false),
+});
+export type HermesModel = z.infer<typeof HermesModelSchema>;
+
+export const HermesModelsResponseSchema = z.object({
+  models: z.array(HermesModelSchema).default([]),
+  defaultProvider: z.string().default(""),
+  defaultModel: z.string().default(""),
+});
+export type HermesModelsResponse = z.infer<typeof HermesModelsResponseSchema>;
+
+export const SessionModelSchema = z.object({
+  sessionKey: z.string().default(""),
+  source: z.enum(["default", "session"]).default("default"),
+  provider: z.string().default(""),
+  model: z.string().default(""),
+  modelId: z.string().default(""),
+  defaultProvider: z.string().default(""),
+  defaultModel: z.string().default(""),
+});
+export type SessionModel = z.infer<typeof SessionModelSchema>;
+
+export const SetModelRequestSchema = z.object({
+  modelId: z.string().nullish(),
+  provider: z.string().nullish(),
+  model: z.string().nullish(),
+});
+export type SetModelRequest = z.infer<typeof SetModelRequestSchema>;
+
 export const SendChatRequestSchema = z.object({
   text: z.string(),
   attachments: z.array(AttachmentSchema).default([]),
