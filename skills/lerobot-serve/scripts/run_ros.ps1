@@ -7,6 +7,8 @@ param(
     [double]$Fps = 60.0,
     [ValidateSet("cpu", "gpu")]
     [string]$Device = "cpu",
+    [ValidateSet("", "moz01")]
+    [string]$ControlProfile = "",
     [switch]$LockRoot,
     [switch]$CheckOnly
 )
@@ -71,5 +73,6 @@ if ($CheckOnly) {
 $Serve = Join-Path $PSScriptRoot "serve.py"
 $Arguments = @($Serve, $Usd, "--articulation", $Articulation, "--fps", $Fps, "--device", $Device)
 if ($LockRoot) { $Arguments += "--lock-root" }
+if ($ControlProfile) { $Arguments += @("--control-profile", $ControlProfile) }
 & $RosPython @Arguments
 exit $LASTEXITCODE

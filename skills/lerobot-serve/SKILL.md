@@ -1,6 +1,6 @@
 ---
 name: lerobot-serve
-description: Start a LeRobot-compatible virtual robot from a USD scene using the standalone NVIDIA ovphysx package, publish articulation joint state and link poses over ROS 2, and accept ROS joint commands. Use when Codex needs to serve, inspect, or troubleshoot a USD robot for LeRobot/ROS without Isaac Sim or Omniverse Kit.
+description: Start a LeRobot-compatible virtual robot from a USD scene using standalone NVIDIA ovphysx, publish articulation state over ROS 2, accept commands, and run the bundled MOZ01 cube-pick generation and evaluation workflow. Use when Codex needs to serve, inspect, troubleshoot, generate demonstrations for, or evaluate a USD robot without Isaac Sim or Omniverse Kit.
 ---
 
 # LeRobot Serve
@@ -59,10 +59,48 @@ Use `scripts/lerobot_ros_robot.py` as the `Robot` adapter in a LeRobot process. 
 
 For LeRobot CLI registration, vendor the adapter into the user's Python package and ensure it is imported before `make_robot_from_config()` runs. Do not modify an installed LeRobot package without explicit user approval.
 
+## MOZ01 cube pickup
+
+Keep MOZ01 control code under `scripts/moz01`; do not run control code from ignored `artifacts/` paths.
+
+Use `scripts/moz01/control.py` as the single source of truth. It holds `RightArm_4` at -90 degrees and expands each finger crank into the imported open-chain equivalent: `joint2=-joint1`, `joint3=0`, and `loop=joint1`. Never add a physical closing joint to the ovphysx articulation.
+
+Verify one deterministic pickup before generating data:
+
+```powershell
+uv run python scripts/moz01/pickup_probe.py "C:\path\moz_pick_cube_scene.usda"
+```
+
+Require `success=true`, finite state, pre-close cube translation below 5 mm, and minimum held lift of at least 5 cm.
+
+Run the ROS bridge with the same command mapping:
+
+```powershell
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File scripts\run_ros.ps1 `
+  "C:\path\moz_pick_cube_scene.usda" -ControlProfile moz01
+```
+
+Generate and evaluate camera-conditioned LeRobot datasets with `scripts/moz01/pickup_pipeline.py`. Start the LeRobot renderer for the scene first and pass the configured sensor names to both generation and evaluation. The pipeline deliberately exposes robot joint state plus camera images, but not the cube's simulator pose, so the learned policy cannot bypass vision with privileged object coordinates. Run it from this skill's ovphysx environment while adding a Python 3.10 LeRobot environment to `PYTHONPATH`; the repository's `lerobot-record-simulation` environment is the standard choice. Always use new dataset roots and repository IDs.
+
+```powershell
+$env:PYTHONPATH="C:\repo\skills\lerobot-record-simulation\.venv\Lib\site-packages"
+uv run python scripts/moz01/pickup_pipeline.py generate `
+  --scene "C:\path\moz_pick_cube_scene.usda" `
+  --root "C:\datasets\moz01-pick-v1" --repo-id "local/moz01-pick-v1" `
+  --episodes 32 --sensors front,closeup --width 320 --height 240 --use-videos
+```
+
+Train with `lerobot-train` from the LeRobot environment. Confirm the training metadata contains `observation.images.*` features and does not contain `observation.environment_state`. On Windows, a completed checkpoint can still be followed by `WinError 1314` when LeRobot tries to create the `checkpoints/last` symlink; verify and use the explicit numbered `pretrained_model` directory.
+
+Evaluate with the same sensor list and pipeline, and persist a rollout dataset using `--rollout-root` and `--rollout-repo-id`. Run exactly one evaluation episode per process, with a unique root, repository ID, and seed. A reused PhysX scene can retain contact state between episodes, so do not combine sequential episodes into an independent success rate. Treat metrics-only evaluation as incomplete.
+
+Export an ovphysx trajectory using `pickup_probe.py --trajectory-out <file.npz>`, then render it with `render_trajectory.py <file.npz> <file.gif>` in an environment containing NumPy and Pillow.
+
 ## Diagnostics
 
 - Treat missing referenced assets as a USD composition problem. Report exact unresolved paths; do not substitute Isaac assets.
 - Treat an empty articulation binding as an incorrect prim pattern or a USD without `UsdPhysicsArticulationRootAPI`.
 - Treat PhysX closed-articulation warnings as model-authoring issues. ovphysx may exclude loop joints; report the resulting `dof_names` from inspection.
+- For MOZ01, use `--control-profile moz01` and the bundled open-chain coupling instead of authoring loop joints or PhysX mimic constraints.
 - Use `--device cpu` when CUDA initialization fails. Use `--device gpu` only after CPU inspection succeeds.
 - Stop cleanly with Ctrl+C so tensor bindings and the PhysX instance are released.

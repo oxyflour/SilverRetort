@@ -1,4 +1,4 @@
 interface:
   display_name: "LeRobot ROS Virtual Robot"
-  short_description: "Serve a USD robot through ovphysx and ROS 2"
-  default_prompt: "Use $lerobot-serve to load a USD robot with ovphysx and publish its state over ROS 2."
+  short_description: "Serve USD robots and run MOZ01 pickup workflows"
+  default_prompt: "Use $lerobot-serve to run or inspect a USD robot, including the MOZ01 cube-pick workflow."

@@ -30,6 +30,10 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument("--inspect", action="store_true", help="load USD, print metadata, then exit")
     parser.add_argument("--no-clock", action="store_true", help="do not publish ROS simulation time")
+    parser.add_argument(
+        "--control-profile", choices=("moz01",),
+        help="apply a robot-specific command coupling profile",
+    )
     return parser.parse_args()
 
 
@@ -98,6 +102,7 @@ class Simulation:
             "root_locked": getattr(self.args, "lock_root", False),
             "fps": self.args.fps,
             "device": self.args.device,
+            "control_profile": getattr(self.args, "control_profile", None),
         }
 
     def read(self) -> None:
@@ -123,13 +128,19 @@ class Simulation:
         for row, root in enumerate(self.roots_paths):
             for col, name in enumerate(self.position.dof_names):
                 lookup[f"{root}::{name}" if multiple else name] = (row, col)
-        for values, target, binding in (
-            (position, self.position_targets, self.position_target),
-            (velocity, self.velocity_targets, self.velocity_target),
-            (effort, self.force_targets, self.effort),
+        position_names = names
+        if getattr(self.args, "control_profile", None) == "moz01" and position:
+            from moz01.control import expand_named_positions
+
+            expanded = expand_named_positions(dict(zip(names, position, strict=False)))
+            position_names, position = list(expanded), list(expanded.values())
+        for command_names, values, target, binding in (
+            (position_names, position, self.position_targets, self.position_target),
+            (names, velocity, self.velocity_targets, self.velocity_target),
+            (names, effort, self.force_targets, self.effort),
         ):
             changed = False
-            for name, value in zip(names, values, strict=False):
+            for name, value in zip(command_names, values, strict=False):
                 index = lookup.get(name)
                 if index is not None:
                     target[index] = value
