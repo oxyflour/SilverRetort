@@ -1,0 +1,4 @@
+interface:
+  display_name: "LeRobot RTX Renderer"
+  short_description: "Render ROS robot poses to an image topic"
+  default_prompt: "Use $lerobot-render to render a USD robot from ROS poses and publish RGB images."

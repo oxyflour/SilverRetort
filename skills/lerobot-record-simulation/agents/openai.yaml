@@ -1,0 +1,4 @@
+interface:
+  display_name: "LeRobot Simulation Recorder"
+  short_description: "Record randomized simulation episodes for LeRobot"
+  default_prompt: "Use $lerobot-record-simulation to record a virtual robot moving from randomized starts to one fixed goal."

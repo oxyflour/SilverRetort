@@ -1,0 +1,4 @@
+interface:
+  display_name: "LeRobot Simulation Rollout"
+  short_description: "Evaluate trained policies in ROS simulation"
+  default_prompt: "Use $lerobot-rollout-simulation to evaluate a trained LeRobot model in the virtual robot and save review data."

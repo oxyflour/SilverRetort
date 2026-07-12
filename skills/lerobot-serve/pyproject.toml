@@ -1,0 +1,21 @@
+[project]
+name = "lerobot-serve-skill"
+version = "0.1.0"
+description = "Standalone ovphysx to ROS 2 bridge bundled with the lerobot-serve skill"
+requires-python = ">=3.10,<3.11"
+dependencies = [
+    "numpy>=2.0,<3",
+    "ovphysx>=0.4.13,<0.5",
+]
+
+[dependency-groups]
+dev = [
+    "pytest>=9.0,<10",
+]
+
+[tool.pytest.ini_options]
+addopts = "-q"
+testpaths = ["tests"]
+
+[tool.uv]
+package = false

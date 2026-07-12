@@ -1,0 +1,22 @@
+[package]
+title = "LeRobot ROS RTX Renderer"
+version = "0.1.0"
+description = "Headless RTX viewport service for ROS robot poses"
+
+[dependencies]
+"omni.kit.uiapp" = {}
+"omni.usd" = {}
+"omni.hydra.rtx" = {}
+"omni.kit.viewport.window" = {}
+"omni.kit.viewport.utility" = {}
+"omni.kit.widget.viewport" = {}
+"lerobot.render" = {}
+
+[settings]
+app.name = "LeRobot Render"
+app.window.title = "LeRobot Render"
+app.window.hideUi = true
+app.renderer.skipWhileMinimized = false
+renderer.enabled = "rtx"
+renderer.active = "rtx"
+rtx.rendermode = "RaytracedLighting"

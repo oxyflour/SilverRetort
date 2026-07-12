@@ -1,0 +1,4 @@
+interface:
+  display_name: "Verify Robot USD"
+  short_description: "Detect simulation instability in robot USD files"
+  default_prompt: "Use $verify-robot-usd to check this robot USD for NaN, Inf, free-fall, and unstable articulation behavior."

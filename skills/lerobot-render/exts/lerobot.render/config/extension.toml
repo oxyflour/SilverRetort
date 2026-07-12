@@ -1,0 +1,23 @@
+[package]
+title = "LeRobot ROS RTX Render Service"
+version = "0.1.0"
+category = "Robotics"
+description = "Applies ROS link poses to USD and captures omni.hydra.rtx frames"
+
+[dependencies]
+"omni.usd" = {}
+"omni.kit.viewport.window" = {}
+"omni.kit.viewport.utility" = {}
+"omni.kit.widget.viewport" = {}
+
+[[python.module]]
+name = "lerobot.render"
+
+[settings]
+exts.lerobot.render.usd = ""
+exts.lerobot.render.camera = ""
+exts.lerobot.render.sensorsFile = ""
+exts.lerobot.render.host = "127.0.0.1"
+exts.lerobot.render.port = 39080
+exts.lerobot.render.width = 640
+exts.lerobot.render.height = 480
