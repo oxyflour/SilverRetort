@@ -16,121 +16,19 @@ import { Message, ToolCall } from "silverretort-protocol";
 import { openArtifactInNewWindow } from "../openArtifactInNewWindow";
 import { useChatStore } from "../store";
 import { AppIcon } from "./icons";
-import { collapsedDetail, MessageViewProps } from "./messageViewSupport";
+import {
+  collapsedDetail,
+  getShownArtifactId,
+  groupConsecutiveToolCalls,
+  inferArtifactIdFromMessageWindow,
+  messageText,
+  MessageViewProps,
+  toRestartErrorMessage,
+} from "./messageViewSupport";
+import { ToolCallGroup } from "./ToolCallGroup";
 
 const markdownRemarkPlugins = [remarkGfm];
 const markdownRehypePlugins = [rehypeHighlight];
-function isShowArtifactTool(toolName: string): boolean {
-  return toolName.includes("ui_show_artifact");
-}
-
-function toTimestamp(value: string): number {
-  const timestamp = Date.parse(value);
-  return Number.isNaN(timestamp) ? 0 : timestamp;
-}
-
-function parseArtifactResult(result: string | null | undefined): string | null {
-  const trimmed = result?.trim();
-  if (!trimmed || trimmed.startsWith("error:")) {
-    return null;
-  }
-
-  try {
-    const parsed = JSON.parse(trimmed);
-    if (typeof parsed === "string") {
-      return parsed;
-    }
-    if (parsed && typeof parsed === "object") {
-      const artifactId =
-        "artifactId" in parsed
-          ? parsed.artifactId
-          : "id" in parsed
-            ? parsed.id
-            : null;
-      return typeof artifactId === "string" ? artifactId : null;
-    }
-  } catch {
-    // Plain string result is still valid.
-  }
-
-  const unquoted =
-    trimmed.startsWith('"') && trimmed.endsWith('"')
-      ? trimmed.slice(1, -1)
-      : trimmed;
-  return unquoted || null;
-}
-
-function inferArtifactIdFromMessageWindow(
-  toolCall: ToolCall,
-  message: Message,
-  sessionMessages: Message[],
-  sessionArtifactIds: string[],
-  artifactCreatedAtById: Record<string, string>,
-): string | null {
-  if (!isShowArtifactTool(toolCall.name)) {
-    return null;
-  }
-
-  const explicitArtifactId = parseArtifactResult(toolCall.result);
-  if (explicitArtifactId) {
-    return explicitArtifactId;
-  }
-
-  if (message.artifactIds.length > 0) {
-    return message.artifactIds[0] ?? null;
-  }
-
-  const currentMessageIndex = sessionMessages.findIndex(
-    (currentMessage) => currentMessage.id === message.id,
-  );
-  const currentTimestamp = toTimestamp(message.createdAt);
-  const nextTimestamp =
-    currentMessageIndex >= 0 && currentMessageIndex + 1 < sessionMessages.length
-      ? toTimestamp(sessionMessages[currentMessageIndex + 1]!.createdAt)
-      : Number.POSITIVE_INFINITY;
-
-  const matchingArtifacts = sessionArtifactIds.filter((artifactId) => {
-    const createdAt = artifactCreatedAtById[artifactId];
-    if (!createdAt) {
-      return false;
-    }
-    const artifactTimestamp = toTimestamp(createdAt);
-    return artifactTimestamp >= currentTimestamp && artifactTimestamp < nextTimestamp;
-  });
-
-  return matchingArtifacts[0] ?? null;
-}
-
-function getShownArtifactId(toolCall: ToolCall): string | null {
-  if (toolCall.status !== "done") {
-    return null;
-  }
-  return parseArtifactResult(toolCall.result);
-}
-
-function messageText(message: Message): string {
-  return message.parts.reduce(
-    (text, part) => (part.type === "text" ? text + part.text : text),
-    "",
-  );
-}
-
-function toRestartErrorMessage(error: unknown): string {
-  if (!(error instanceof Error)) {
-    return "Save failed. Please try again.";
-  }
-  if (error.message.includes("HTTP 409")) {
-    return "This session is still running. Try again after it stops.";
-  }
-  if (error.message.includes("HTTP 400")) {
-    return "Only user messages can be edited and restarted.";
-  }
-  if (error.message.includes("HTTP 404")) {
-    return "The target message no longer exists.";
-  }
-  return error.message;
-}
-
 function ToolStatusIcon({ status }: { status: ToolCall["status"] }) {
   if (status === "running") {
     return (
@@ -209,6 +107,7 @@ function ToolCard({
         </span>
         <button
           type="button"
+          aria-label={`Toggle details for ${toolCall.name}`}
           aria-expanded={expanded}
           onClick={() => {
             const nextExpanded = !expanded;
@@ -288,6 +187,7 @@ function MessageViewComponent({
   const [saving, setSaving] = useState(false);
   const [submitError, setSubmitError] = useState<string | null>(null);
   const isUser = message.role === "user";
+  const partGroups = groupConsecutiveToolCalls(message.parts);
 
   const beginEditing = () => {
     setDraft(messageText(message));
@@ -439,28 +339,58 @@ function MessageViewComponent({
             </div>
           </div>
         ) : (
-          message.parts.map((part, index) =>
-            part.type === "text" ? (
-              <div key={index} className="prose prose-sm max-w-none dark:prose-invert">
-                <ReactMarkdown
-                  remarkPlugins={markdownRemarkPlugins}
-                  rehypePlugins={markdownRehypePlugins}
-                >
-                  {part.text}
-                </ReactMarkdown>
+          partGroups.map((group, groupIndex) => {
+            const previousGroup = partGroups[groupIndex - 1];
+            if (group.type === "tools" && previousGroup?.type === "text") {
+              return null;
+            }
+
+            const nextGroup = partGroups[groupIndex + 1];
+            const attachedTools =
+              group.type === "text" && nextGroup?.type === "tools"
+                ? nextGroup
+                : null;
+            const toolGroup = group.type === "tools" ? group : attachedTools;
+
+            return (
+              <div key={group.index}>
+                {group.type === "text" && (
+                  <div
+                    className={`prose prose-sm max-w-none dark:prose-invert ${
+                      attachedTools
+                        ? "contents [&>p:last-child]:mr-2 [&>p:last-child]:inline"
+                        : ""
+                    }`}
+                  >
+                    <ReactMarkdown
+                      remarkPlugins={markdownRemarkPlugins}
+                      rehypePlugins={markdownRehypePlugins}
+                    >
+                      {group.part.text}
+                    </ReactMarkdown>
+                  </div>
+                )}
+                {toolGroup && (
+                  <ToolCallGroup
+                    toolCalls={toolGroup.toolCalls}
+                    inline={Boolean(attachedTools)}
+                  >
+                    {toolGroup.toolCalls.map((toolCall) => (
+                      <ToolCard
+                        key={toolCall.id}
+                        toolCall={toolCall}
+                        message={message}
+                        sessionMessages={sessionMessages}
+                        sessionArtifactIds={sessionArtifactIds}
+                        artifactCreatedAtById={artifactCreatedAtById}
+                        sessionId={message.sessionId}
+                      />
+                    ))}
+                  </ToolCallGroup>
+                )}
               </div>
-            ) : (
-              <ToolCard
-                key={part.toolCall.id}
-                toolCall={part.toolCall}
-                message={message}
-                sessionMessages={sessionMessages}
-                sessionArtifactIds={sessionArtifactIds}
-                artifactCreatedAtById={artifactCreatedAtById}
-                sessionId={message.sessionId}
-              />
-            ),
-          )
+            );
+          })
         )}
 
         {message.artifactIds.length > 0 && (

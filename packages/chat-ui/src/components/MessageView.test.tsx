@@ -67,7 +67,7 @@ describe("MessageView", () => {
     expect(screen.queryByText("Streaming")).not.toBeInTheDocument();
   });
 
-  it("keeps tool details collapsed until requested", async () => {
+  it("keeps tool calls and their details collapsed until requested", async () => {
     const user = userEvent.setup();
     render(
       <MessageView
@@ -77,15 +77,29 @@ describe("MessageView", () => {
       />,
     );
 
+    expect(screen.getByText("调用了 1 次工具")).toBeInTheDocument();
+    expect(screen.queryByText("lookup")).not.toBeInTheDocument();
+    expect(screen.queryByText("tool result")).not.toBeInTheDocument();
+
+    const groupToggle = screen.getByRole("button", {
+      name: "调用了 1 次工具",
+      expanded: false,
+    });
+    await user.click(groupToggle);
+
     expect(screen.getByText("lookup")).toBeInTheDocument();
     expect(screen.queryByText("tool result")).not.toBeInTheDocument();
 
-    const toggle = screen.getByRole("button", { expanded: false });
-    await user.click(toggle);
+    const detailToggle = screen.getByRole("button", {
+      name: "Toggle details for lookup",
+      expanded: false,
+    });
+    await user.click(detailToggle);
 
     expect(screen.getAllByText("query details")).toHaveLength(2);
     expect(screen.getByText("tool result")).toBeInTheDocument();
-    expect(toggle).toHaveAttribute("aria-expanded", "true");
+    expect(groupToggle).toHaveAttribute("aria-expanded", "true");
+    expect(detailToggle).toHaveAttribute("aria-expanded", "true");
   });
 
   it("loads complete tool details only when a compact card is expanded", async () => {
@@ -124,7 +138,18 @@ describe("MessageView", () => {
     );
 
     expect(getToolCall).not.toHaveBeenCalled();
-    await user.click(screen.getByRole("button", { expanded: false }));
+    await user.click(
+      screen.getByRole("button", {
+        name: "调用了 1 次工具",
+        expanded: false,
+      }),
+    );
+    await user.click(
+      screen.getByRole("button", {
+        name: "Toggle details for lookup",
+        expanded: false,
+      }),
+    );
 
     expect(await screen.findByText("complete details")).toBeInTheDocument();
     expect(screen.getByText("complete result")).toBeInTheDocument();
