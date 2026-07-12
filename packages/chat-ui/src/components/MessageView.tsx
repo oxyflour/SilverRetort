@@ -346,22 +346,12 @@ function MessageViewComponent({
             }
 
             const nextGroup = partGroups[groupIndex + 1];
-            const attachedTools =
-              group.type === "text" && nextGroup?.type === "tools"
-                ? nextGroup
-                : null;
-            const toolGroup = group.type === "tools" ? group : attachedTools;
+            const toolGroup = group.type === "tools" ? group : nextGroup?.type === "tools" ? nextGroup : null;
 
             return (
               <div key={group.index}>
                 {group.type === "text" && (
-                  <div
-                    className={`prose prose-sm max-w-none dark:prose-invert ${
-                      attachedTools
-                        ? "contents [&>p:last-child]:mr-2 [&>p:last-child]:inline"
-                        : ""
-                    }`}
-                  >
+                  <div className="prose prose-sm max-w-none dark:prose-invert">
                     <ReactMarkdown
                       remarkPlugins={markdownRemarkPlugins}
                       rehypePlugins={markdownRehypePlugins}
@@ -371,10 +361,7 @@ function MessageViewComponent({
                   </div>
                 )}
                 {toolGroup && (
-                  <ToolCallGroup
-                    toolCalls={toolGroup.toolCalls}
-                    inline={Boolean(attachedTools)}
-                  >
+                  <ToolCallGroup toolCalls={toolGroup.toolCalls}>
                     {toolGroup.toolCalls.map((toolCall) => (
                       <ToolCard
                         key={toolCall.id}

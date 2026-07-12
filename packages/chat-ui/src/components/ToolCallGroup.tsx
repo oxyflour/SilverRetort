@@ -8,7 +8,6 @@ import { AppIcon } from "./icons";
 interface ToolCallGroupProps {
   toolCalls: ToolCall[];
   children: ReactNode;
-  inline?: boolean;
 }
 
 function aggregateStatus(toolCalls: ToolCall[]): ToolCall["status"] {
@@ -39,12 +38,11 @@ function GroupStatusIcon({ status }: { status: ToolCall["status"] }) {
 export function ToolCallGroup({
   toolCalls,
   children,
-  inline = false,
 }: ToolCallGroupProps) {
   const [expanded, setExpanded] = useState(false);
 
   return (
-    <div className={inline ? "inline" : "my-1"}>
+    <div className="my-1">
       <button
         type="button"
         aria-expanded={expanded}
