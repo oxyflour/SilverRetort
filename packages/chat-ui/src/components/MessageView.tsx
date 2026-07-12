@@ -1,6 +1,6 @@
 "use client";
 
-import { memo, useState } from "react";
+import { memo, useEffect, useState } from "react";
 import {
   Check,
   ChevronDown,
@@ -26,6 +26,7 @@ import {
   toRestartErrorMessage,
 } from "./messageViewSupport";
 import { ToolCallGroup } from "./ToolCallGroup";
+import { isTodoTool } from "./toolCallGroupSupport";
 
 const markdownRemarkPlugins = [remarkGfm];
 const markdownRehypePlugins = [rehypeHighlight];
@@ -186,8 +187,50 @@ function MessageViewComponent({
   const [draft, setDraft] = useState("");
   const [saving, setSaving] = useState(false);
   const [submitError, setSubmitError] = useState<string | null>(null);
+  const [fullToolCalls, setFullToolCalls] = useState<Record<string, ToolCall>>({});
   const isUser = message.role === "user";
   const partGroups = groupConsecutiveToolCalls(message.parts);
+  const lastToolGroupIndex = partGroups.findLast(
+    (group) => group.type === "tools",
+  )?.index;
+
+  useEffect(() => {
+    const truncatedTodoCalls = message.parts.flatMap((part) =>
+      part.type === "tool" &&
+      isTodoTool(part.toolCall.name) &&
+      (part.toolCall.detailTruncated || part.toolCall.resultTruncated) &&
+      !fullToolCalls[part.toolCall.id]
+        ? [part.toolCall]
+        : [],
+    );
+    if (truncatedTodoCalls.length === 0) {
+      return;
+    }
+
+    let active = true;
+    void Promise.all(
+      truncatedTodoCalls.map((toolCall) =>
+        client
+          .getToolCall(message.sessionId, message.id, toolCall.id)
+          .catch(() => null),
+      ),
+    ).then((toolCalls) => {
+      if (!active) {
+        return;
+      }
+      setFullToolCalls((current) => ({
+        ...current,
+        ...Object.fromEntries(
+          toolCalls
+            .filter((toolCall): toolCall is ToolCall => toolCall !== null)
+            .map((toolCall) => [toolCall.id, toolCall]),
+        ),
+      }));
+    });
+    return () => {
+      active = false;
+    };
+  }, [client, fullToolCalls, message.id, message.parts, message.sessionId]);
 
   const beginEditing = () => {
     setDraft(messageText(message));
@@ -347,6 +390,35 @@ function MessageViewComponent({
 
             const nextGroup = partGroups[groupIndex + 1];
             const toolGroup = group.type === "tools" ? group : nextGroup?.type === "tools" ? nextGroup : null;
+            const displayedToolCalls =
+              toolGroup?.toolCalls.map(
+                (toolCall) => fullToolCalls[toolCall.id] ?? toolCall,
+              ) ?? [];
+            const toolGroupArtifacts = toolGroup
+              ? Array.from(
+                  new Set(
+                    [
+                      ...toolGroup.toolCalls.map(
+                        (toolCall) =>
+                          getShownArtifactId(toolCall) ??
+                          inferArtifactIdFromMessageWindow(
+                            toolCall,
+                            message,
+                            sessionMessages,
+                            sessionArtifactIds,
+                            artifactCreatedAtById,
+                          ),
+                      ),
+                      ...(toolGroup.index === lastToolGroupIndex
+                        ? message.artifactIds
+                        : []),
+                    ].filter((artifactId): artifactId is string => Boolean(artifactId)),
+                  ),
+                ).map((artifactId) => ({
+                  id: artifactId,
+                  title: artifacts[artifactId]?.title ?? "Artifact",
+                }))
+              : [];
 
             return (
               <div key={group.index}>
@@ -361,7 +433,13 @@ function MessageViewComponent({
                   </div>
                 )}
                 {toolGroup && (
-                  <ToolCallGroup toolCalls={toolGroup.toolCalls}>
+                  <ToolCallGroup
+                    toolCalls={displayedToolCalls}
+                    artifacts={toolGroupArtifacts}
+                    onOpenArtifact={(artifactId) =>
+                      openArtifact(artifactId, message.sessionId)
+                    }
+                  >
                     {toolGroup.toolCalls.map((toolCall) => (
                       <ToolCard
                         key={toolCall.id}

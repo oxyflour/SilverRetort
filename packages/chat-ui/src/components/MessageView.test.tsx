@@ -77,12 +77,12 @@ describe("MessageView", () => {
       />,
     );
 
-    expect(screen.getByText("调用了 1 次工具")).toBeInTheDocument();
+    expect(screen.getByText("调用了 lookup")).toBeInTheDocument();
     expect(screen.queryByText("lookup")).not.toBeInTheDocument();
     expect(screen.queryByText("tool result")).not.toBeInTheDocument();
 
     const groupToggle = screen.getByRole("button", {
-      name: "调用了 1 次工具",
+      name: "调用了 lookup",
       expanded: false,
     });
     await user.click(groupToggle);
@@ -140,7 +140,7 @@ describe("MessageView", () => {
     expect(getToolCall).not.toHaveBeenCalled();
     await user.click(
       screen.getByRole("button", {
-        name: "调用了 1 次工具",
+        name: "调用了 lookup",
         expanded: false,
       }),
     );
@@ -154,5 +154,58 @@ describe("MessageView", () => {
     expect(await screen.findByText("complete details")).toBeInTheDocument();
     expect(screen.getByText("complete result")).toBeInTheDocument();
     expect(getToolCall).toHaveBeenCalledWith("session-a", "assistant-a", "tool-a");
+  });
+
+  it("loads and renders compact todo tool details while the group is collapsed", async () => {
+    const fullDetail = JSON.stringify({
+      todos: [
+        { id: "1", content: "创建一个示例任务：写 Hello World", status: "completed" },
+        { id: "2", content: "演示进度中的任务：查看文件", status: "in_progress" },
+        { id: "3", content: "演示待办任务：更新README", status: "pending" },
+        { id: "4", content: "演示已取消的任务：发送邮件", status: "cancelled" },
+      ],
+    });
+    const todoMessage: Message = {
+      ...message,
+      parts: [
+        {
+          type: "tool",
+          toolCall: {
+            id: "todo-a",
+            name: "todo",
+            status: "done",
+            detail: `${fullDetail.slice(0, 80)}…`,
+            result: `${fullDetail.slice(0, 80)}…`,
+            detailTruncated: true,
+            resultTruncated: true,
+          },
+        },
+      ],
+    };
+    const getToolCall = vi
+      .spyOn(useChatStore.getState().client, "getToolCall")
+      .mockResolvedValue({
+        id: "todo-a",
+        name: "todo",
+        status: "done",
+        detail: fullDetail,
+        result: fullDetail,
+      });
+
+    render(
+      <MessageView
+        message={todoMessage}
+        context={{ ...context, sessionMessages: [todoMessage] }}
+        hasFollowingMessages={false}
+      />,
+    );
+
+    expect(screen.getByText("调用了 todo")).toBeInTheDocument();
+    expect(await screen.findByText("创建一个示例任务：写 Hello World")).toHaveClass("line-through");
+    expect(screen.getByText("演示进度中的任务：查看文件")).not.toHaveClass("line-through");
+    expect(screen.getByText("演示待办任务：更新README")).not.toHaveClass("line-through");
+    expect(screen.getByText("演示已取消的任务：发送邮件")).toHaveClass("line-through");
+    expect(screen.queryByText("todo", { selector: ".font-mono" })).not.toBeInTheDocument();
+    expect(getToolCall).toHaveBeenCalledWith("session-a", "assistant-a", "todo-a");
   });
 });
