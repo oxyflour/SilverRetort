@@ -28,6 +28,14 @@ export function ChatApp() {
   useEffect(() => {
     const store = useChatStore.getState();
     void store.refreshSessions();
+    const refreshModelSettings = () => {
+      const current = useChatStore.getState();
+      void current.refreshHermesControls();
+      if (current.currentSessionId) {
+        void current.refreshSessionModel(current.currentSessionId);
+      }
+    };
+    window.addEventListener("silverretort:model-settings-changed", refreshModelSettings);
     // 甯搁┗浜嬩欢閫氶亾锛氭墍鏈?run 浜嬩欢 + MCP UI 鍛戒护閮戒粠杩欓噷杩涙潵
     const stop = subscribeEvents(store.client.eventsUrl(), {
       onEvent: (event) => useChatStore.getState().applyEvent(event),
@@ -41,7 +49,10 @@ export function ChatApp() {
         });
       },
     });
-    return stop;
+    return () => {
+      window.removeEventListener("silverretort:model-settings-changed", refreshModelSettings);
+      stop();
+    };
   }, []);
 
   return (

@@ -194,6 +194,8 @@ export const SessionModelSchema = z.object({
   modelId: z.string().default(""),
   defaultProvider: z.string().default(""),
   defaultModel: z.string().default(""),
+  baseUrl: z.string().default(""),
+  hasApiKey: z.boolean().default(false),
 });
 export type SessionModel = z.infer<typeof SessionModelSchema>;
 
@@ -201,6 +203,8 @@ export const SetModelRequestSchema = z.object({
   modelId: z.string().nullish(),
   provider: z.string().nullish(),
   model: z.string().nullish(),
+  baseUrl: z.string().nullish(),
+  apiKey: z.string().nullish(),
 });
 export type SetModelRequest = z.infer<typeof SetModelRequestSchema>;
 

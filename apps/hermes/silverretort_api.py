@@ -8,6 +8,15 @@ import re
 from fastapi import HTTPException
 from starlette.requests import Request
 
+from model_settings import (
+    collect_models,
+    model_default,
+    model_id,
+    set_default_model,
+    set_vision_model,
+    vision_model,
+)
+
 SESSION_KEY_RE = re.compile(r"^[A-Za-z0-9_.:-]{1,200}$")
 LOOPBACK_HOSTS = {"127.0.0.1", "::1", "localhost"}
 UI_OPERATION_TIMEOUT_SECONDS = 5.0
@@ -156,46 +165,6 @@ def expand_slash_text(text: str, session_key: str) -> dict[str, Any]:
     }
 
 
-def model_id(provider: str, model: str) -> str:
-    return f"{provider}:{model}"
-
-
-def model_default() -> dict[str, str]:
-    from hermes_cli.config import load_config
-
-    cfg = load_config()
-    model_cfg = cfg.get("model", {})
-    if isinstance(model_cfg, dict):
-        return {
-            "provider": str(model_cfg.get("provider") or ""),
-            "model": str(model_cfg.get("default") or model_cfg.get("name") or ""),
-        }
-    return {"provider": "", "model": str(model_cfg or "")}
-
-
-def collect_models() -> dict[str, Any]:
-    default = model_default()
-    provider = default["provider"]
-    model = default["model"]
-    models: list[dict[str, Any]] = []
-    if provider and model:
-        models.append(
-            {
-                "id": model_id(provider, model),
-                "provider": provider,
-                "providerLabel": provider,
-                "model": model,
-                "label": model.split("/")[-1],
-                "available": True,
-                "current": True,
-            }
-        )
-    return {
-        "models": models,
-        "default": default,
-    }
-
-
 def _runner() -> Any:
     try:
         from gateway.run import _gateway_runner_ref
@@ -282,30 +251,6 @@ def clear_session_model(session_key: str) -> None:
         pass
 
 
-def set_default_model(provider: str, model: str) -> dict[str, Any]:
-    from hermes_cli.config import (
-        clear_model_endpoint_credentials,
-        load_config,
-        save_config,
-    )
-
-    cfg = load_config()
-    current = cfg.get("model", {})
-    if isinstance(current, dict):
-        model_cfg = dict(current)
-    elif isinstance(current, str) and current.strip():
-        model_cfg = {"default": current.strip()}
-    else:
-        model_cfg = {}
-    model_cfg["provider"] = provider
-    model_cfg["default"] = model
-    if provider.strip().lower() != "custom":
-        clear_model_endpoint_credentials(model_cfg, clear_base_url=True)
-    cfg["model"] = model_cfg
-    save_config(cfg)
-    return {"provider": provider, "model": model, "modelId": model_id(provider, model)}
-
-
 def _require_auth(request: Request, api_key: str) -> None:
     if not authorized_request(request, api_key):
         raise HTTPException(401, "unauthorized")
@@ -323,6 +268,7 @@ def _default_model_response() -> dict[str, Any]:
     provider = current.get("provider", "")
     model = current.get("model", "")
     return {
+        **current,
         "provider": provider,
         "model": model,
         "modelId": model_id(provider, model) if provider and model else "",
@@ -331,7 +277,34 @@ def _default_model_response() -> dict[str, Any]:
 
 def _set_default_model_response(body: dict[str, Any]) -> dict[str, Any]:
     provider, model = resolve_model_selection(body)
-    return set_default_model(provider, model)
+    return set_default_model(
+        provider,
+        model,
+        str(body.get("baseUrl") or "") if "baseUrl" in body else None,
+        str(body.get("apiKey") or "") or None,
+    )
+
+
+def _vision_model_response() -> dict[str, Any]:
+    current = vision_model()
+    provider = str(current.get("provider") or "")
+    model = str(current.get("model") or "")
+    return {
+        **current,
+        "modelId": model_id(provider, model) if provider and model else "",
+    }
+
+
+def _set_vision_model_response(body: dict[str, Any]) -> dict[str, Any]:
+    if body.get("provider") is None and body.get("model") is None:
+        return set_vision_model("", "")
+    provider, model = resolve_model_selection(body)
+    return set_vision_model(
+        provider,
+        model,
+        str(body.get("baseUrl") or "") if "baseUrl" in body else None,
+        str(body.get("apiKey") or "") or None,
+    )
 
 
 def _set_session_model_response(
@@ -385,6 +358,21 @@ def register_silverretort_routes(app: Any, api_key: str) -> None:
             raise HTTPException(400, "invalid body")
         return await run_ui_operation(
             "set default model", lambda: _set_default_model_response(body)
+        )
+
+    @app.get("/silverretort/vision-model")
+    async def silverretort_vision_model(request: Request) -> dict[str, Any]:
+        _require_auth(request, api_key)
+        return await run_ui_operation("vision model", _vision_model_response)
+
+    @app.put("/silverretort/vision-model")
+    async def silverretort_set_vision_model(request: Request) -> dict[str, Any]:
+        _require_auth(request, api_key)
+        body = await request.json()
+        if not isinstance(body, dict):
+            raise HTTPException(400, "invalid body")
+        return await run_ui_operation(
+            "set vision model", lambda: _set_vision_model_response(body)
         )
 
     @app.get("/silverretort/session-model")
