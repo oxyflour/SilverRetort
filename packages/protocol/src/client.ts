@@ -159,7 +159,7 @@ export class ApiClient {
 
   artifactContentUrl(artifactId: string, assetPath?: string): string {
     const base = `${this.baseUrl}/api/artifacts/${encodeURIComponent(artifactId)}/content/`;
-    return assetPath ? `${base}/${encodePath(assetPath)}` : base;
+    return assetPath ? `${base}${encodePath(assetPath)}` : base;
   }
 
   sendChat(sessionId: string, body: SendChatRequest): Promise<SendChatResponse> {

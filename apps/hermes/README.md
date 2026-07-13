@@ -41,7 +41,10 @@ discarded during migration and is not copied into workspaces.
 Iframe artifacts reference a static-site entry inside the workspace, for
 example `{"path":"artifacts/demo/index.html"}`. Inline HTML and external iframe
 URLs are not supported. Relative CSS, JavaScript, image, and font assets are
-served from the entry file's directory. Local-process mode lets uvicorn read
+served from the entry file's directory. Put those resources in the same
+directory as the entry HTML or in child directories, and reference them with
+relative URLs such as `./style.css` or `./assets/app.js`; files in parent
+directories are not valid artifact assets. Local-process mode lets uvicorn read
 the shared directory directly; Docker and remote modes stream through relay.
 
 ## Desktop-Managed Docker
