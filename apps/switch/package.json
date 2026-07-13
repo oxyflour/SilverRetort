@@ -1,0 +1,17 @@
+{
+  "name": "silverretort-switch",
+  "version": "0.1.0",
+  "private": true,
+  "type": "commonjs",
+  "bin": {
+    "silverretort-switch": "switch.cjs"
+  },
+  "scripts": {
+    "dev": "node switch.cjs",
+    "start": "node switch.cjs",
+    "build": "node scripts/build-sea.cjs"
+  },
+  "engines": {
+    "node": ">=24"
+  }
+}

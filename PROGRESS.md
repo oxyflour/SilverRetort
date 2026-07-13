@@ -44,7 +44,7 @@
   - 默认 `DATA_DIR`：`app.getPath("userData")/data`；可用 `SILVERRETORT_DATA_DIR` 覆盖，desktop 会把 `DATA_DIR` 传给 uvicorn
   - 本地模式：无 `DATA_DIR/settings.json` 时，development 下自动 spawn 第三个子进程 `apps/hermes`，生成随机 64 hex API key，轮询 `http://127.0.0.1:23002/health`，并把 `HERMES_URL/HERMES_API_KEY` 传给 uvicorn
   - 远程模式：`DATA_DIR/settings.json` 含 `hermesUrl` + `hermesApiKey` 时，不再本地拉起 hermes，uvicorn 直接走远端；已验证实际请求发往远端 `/v1/chat/completions`
-  - Docker 托管远端模式：`DATA_DIR/settings.json` 含 `hermesDockerImage` 时，desktop 按 `hermesDockerUser`（默认 OS 用户名）生成隔离容器名，并让 Docker 动态分配宿主机端口；启动后把实际 URL 传给 uvicorn。该模式不再依赖 `hermesUrl`，容器固定带 `HERMES_RELAY_ENABLED=1`，`hermesApiKey` 留空时由 desktop 按次随机生成
+  - 远端 Docker 模式由 `apps/switch` 托管：desktop 只配置用户级 `hermesUrl` 和 `hermesApiKey`；switch 按 `{userId}.conf` 创建/恢复容器并转发 HTTP 与 WebSocket bridge
   - 当前边界：packaged 模式下本地 hermes runtime 仍依赖 #9 的打包工作；在未配置远程 hermes 时暂回退 mock 引擎，避免现阶段桌面包直接启动失败
 - [ ] #8 远程沙盒：apps/hermes relay.py（沙盒内 MCP 端点 + /bridge WebSocket）+ Dockerfile + uvicorn 出站 bridge 连接
 - [ ] #9 打包：extraResources 带 uv.exe + lock，首启 `uv sync` 到 DATA_DIR/hermes-env + 进度页

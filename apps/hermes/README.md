@@ -47,54 +47,21 @@ relative URLs such as `./style.css` or `./assets/app.js`; files in parent
 directories are not valid artifact assets. Local-process mode lets uvicorn read
 the shared directory directly; Docker and remote modes stream through relay.
 
-## Desktop-Managed Docker
+## User-Scoped Docker Switch
 
-If desktop should start the container for you, put these fields in `DATA_DIR/settings.json`:
-
-```json
-{
-  "hermesDockerImage": "silverretort-hermes"
-}
-```
-
-Optional fields:
-
-- `hermesApiKey`
-- `hermesDockerUser` (defaults to the desktop OS username)
-- `hermesDockerHost` (a hostname or IP address reachable from the desktop)
-- `hermesDockerContainerPrefix` (defaults to `silverretort-hermes`)
-- `hermesDockerContainerPort`
-
-Behavior:
-
-- desktop treats this as a remote Hermes service, not a special local mode
-- desktop derives a stable, user-scoped container name from `hermesDockerUser`
-- Docker publishes `hermesDockerContainerPort` on an ephemeral host port, so users do not contend for one fixed port
-- desktop discovers the published port and passes the resulting URL to local uvicorn
-- desktop starts the container with `HERMES_RELAY_ENABLED=1`
-- if `hermesApiKey` is omitted here, desktop generates a random per-launch key and passes the same key to both the container and uvicorn
-- `hermesUrl` is ignored in desktop-managed Docker mode; it is reserved for externally managed remote Hermes
-- `hermesDockerContainerName` is no longer supported; use `hermesDockerContainerPrefix`
-- stale containers are removed only when their SilverRetort ownership label matches the current user
-
-For a shared remote Docker daemon:
-
-- if `hermesDockerHost` is omitted, desktop derives the host from `DOCKER_HOST` or the active Docker context
-- local `npipe` and `unix` endpoints resolve to `127.0.0.1`; `ssh` and `tcp` endpoints use their hostname
-- set `hermesDockerHost` explicitly when the Docker endpoint hostname is not reachable from the desktop
-- users with the same OS username on different machines must set distinct `hermesDockerUser` values
-
-Example:
+Desktop no longer manages Docker containers. Run `apps/switch` next to the
+Docker daemon and configure desktop with the user-scoped switch URL:
 
 ```json
 {
-  "hermesDockerImage": "silverretort-hermes",
-  "hermesDockerHost": "my-box",
-  "hermesDockerUser": "alice"
+  "hermesUrl": "https://switch.example/endpoint/alice",
+  "hermesApiKey": "same-value-as-alice-conf"
 }
 ```
 
-Published ports bind to all Docker host interfaces by default. Restrict access with the host firewall; Hermes API authentication remains enabled.
+The switch reads `alice.conf`, creates or recovers `hermes-alice`, waits for its
+health endpoint, and proxies HTTP and `/bridge` WebSocket traffic. See
+`apps/switch/README.md` for configuration and single-executable packaging.
 
 ## Local Docker
 
