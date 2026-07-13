@@ -1,6 +1,8 @@
 """SilverRetort-specific Hermes relay endpoints."""
 
-from typing import Any
+from collections.abc import Callable
+from typing import Any, TypeVar
+import asyncio
 import re
 
 from fastapi import HTTPException
@@ -8,6 +10,17 @@ from starlette.requests import Request
 
 SESSION_KEY_RE = re.compile(r"^[A-Za-z0-9_.:-]{1,200}$")
 LOOPBACK_HOSTS = {"127.0.0.1", "::1", "localhost"}
+UI_OPERATION_TIMEOUT_SECONDS = 5.0
+T = TypeVar("T")
+
+
+async def run_ui_operation(name: str, operation: Callable[[], T]) -> T:
+    try:
+        return await asyncio.wait_for(
+            asyncio.to_thread(operation), timeout=UI_OPERATION_TIMEOUT_SECONDS
+        )
+    except TimeoutError as exc:
+        raise HTTPException(503, f"Hermes UI operation timed out: {name}") from exc
 
 
 def _bearer_token(headers: Any) -> str:
@@ -74,7 +87,10 @@ def expand_slash_text(text: str, session_key: str) -> dict[str, Any]:
         return {"handled": False}
     command, rest = parsed
 
-    from agent.skill_bundles import build_bundle_invocation_message, resolve_bundle_command_key
+    from agent.skill_bundles import (
+        build_bundle_invocation_message,
+        resolve_bundle_command_key,
+    )
     from agent.skill_commands import (
         build_skill_invocation_message,
         build_stacked_skill_invocation_message,
@@ -186,7 +202,8 @@ def collect_models() -> dict[str, Any]:
                     "model": model_name,
                     "label": model_name.split("/")[-1],
                     "available": model_name not in unavailable,
-                    "current": bool(provider.get("is_current")) and model_name == payload.get("model"),
+                    "current": bool(provider.get("is_current"))
+                    and model_name == payload.get("model"),
                 }
             )
     return {
@@ -285,7 +302,11 @@ def clear_session_model(session_key: str) -> None:
 
 
 def set_default_model(provider: str, model: str) -> dict[str, Any]:
-    from hermes_cli.config import clear_model_endpoint_credentials, load_config, save_config
+    from hermes_cli.config import (
+        clear_model_endpoint_credentials,
+        load_config,
+        save_config,
+    )
 
     cfg = load_config()
     current = cfg.get("model", {})
@@ -316,11 +337,40 @@ def _session_key_from_query(request: Request) -> str:
     return session_key
 
 
+def _default_model_response() -> dict[str, Any]:
+    current = model_default()
+    provider = current.get("provider", "")
+    model = current.get("model", "")
+    return {
+        "provider": provider,
+        "model": model,
+        "modelId": model_id(provider, model) if provider and model else "",
+    }
+
+
+def _set_default_model_response(body: dict[str, Any]) -> dict[str, Any]:
+    provider, model = resolve_model_selection(body)
+    return set_default_model(provider, model)
+
+
+def _set_session_model_response(
+    body: dict[str, Any], session_key: str
+) -> dict[str, Any]:
+    if body.get("modelId") is None and body.get("model") is None:
+        clear_session_model(session_key)
+        return session_model_response(session_key)
+    provider, model = resolve_model_selection(body)
+    apply_session_model(session_key, provider, model)
+    return session_model_response(session_key)
+
+
 def register_silverretort_routes(app: Any, api_key: str) -> None:
     @app.get("/silverretort/slash/commands")
     async def silverretort_slash_commands(request: Request) -> dict[str, Any]:
         _require_auth(request, api_key)
-        return {"commands": collect_slash_commands()}
+        return await run_ui_operation(
+            "slash commands", lambda: {"commands": collect_slash_commands()}
+        )
 
     @app.post("/silverretort/slash/expand")
     async def silverretort_slash_expand(request: Request) -> dict[str, Any]:
@@ -331,20 +381,20 @@ def register_silverretort_routes(app: Any, api_key: str) -> None:
         session_key = str(body.get("sessionKey") or "").strip()
         if session_key and not SESSION_KEY_RE.match(session_key):
             raise HTTPException(400, "invalid sessionKey")
-        return expand_slash_text(str(body.get("text") or ""), session_key)
+        return await run_ui_operation(
+            "slash expand",
+            lambda: expand_slash_text(str(body.get("text") or ""), session_key),
+        )
 
     @app.get("/silverretort/models")
     async def silverretort_models(request: Request) -> dict[str, Any]:
         _require_auth(request, api_key)
-        return collect_models()
+        return await run_ui_operation("models", collect_models)
 
     @app.get("/silverretort/default-model")
     async def silverretort_default_model(request: Request) -> dict[str, Any]:
         _require_auth(request, api_key)
-        current = model_default()
-        provider = current.get("provider", "")
-        model = current.get("model", "")
-        return {"provider": provider, "model": model, "modelId": model_id(provider, model) if provider and model else ""}
+        return await run_ui_operation("default model", _default_model_response)
 
     @app.put("/silverretort/default-model")
     async def silverretort_set_default_model(request: Request) -> dict[str, Any]:
@@ -352,13 +402,17 @@ def register_silverretort_routes(app: Any, api_key: str) -> None:
         body = await request.json()
         if not isinstance(body, dict):
             raise HTTPException(400, "invalid body")
-        provider, model = resolve_model_selection(body)
-        return set_default_model(provider, model)
+        return await run_ui_operation(
+            "set default model", lambda: _set_default_model_response(body)
+        )
 
     @app.get("/silverretort/session-model")
     async def silverretort_session_model(request: Request) -> dict[str, Any]:
         _require_auth(request, api_key)
-        return session_model_response(_session_key_from_query(request))
+        session_key = _session_key_from_query(request)
+        return await run_ui_operation(
+            "session model", lambda: session_model_response(session_key)
+        )
 
     @app.put("/silverretort/session-model")
     async def silverretort_set_session_model(request: Request) -> dict[str, Any]:
@@ -369,9 +423,7 @@ def register_silverretort_routes(app: Any, api_key: str) -> None:
         session_key = str(body.get("sessionKey") or "").strip()
         if not session_key or not SESSION_KEY_RE.match(session_key):
             raise HTTPException(400, "invalid sessionKey")
-        if body.get("modelId") is None and body.get("model") is None:
-            clear_session_model(session_key)
-            return session_model_response(session_key)
-        provider, model = resolve_model_selection(body)
-        apply_session_model(session_key, provider, model)
-        return session_model_response(session_key)
+        return await run_ui_operation(
+            "set session model",
+            lambda: _set_session_model_response(body, session_key),
+        )
