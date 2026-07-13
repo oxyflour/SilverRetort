@@ -18,6 +18,10 @@ export type MessagePartGroup =
   | { type: "text"; part: Extract<MessagePart, { type: "text" }>; index: number }
   | { type: "tools"; toolCalls: ToolCall[]; index: number };
 
+function isBlankTextPart(part: MessagePart | undefined): boolean {
+  return part?.type === "text" && part.text.trim().length === 0;
+}
+
 export function groupConsecutiveToolCalls(parts: MessagePart[]): MessagePartGroup[] {
   const groups: MessagePartGroup[] = [];
 
@@ -28,15 +32,28 @@ export function groupConsecutiveToolCalls(parts: MessagePart[]): MessagePartGrou
       continue;
     }
 
-    const toolCalls = [part.toolCall];
-    while (parts[index + 1]?.type === "tool") {
-      index += 1;
-      const nextPart = parts[index]!;
+    const startIndex = index;
+    const toolCalls: ToolCall[] = [];
+    let nextIndex = index;
+
+    while (nextIndex < parts.length) {
+      const nextPart = parts[nextIndex]!;
       if (nextPart.type === "tool") {
         toolCalls.push(nextPart.toolCall);
+        nextIndex += 1;
+        continue;
       }
+
+      if (isBlankTextPart(nextPart) && parts[nextIndex + 1]?.type === "tool") {
+        nextIndex += 1;
+        continue;
+      }
+
+      break;
     }
-    groups.push({ type: "tools", toolCalls, index: index - toolCalls.length + 1 });
+
+    groups.push({ type: "tools", toolCalls, index: startIndex });
+    index = nextIndex - 1;
   }
 
   return groups;
