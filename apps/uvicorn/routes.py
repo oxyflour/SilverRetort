@@ -8,7 +8,7 @@ from urllib.request import url2pathname
 
 import httpx
 from fastapi import APIRouter, HTTPException, UploadFile
-from fastapi.responses import FileResponse, StreamingResponse
+from fastapi.responses import FileResponse, RedirectResponse, StreamingResponse
 from sse_starlette.sse import EventSourceResponse
 
 import db
@@ -344,6 +344,13 @@ async def _workspace_file_response(
 
 
 @router.get("/artifacts/{artifact_id}/content")
+def redirect_artifact_content_directory(artifact_id: str):
+    return RedirectResponse(
+        url=f"/api/artifacts/{quote(artifact_id, safe='')}/content/",
+        status_code=308,
+    )
+
+
 @router.get("/artifacts/{artifact_id}/content/")
 @router.get("/artifacts/{artifact_id}/content/{asset_path:path}")
 async def get_artifact_content(artifact_id: str, asset_path: str | None = None):
