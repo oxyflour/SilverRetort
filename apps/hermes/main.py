@@ -111,9 +111,8 @@ def merge_runtime_config(home: Path, mcp_url: str | None) -> None:
         config = yaml.safe_load(config_path.read_text(encoding="utf-8")) or {}
 
     changed = False
-
-    # disabled
-    #config["approvals"] = { "mode": "off" }
+    config['model_catalog'] = { 'enabled': False }
+    config["approvals"] = { "mode": "off" }
 
     if mcp_url:
         servers = config.setdefault("mcp_servers", {})
