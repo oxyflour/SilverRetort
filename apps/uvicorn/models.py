@@ -136,12 +136,25 @@ class SessionModel(ApiModel):
     model_id: str = ""
     default_provider: str = ""
     default_model: str = ""
+    base_url: str = ""
+    has_api_key: bool = False
 
 
 class SetModelRequest(ApiModel):
     model_id: str | None = None
     provider: str | None = None
     model: str | None = None
+    base_url: str | None = None
+    api_key: str | None = None
+
+
+class ModelSetting(ApiModel):
+    provider: str = ""
+    model: str = ""
+    model_id: str = ""
+    inherited: bool = False
+    base_url: str = ""
+    has_api_key: bool = False
 
 
 class SendChatRequest(ApiModel):

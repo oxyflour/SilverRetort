@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import {
+  BrainCircuit,
   Check,
   ChevronRight,
   Monitor,
@@ -12,9 +13,10 @@ import {
   X,
   type LucideIcon,
 } from "lucide-react";
+import { ModelSettings } from "./ModelSettings";
 import { useThemePreference, type ThemePreference } from "./theme";
 
-type SettingsPage = "general" | "appearance";
+type SettingsPage = "general" | "models" | "appearance";
 
 interface SettingsDialogProps {
   open: boolean;
@@ -24,6 +26,7 @@ interface SettingsDialogProps {
 
 const pages: Array<{ id: SettingsPage; label: string; icon: LucideIcon }> = [
   { id: "general", label: "常规", icon: Settings },
+  { id: "models", label: "模型", icon: BrainCircuit },
   { id: "appearance", label: "外观", icon: Palette },
 ];
 
@@ -94,9 +97,9 @@ export function SettingsDialog({ open, onClose, userName }: SettingsDialogProps)
           >
             <X className="h-5 w-5" />
           </button>
-          {page === "general" ? (
-            <GeneralSettings userName={userName} />
-          ) : (
+          {page === "general" && <GeneralSettings userName={userName} />}
+          {page === "models" && <ModelSettings />}
+          {page === "appearance" && (
             <AppearanceSettings theme={theme} onThemeChange={setTheme} />
           )}
         </main>
@@ -114,111 +117,7 @@ function GeneralSettings({ userName }: { userName: string }) {
         <p className="text-xs font-medium uppercase tracking-wide text-neutral-500">当前用户</p>
         <p className="mt-2 font-medium">{userName}</p>
       </div>
-      <DefaultModelSettings />
     </section>
-  );
-}
-
-interface HermesModel {
-  id: string;
-  provider: string;
-  providerLabel: string;
-  model: string;
-  label: string;
-  available: boolean;
-}
-
-function DefaultModelSettings() {
-  const [models, setModels] = useState<HermesModel[]>([]);
-  const [selected, setSelected] = useState("");
-  const [loading, setLoading] = useState(false);
-  const [saving, setSaving] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-
-  useEffect(() => {
-    let cancelled = false;
-    setLoading(true);
-    setError(null);
-    Promise.all([
-      fetch("/api/hermes/models").then((response) => {
-        if (!response.ok) throw new Error(`models HTTP ${response.status}`);
-        return response.json();
-      }),
-      fetch("/api/hermes/default-model").then((response) => {
-        if (!response.ok) throw new Error(`default model HTTP ${response.status}`);
-        return response.json();
-      }),
-    ])
-      .then(([modelsPayload, defaultPayload]) => {
-        if (cancelled) return;
-        setModels(Array.isArray(modelsPayload.models) ? modelsPayload.models : []);
-        setSelected(defaultPayload.modelId || "");
-      })
-      .catch((cause) => {
-        if (!cancelled) setError(cause instanceof Error ? cause.message : String(cause));
-      })
-      .finally(() => {
-        if (!cancelled) setLoading(false);
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, []);
-
-  const save = () => {
-    const model = models.find((item) => item.id === selected);
-    if (!model) return;
-    setSaving(true);
-    setError(null);
-    fetch("/api/hermes/default-model", {
-      method: "PUT",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({
-        modelId: model.id,
-        provider: model.provider,
-        model: model.model,
-      }),
-    })
-      .then((response) => {
-        if (!response.ok) throw new Error(`save HTTP ${response.status}`);
-        return response.json();
-      })
-      .catch((cause) => setError(cause instanceof Error ? cause.message : String(cause)))
-      .finally(() => setSaving(false));
-  };
-
-  return (
-    <div className="mt-4 rounded-xl border border-neutral-200 p-4 dark:border-neutral-700">
-      <p className="text-xs font-medium uppercase tracking-wide text-neutral-500">
-        Hermes 默认模型
-      </p>
-      <p className="mt-1 text-xs text-neutral-500 dark:text-neutral-400">
-        影响新会话，或未设置会话模型 override 的会话。
-      </p>
-      <div className="mt-3 flex flex-col gap-2 sm:flex-row">
-        <select
-          value={selected}
-          disabled={loading || models.length === 0}
-          onChange={(event) => setSelected(event.target.value)}
-          className="min-w-0 flex-1 rounded-lg border border-neutral-300 bg-white px-3 py-2 text-sm dark:border-neutral-700 dark:bg-neutral-800"
-        >
-          <option value="">{loading ? "加载模型中..." : "选择默认模型"}</option>
-          {models.map((model) => (
-            <option key={model.id} value={model.id} disabled={!model.available}>
-              {model.providerLabel || model.provider}: {model.model}
-            </option>
-          ))}
-        </select>
-        <button
-          disabled={!selected || saving}
-          onClick={save}
-          className="rounded-lg bg-neutral-900 px-4 py-2 text-sm text-white disabled:opacity-40 dark:bg-neutral-100 dark:text-neutral-900"
-        >
-          {saving ? "保存中..." : "保存"}
-        </button>
-      </div>
-      {error && <p className="mt-2 text-xs text-red-500">{error}</p>}
-    </div>
   );
 }
 

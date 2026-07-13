@@ -270,13 +270,61 @@ class HermesEngine:
             response.raise_for_status()
             return dict(response.json())
 
-    async def set_default_model(self, provider: str, model: str, model_id: str | None = None) -> dict[str, Any]:
+    async def set_default_model(
+        self,
+        provider: str,
+        model: str,
+        model_id: str | None = None,
+        base_url: str | None = None,
+        api_key: str | None = None,
+    ) -> dict[str, Any]:
         body = {"provider": provider, "model": model}
         if model_id is not None:
             body["modelId"] = model_id
+        if base_url is not None:
+            body["baseUrl"] = base_url
+        if api_key:
+            body["apiKey"] = api_key
         async with httpx.AsyncClient(timeout=httpx.Timeout(30, connect=5)) as client:
             response = await client.put(
                 f"{self.base_url}/silverretort/default-model",
+                json=body,
+                headers=self._headers(),
+            )
+            response.raise_for_status()
+            return dict(response.json())
+
+    async def get_vision_model(self) -> dict[str, Any]:
+        async with httpx.AsyncClient(timeout=httpx.Timeout(20, connect=5)) as client:
+            response = await client.get(
+                f"{self.base_url}/silverretort/vision-model",
+                headers=self._headers(),
+            )
+            response.raise_for_status()
+            return dict(response.json())
+
+    async def set_vision_model(
+        self,
+        provider: str | None,
+        model: str | None,
+        model_id: str | None = None,
+        base_url: str | None = None,
+        api_key: str | None = None,
+    ) -> dict[str, Any]:
+        body: dict[str, Any] = {}
+        if provider is not None:
+            body["provider"] = provider
+        if model is not None:
+            body["model"] = model
+        if model_id is not None:
+            body["modelId"] = model_id
+        if base_url is not None:
+            body["baseUrl"] = base_url
+        if api_key:
+            body["apiKey"] = api_key
+        async with httpx.AsyncClient(timeout=httpx.Timeout(30, connect=5)) as client:
+            response = await client.put(
+                f"{self.base_url}/silverretort/vision-model",
                 json=body,
                 headers=self._headers(),
             )

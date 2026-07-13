@@ -24,6 +24,7 @@ from models import (
     CreateWorkspaceRequest,
     CreateSessionRequest,
     Message,
+    ModelSetting,
     RestartMessageRequest,
     SendChatRequest,
     SendChatResponse,
@@ -115,6 +116,8 @@ async def hermes_default_model() -> SessionModel:
             model_id=str(payload.get("modelId") or ""),
             default_provider=provider,
             default_model=model,
+            base_url=str(payload.get("baseUrl") or ""),
+            has_api_key=bool(payload.get("hasApiKey")),
         )
     except Exception as exc:
         raise HTTPException(503, f"Hermes default model unavailable: {exc}") from exc
@@ -126,7 +129,13 @@ async def set_hermes_default_model(body: SetModelRequest) -> SessionModel:
         raise HTTPException(400, "provider and model are required")
     method = _require_hermes_method("set_default_model")
     try:
-        payload = await method(body.provider, body.model, body.model_id)
+        payload = await method(
+            body.provider,
+            body.model,
+            body.model_id,
+            body.base_url,
+            body.api_key,
+        )
         provider = str(payload.get("provider") or body.provider)
         model = str(payload.get("model") or body.model)
         return SessionModel(
@@ -136,9 +145,40 @@ async def set_hermes_default_model(body: SetModelRequest) -> SessionModel:
             model_id=str(payload.get("modelId") or body.model_id or ""),
             default_provider=provider,
             default_model=model,
+            base_url=str(payload.get("baseUrl") or ""),
+            has_api_key=bool(payload.get("hasApiKey")),
         )
     except Exception as exc:
         raise HTTPException(503, f"failed to set Hermes default model: {exc}") from exc
+
+
+@router.get("/hermes/vision-model")
+async def hermes_vision_model() -> ModelSetting:
+    method = _require_hermes_method("get_vision_model")
+    try:
+        return ModelSetting.model_validate(await method())
+    except Exception as exc:
+        raise HTTPException(503, f"Hermes vision model unavailable: {exc}") from exc
+
+
+@router.put("/hermes/vision-model")
+async def set_hermes_vision_model(body: SetModelRequest) -> ModelSetting:
+    has_provider = bool(body.provider and body.provider.strip())
+    has_model = bool(body.model and body.model.strip())
+    if has_provider != has_model:
+        raise HTTPException(400, "provider and model must both be set or both be empty")
+    method = _require_hermes_method("set_vision_model")
+    try:
+        payload = await method(
+            body.provider,
+            body.model,
+            body.model_id,
+            body.base_url,
+            body.api_key,
+        )
+        return ModelSetting.model_validate(payload)
+    except Exception as exc:
+        raise HTTPException(503, f"failed to set Hermes vision model: {exc}") from exc
 
 
 @router.get("/workspaces")
