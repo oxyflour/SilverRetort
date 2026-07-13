@@ -46,7 +46,13 @@ def validate_iframe_payload(session_id: str, payload: Any) -> str | None:
 def ui_show_artifact(
     session_id: str, type: str, title: str, payload: dict[str, Any] | None = None
 ) -> str:
-    """Show an artifact in the user's right panel and return its artifact_id."""
+    """Show an artifact in the user's right panel and return its artifact_id.
+
+    For iframe artifacts, payload.path must point to a workspace-relative HTML
+    entry file. Put referenced resources in the same directory as that HTML file
+    or in child directories, then reference them with relative URLs such as
+    ./style.css or ./assets/app.js. Parent-directory assets are not served.
+    """
     if db.get_session(session_id) is None:
         return f"error: session not found: {session_id}"
     type_error = validate_render_type(type)
