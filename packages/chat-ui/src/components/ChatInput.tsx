@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useRef, useState } from "react";
+import { type DragEvent, useMemo, useRef, useState } from "react";
 import { Paperclip, SendHorizontal, Square, X } from "lucide-react";
 import { useChatStore } from "../store";
 import { AppIcon } from "./icons";
@@ -19,6 +19,7 @@ export function ChatInput() {
   const slashCommands = useChatStore((s) => s.slashCommands);
   const refreshHermesControls = useChatStore((s) => s.refreshHermesControls);
   const [text, setText] = useState("");
+  const [draggingFiles, setDraggingFiles] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const trimmedText = text.trim();
@@ -46,15 +47,46 @@ export function ChatInput() {
     setText(`${command} `);
   };
 
+  const addFiles = (files: FileList | File[]) => {
+    if (!currentSessionId) return;
+    for (const file of Array.from(files)) void addAttachment(file);
+  };
+
+  const hasDraggedFiles = (event: DragEvent) =>
+    Array.from(event.dataTransfer.types).includes("Files");
+
   return (
-    <div className="border-t border-neutral-200 p-3 dark:border-neutral-800">
+    <div
+      className="border-t border-neutral-200 p-3 dark:border-neutral-800"
+      onDragEnter={(event) => {
+        if (!currentSessionId || !hasDraggedFiles(event)) return;
+        event.preventDefault();
+        setDraggingFiles(true);
+      }}
+      onDragOver={(event) => {
+        if (!currentSessionId || !hasDraggedFiles(event)) return;
+        event.preventDefault();
+        event.dataTransfer.dropEffect = "copy";
+        setDraggingFiles(true);
+      }}
+      onDragLeave={(event) => {
+        if (event.currentTarget.contains(event.relatedTarget as Node | null)) return;
+        setDraggingFiles(false);
+      }}
+      onDrop={(event) => {
+        if (!currentSessionId || !hasDraggedFiles(event)) return;
+        event.preventDefault();
+        setDraggingFiles(false);
+        addFiles(event.dataTransfer.files);
+      }}
+    >
       <input
         ref={fileInputRef}
         type="file"
         multiple
         hidden
         onChange={(e) => {
-          for (const file of e.target.files ?? []) void addAttachment(file);
+          if (e.target.files) addFiles(e.target.files);
           e.target.value = "";
         }}
       />
@@ -82,7 +114,13 @@ export function ChatInput() {
             ))}
           </div>
         )}
-        <div className="relative flex items-center gap-2 rounded-[1.25rem] bg-neutral-100 px-3 py-2 transition-colors dark:bg-neutral-800">
+        <div
+          className={`relative flex items-center gap-2 rounded-[1.25rem] border border-transparent bg-neutral-100 px-3 py-2 transition-colors dark:bg-neutral-800 ${
+            draggingFiles
+              ? "border-dashed border-blue-400 bg-blue-50 dark:border-blue-500 dark:bg-blue-950/30"
+              : ""
+          }`}
+        >
           {slashSuggestions.length > 0 && (
             <div className="absolute bottom-full left-10 right-3 mb-2 overflow-hidden rounded-lg border border-neutral-200 bg-white shadow-lg dark:border-neutral-700 dark:bg-neutral-900">
               {slashSuggestions.map((command) => (
@@ -138,10 +176,11 @@ export function ChatInput() {
               }
             }}
             onPaste={(e) => {
-              for (const item of e.clipboardData.items) {
+              const files = Array.from(e.clipboardData.items).flatMap((item) => {
                 const file = item.kind === "file" ? item.getAsFile() : null;
-                if (file) void addAttachment(file);
-              }
+                return file ? [file] : [];
+              });
+              addFiles(files);
             }}
             placeholder={
               currentSessionId
