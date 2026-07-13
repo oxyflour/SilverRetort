@@ -18,7 +18,7 @@ export function SessionModelSelector() {
   const value = sessionModel?.source === "session" ? sessionModel.modelId : "__default__";
   const defaultProvider = sessionModel?.defaultProvider || "Default provider";
   const defaultLabel = sessionModel?.defaultModel
-    ? `Default: ${shortModelName(sessionModel.defaultModel)}`
+    ? shortModelName(sessionModel.defaultModel)
     : "Default model";
   const selectedModel = models.find((model) => model.id === value);
   const selectedProvider = selectedModel
