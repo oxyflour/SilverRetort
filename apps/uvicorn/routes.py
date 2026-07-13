@@ -8,7 +8,7 @@ from urllib.request import url2pathname
 
 import httpx
 from fastapi import APIRouter, HTTPException, UploadFile
-from fastapi.responses import FileResponse, RedirectResponse, Response, StreamingResponse
+from fastapi.responses import FileResponse, StreamingResponse
 from sse_starlette.sse import EventSourceResponse
 
 import db
@@ -305,7 +305,6 @@ async def _workspace_file_response(
     *,
     download_name: str | None = None,
     no_cache: bool = False,
-    html_base_href: str | None = None,
 ):
     try:
         metadata = await workspace_service.stat_workspace_file(workspace_id, relative_path)
@@ -320,12 +319,8 @@ async def _workspace_file_response(
         headers["Cross-Origin-Resource-Policy"] = "cross-origin"
     if download_name:
         headers["Content-Disposition"] = f"attachment; filename*=UTF-8''{quote(Path(download_name).name)}"
-    should_inject_base = html_base_href is not None and metadata["mimeType"].startswith("text/html")
     local_path = workspace_service.local_file_path(workspace_id, relative_path)
     if local_path is not None:
-        if should_inject_base:
-            content = _inject_html_base(local_path.read_text(encoding="utf-8"), html_base_href)
-            return Response(content, media_type=metadata["mimeType"], headers=headers)
         return FileResponse(local_path, media_type=metadata["mimeType"], headers=headers)
     try:
         client, response = await workspace_service.open_remote_file(workspace_id, relative_path)
@@ -338,10 +333,6 @@ async def _workspace_file_response(
         status = response.status_code
         await response.aclose(); await client.aclose()
         raise HTTPException(503, f"workspace file service returned {status}")
-    if should_inject_base:
-        content = _inject_html_base((await response.aread()).decode("utf-8"), html_base_href)
-        await response.aclose(); await client.aclose()
-        return Response(content, media_type=metadata["mimeType"], headers=headers)
     async def stream():
         try:
             async for chunk in response.aiter_raw():
@@ -352,19 +343,7 @@ async def _workspace_file_response(
     return StreamingResponse(stream(), media_type=metadata["mimeType"], headers=headers)
 
 
-def _inject_html_base(html: str, href: str) -> str:
-    base = f'<base href="{href}">'
-    head_index = html.lower().find("<head>")
-    if head_index >= 0:
-        return html[: head_index + len("<head>")] + base + html[head_index + len("<head>") :]
-    return base + html
-
-
 @router.get("/artifacts/{artifact_id}/content")
-def redirect_artifact_content_directory(artifact_id: str):
-    return RedirectResponse(url="content/", status_code=308)
-
-
 @router.get("/artifacts/{artifact_id}/content/")
 @router.get("/artifacts/{artifact_id}/content/{asset_path:path}")
 async def get_artifact_content(artifact_id: str, asset_path: str | None = None):
@@ -383,12 +362,7 @@ async def get_artifact_content(artifact_id: str, asset_path: str | None = None):
         relative_path = workspace_service.resolve_artifact_asset(payload["path"], asset_path)
     except ValueError as exc:
         raise HTTPException(400, str(exc)) from exc
-    return await _workspace_file_response(
-        session.workspace_id,
-        relative_path,
-        no_cache=True,
-        html_base_href=f"/api/artifacts/{quote(artifact_id, safe='')}/content/" if asset_path is None else None,
-    )
+    return await _workspace_file_response(session.workspace_id, relative_path, no_cache=True)
 
 
 # ---- chat run ----

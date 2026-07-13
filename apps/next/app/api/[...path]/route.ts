@@ -23,8 +23,10 @@ async function proxy(
   { params }: { params: Promise<{ path: string[] }> },
 ): Promise<Response> {
   const { path } = await params;
-  const search = new URL(req.url).search;
-  const dest = `${backendBase()}/api/${path.map(encodeURIComponent).join("/")}${search}`;
+  const url = new URL(req.url);
+  const search = url.search;
+  const trailingSlash = url.pathname.endsWith("/") ? "/" : "";
+  const dest = `${backendBase()}/api/${path.map(encodeURIComponent).join("/")}${trailingSlash}${search}`;
 
   const headers = new Headers();
   req.headers.forEach((value, key) => {
