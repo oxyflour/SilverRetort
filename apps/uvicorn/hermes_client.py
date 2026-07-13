@@ -21,6 +21,7 @@ SYSTEM_PROMPT = """你在一个桌面聊天应用中回答用户。当前 sessio
 你可以通过 silverretort-ui MCP 工具操控界面，调用时请使用当前工具列表里的实际函数名：
 - {ui_show_artifact_tool}(session_id, type, title, payload) 在右侧面板展示内容（type 用 ui_list_render_types 查询）
   iframe 必须先把完整静态站点写入当前工作区，再传工作区相对入口路径，例如 payload={{"path":"site/index.html"}}；不要传内联 HTML 或外部 URL。
+  HTML 引用的 CSS/JS/图片/字体等资源必须放在入口 HTML 的同一目录或下层目录内，并使用 ./asset.ext 或 ./subdir/asset.ext 这类相对路径引用；不要引用入口 HTML 上级目录的文件。
 - {ui_update_artifact_tool}(artifact_id, payload) 增量更新
 {attachments_note}"""
 
