@@ -174,44 +174,25 @@ def model_default() -> dict[str, str]:
 
 
 def collect_models() -> dict[str, Any]:
-    from hermes_cli.inventory import build_models_payload, load_picker_context
-
-    payload = build_models_payload(
-        load_picker_context(),
-        explicit_only=False,
-        include_unconfigured=False,
-        picker_hints=True,
-        canonical_order=True,
-        pricing=False,
-        capabilities=True,
-        probe_custom_providers=False,
-        probe_current_custom_provider=True,
-    )
+    default = model_default()
+    provider = default["provider"]
+    model = default["model"]
     models: list[dict[str, Any]] = []
-    for provider in payload.get("providers", []):
-        provider_id = str(provider.get("slug") or "")
-        provider_label = str(provider.get("name") or provider_id)
-        unavailable = set(provider.get("unavailable_models") or [])
-        for model in provider.get("models") or []:
-            model_name = str(model)
-            models.append(
-                {
-                    "id": model_id(provider_id, model_name),
-                    "provider": provider_id,
-                    "providerLabel": provider_label,
-                    "model": model_name,
-                    "label": model_name.split("/")[-1],
-                    "available": model_name not in unavailable,
-                    "current": bool(provider.get("is_current"))
-                    and model_name == payload.get("model"),
-                }
-            )
+    if provider and model:
+        models.append(
+            {
+                "id": model_id(provider, model),
+                "provider": provider,
+                "providerLabel": provider,
+                "model": model,
+                "label": model.split("/")[-1],
+                "available": True,
+                "current": True,
+            }
+        )
     return {
         "models": models,
-        "default": {
-            "provider": str(payload.get("provider") or ""),
-            "model": str(payload.get("model") or ""),
-        },
+        "default": default,
     }
 
 
