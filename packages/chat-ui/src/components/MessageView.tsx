@@ -5,6 +5,7 @@ import {
   Check,
   ChevronDown,
   ChevronRight,
+  Copy,
   ExternalLink,
   PencilLine,
   X,
@@ -232,6 +233,10 @@ function MessageViewComponent({
     };
   }, [client, fullToolCalls, message.id, message.parts, message.sessionId]);
 
+  const copyMessage = () => {
+    void navigator.clipboard.writeText(messageText(message));
+  };
+
   const beginEditing = () => {
     setDraft(messageText(message));
     setSubmitError(null);
@@ -301,6 +306,14 @@ function MessageViewComponent({
             <span className="ml-auto flex shrink-0 opacity-0 transition-opacity pointer-events-none group-hover:opacity-100 group-hover:pointer-events-auto">
               <button
                 type="button"
+                title="Copy message"
+                onClick={copyMessage}
+                className="rounded p-1 text-neutral-500 hover:text-neutral-900 dark:hover:text-neutral-100"
+              >
+                <AppIcon icon={Copy} className="h-4 w-4" />
+              </button>
+              <button
+                type="button"
                 title="Edit and restart"
                 onClick={beginEditing}
                 disabled={running || saving || editing}
@@ -330,7 +343,7 @@ function MessageViewComponent({
                   rel="noreferrer"
                   className="rounded-full border border-neutral-300 px-3 py-1 text-xs hover:bg-neutral-100 dark:border-neutral-600 dark:hover:bg-neutral-800"
                 >
-                  file {attachment.name}
+                  {attachment.name}
                 </a>
               ),
             )}
