@@ -330,7 +330,7 @@ function MessageViewComponent({
                   rel="noreferrer"
                   className="rounded-full border border-neutral-300 px-3 py-1 text-xs hover:bg-neutral-100 dark:border-neutral-600 dark:hover:bg-neutral-800"
                 >
-                  file {attachment.name}
+                  {attachment.name}
                 </a>
               ),
             )}
