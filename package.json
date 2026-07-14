@@ -5,6 +5,8 @@
   "scripts": {
     "dev": "pnpm --filter silverretort-desktop run dev",
     "build": "pnpm --filter silverretort-desktop run build",
-    "build:dir": "pnpm --filter silverretort-desktop run build:dir"
+    "build:dir": "pnpm --filter silverretort-desktop run build:dir",
+    "switch:dev": "pnpm --filter silverretort-switch run dev",
+    "switch:build": "pnpm --filter silverretort-switch run build"
   }
 }
