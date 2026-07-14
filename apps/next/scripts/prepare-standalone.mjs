@@ -1,4 +1,4 @@
-import { access, cp, mkdir, rm } from "node:fs/promises";
+import { access, cp, lstat, mkdir, readlink, rm } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -17,10 +17,39 @@ async function pathExists(targetPath) {
   }
 }
 
+async function shouldCopyStandaloneEntry(sourcePath) {
+  const stats = await lstat(sourcePath);
+  if (!stats.isSymbolicLink()) {
+    return true;
+  }
+
+  const target = await readlink(sourcePath);
+  const resolvedTarget = path.resolve(path.dirname(sourcePath), target);
+  if (await pathExists(resolvedTarget)) {
+    return true;
+  }
+
+  console.warn(`Skipping dangling standalone symlink: ${sourcePath} -> ${target}`);
+  return false;
+}
+
 async function replaceDir(from, to) {
   await rm(to, { recursive: true, force: true });
   await mkdir(path.dirname(to), { recursive: true });
   await cp(from, to, {
+    dereference: true,
+    filter: shouldCopyStandaloneEntry,
+    recursive: true,
+  });
+}
+
+async function copyDirContents(from, to) {
+  await mkdir(to, { recursive: true });
+
+  await cp(from, to, {
+    dereference: true,
+    filter: shouldCopyStandaloneEntry,
+    force: true,
     recursive: true,
   });
 }
@@ -28,9 +57,12 @@ async function replaceDir(from, to) {
 async function main() {
   const publicDir = path.join(appRoot, "public");
   const staticDir = path.join(nextDir, "static");
+  const hoistedNodeModulesDir = path.join(standaloneDir, "node_modules", ".pnpm", "node_modules");
   const standaloneAppDir = path.join(desktopStandaloneDir, "apps", "next");
 
   await replaceDir(standaloneDir, desktopStandaloneDir);
+  await copyDirContents(hoistedNodeModulesDir, path.join(standaloneAppDir, "node_modules"));
+
   if (await pathExists(publicDir)) {
     await replaceDir(publicDir, path.join(standaloneAppDir, "public"));
   }
