@@ -9,11 +9,11 @@ const DEFAULT_NEXT_PORT = 23000;
 const DEFAULT_PYTHON_PORT = 23001;
 const DEFAULT_HERMES_PORT = 23002;
 
-async function assertUrl(url, retry = 30) {
+async function assertUrl(url, options = {}, retry = 30) {
     while (retry-- > 0) {
         await new Promise((resolve) => setTimeout(resolve, 1000));
         try {
-            const response = await fetch(url);
+            const response = await fetch(url, options);
             const text = await response.text();
             if (response.status === 200) {
                 return text;
@@ -85,9 +85,7 @@ function buildUvicornEnv(config, hermesMode, pythonPort) {
             ...(hermesMode.mode === "local" ? {
                 LOCAL_HERMES_WORKSPACES_DIR: hermesMode.workspacesDir,
             } : {}),
-            ...(["docker", "local"].includes(hermesMode.mode) ? {
-                HERMES_BRIDGE_URL: toWebSocketUrl(hermesMode.url, "bridge"),
-            } : {}),
+            HERMES_BRIDGE_URL: toWebSocketUrl(hermesMode.url, "bridge"),
         }),
     });
 }
@@ -104,10 +102,7 @@ async function startServiceStack({ config, supervisor, utilityProcess, ports = {
     const nextPort = ports.next ?? DEFAULT_NEXT_PORT;
     const pythonPort = ports.python ?? DEFAULT_PYTHON_PORT;
     const hermesPort = ports.hermes ?? DEFAULT_HERMES_PORT;
-    const configuredHermesMode = resolveHermesMode(config, pythonPort, hermesPort);
-    const hermesMode = configuredHermesMode.mode === "docker"
-        ? await startHermes(configuredHermesMode, config, supervisor)
-        : configuredHermesMode;
+    const hermesMode = resolveHermesMode(config, pythonPort, hermesPort);
     const pythonRuntime = resolvePythonRuntime(config, pythonPort);
 
     const uvicorn = spawn(pythonRuntime.command, pythonRuntime.args, {
@@ -128,7 +123,9 @@ async function startServiceStack({ config, supervisor, utilityProcess, ports = {
         assertUrl(`http://127.0.0.1:${nextPort}/health`),
     ];
     if (hermesMode.mode !== "disabled") {
-        healthChecks.push(assertUrl(hermesMode.healthUrl));
+        healthChecks.push(assertUrl(hermesMode.healthUrl, {
+            headers: { Authorization: `Bearer ${hermesMode.apiKey}` },
+        }));
     }
     const [apiHealth, nextHealth, hermesHealth] = await Promise.all(healthChecks);
     const hermesSummary = hermesMode.mode === "disabled"
