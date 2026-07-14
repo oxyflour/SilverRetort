@@ -8,6 +8,7 @@ import signal
 import sys
 import threading
 from pathlib import Path
+from typing import Any
 from urllib.parse import urlsplit, urlunsplit
 
 import yaml
@@ -176,6 +177,17 @@ def configure_bridge_relay(public_host: str, public_port: str) -> str | None:
     return f"http://127.0.0.1:{public_port}/mcp/"
 
 
+def patch_hermes() -> None:
+    import agent.model_metadata as model_metadata
+
+    def disabled_fetch_model_metadata(
+        force_refresh: bool = False,
+    ) -> dict[str, dict[str, Any]]:
+        return {}
+
+    model_metadata.fetch_model_metadata = disabled_fetch_model_metadata
+
+
 def main() -> None:
     if os.getenv("WATCH_STDIN", "1") != "0":
         threading.Thread(target=exit_on_stdin_eof, daemon=True).start()
@@ -190,6 +202,7 @@ def main() -> None:
     merge_runtime_config(home, mcp_url)
 
     # 复用 hermes CLI 入口，等价于命令行执行 `hermes gateway`
+    patch_hermes()
     from hermes_cli.main import main as hermes_main
 
     sys.argv = ["hermes", "gateway"]
