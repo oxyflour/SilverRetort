@@ -1,13 +1,15 @@
 """REST API + 常驻事件通道。路径与 packages/protocol 的 ApiClient 一一对应。"""
 
+import json
 import mimetypes
+import os
 from pathlib import Path, PurePosixPath
 import uuid
 from urllib.parse import quote, unquote, urlparse
 from urllib.request import url2pathname
 
 import httpx
-from fastapi import APIRouter, HTTPException, UploadFile
+from fastapi import APIRouter, HTTPException, UploadFile, Body
 from fastapi.responses import FileResponse, StreamingResponse
 from sse_starlette.sse import EventSourceResponse
 
@@ -48,6 +50,45 @@ engine = create_engine()
 DEFAULT_TITLE = "新会话"
 
 
+def _data_dir() -> Path:
+    path = Path(os.getenv("DATA_DIR", Path(__file__).parent / "data"))
+    path.mkdir(parents=True, exist_ok=True)
+    return path
+
+
+def _desktop_settings_path() -> Path:
+    return _data_dir() / "settings.json"
+
+
+def _read_desktop_settings() -> dict:
+    path = _desktop_settings_path()
+    if not path.exists():
+        return {}
+    try:
+        payload = json.loads(path.read_text("utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return {}
+    return payload if isinstance(payload, dict) else {}
+
+
+def _write_desktop_settings(settings: dict) -> None:
+    _desktop_settings_path().write_text(json.dumps(settings, ensure_ascii=False, indent=2) + "\n", "utf-8")
+
+
+def _hermes_connection_response() -> dict:
+    settings = _read_desktop_settings()
+    configured_url = str(settings.get("hermesUrl") or "")
+    runtime_mode = os.getenv("SILVERRETORT_HERMES_MODE")
+    hermes_url = configured_url or (str(os.getenv("HERMES_URL") or "") if runtime_mode == "remote" else "")
+    return {
+        "packaged": os.getenv("SILVERRETORT_DESKTOP_MODE") == "packaged",
+        "mode": "remote" if configured_url or runtime_mode == "remote" else "local",
+        "hermesUrl": hermes_url,
+        "hasHermesApiKey": bool(settings.get("hermesApiKey") or (runtime_mode == "remote" and os.getenv("HERMES_API_KEY"))),
+        "restartRequired": False,
+    }
+
+
 def _auto_title(text: str) -> str:
     return text[:30] or DEFAULT_TITLE
 
@@ -66,6 +107,39 @@ def _models_response(payload: dict) -> HermesModelsResponse:
         default_provider=str(default.get("provider") or ""),
         default_model=str(default.get("model") or ""),
     )
+
+
+
+@router.get("/hermes/connection")
+def hermes_connection() -> dict:
+    return _hermes_connection_response()
+
+
+@router.put("/hermes/connection")
+def set_hermes_connection(body: dict = Body(...)) -> dict:
+    mode = str(body.get("mode") or "").strip().lower()
+    settings = _read_desktop_settings()
+    if mode == "remote":
+        hermes_url = str(body.get("hermesUrl") or "").strip().rstrip("/")
+        if not hermes_url:
+            raise HTTPException(400, "hermesUrl is required")
+        settings["hermesUrl"] = hermes_url
+        hermes_api_key = str(body.get("hermesApiKey") or "").strip()
+        if hermes_api_key:
+            settings["hermesApiKey"] = hermes_api_key
+        elif not settings.get("hermesApiKey"):
+            raise HTTPException(400, "hermesApiKey is required")
+    elif mode == "local":
+        if os.getenv("SILVERRETORT_DESKTOP_MODE") == "packaged":
+            raise HTTPException(400, "packaged mode requires hermesUrl")
+        settings.pop("hermesUrl", None)
+        settings.pop("hermesApiKey", None)
+    else:
+        raise HTTPException(400, "mode must be local or remote")
+    _write_desktop_settings(settings)
+    response = _hermes_connection_response()
+    response["restartRequired"] = True
+    return response
 
 
 # ---- sessions ----

@@ -79,6 +79,8 @@ function buildUvicornEnv(config, hermesMode, pythonPort) {
     return config.buildChildEnv({
         LISTEN_PORT: `${pythonPort}`,
         DATA_DIR: config.dataDir,
+        SILVERRETORT_DESKTOP_MODE: config.isPackaged ? "packaged" : "development",
+        SILVERRETORT_HERMES_MODE: hermesMode.mode,
         ...(hermesMode.mode === "disabled" ? {} : {
             HERMES_URL: hermesMode.url,
             HERMES_API_KEY: hermesMode.apiKey,
