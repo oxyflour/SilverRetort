@@ -10,34 +10,51 @@ containers. Requests under `/endpoint/{userId}` are routed to a container named
 pnpm --filter silverretort-switch dev
 ```
 
-The switch reads `{userId}.conf` from `SWITCH_CONFIG_DIR`. Each file uses Docker
-`--env-file` syntax and must contain `HERMES_API_KEY`:
+The switch reads `config/{userId}.json` from `SWITCH_CONFIG_DIR` (default:
+`config`). Each file must contain `hermesApiKey`, and can override container
+startup parameters, environment variables, and mounted volumes:
 
-```dotenv
-HERMES_API_KEY=replace-with-a-long-random-key
-OPENAI_API_KEY=replace-with-your-key
-OPENAI_BASE_URL=https://example.com/v1
-OPENAI_MODEL_ID=model-name
+```json
+{
+  "hermesApiKey": "replace-with-a-long-random-key",
+  "image": "silverretort-hermes",
+  "containerPort": 23002,
+  "env": {
+    "OPENAI_API_KEY": "replace-with-your-key",
+    "OPENAI_BASE_URL": "https://example.com/v1",
+    "OPENAI_MODEL_ID": "model-name"
+  },
+  "volumes": [
+    "alice-cache:/cache",
+    { "source": "/host/read-only", "target": "/mnt/read-only", "readOnly": true }
+  ],
+  "args": []
+}
 ```
 
 Desktop configuration points at the user-scoped base URL and uses the same key:
 
 ```json
 {
-  "hermesUrl": "https://switch.example/endpoint/alice",
+  "switchUrl": "https://switch.example/endpoint/$USERNAME",
   "hermesApiKey": "replace-with-a-long-random-key"
 }
 ```
 
-The switch creates missing containers from `HERMES_DOCKER_IMAGE`, enables the
-Hermes relay, dynamically publishes `HERMES_CONTAINER_PORT`, and persists the
-workspace and Hermes home in named Docker volumes. Existing stopped containers
-are started; unhealthy running containers are restarted.
+Open `/admin` for a simple management UI. The default admin password is
+`Abcd1234` and can be changed with `SWITCH_ADMIN_PASSWORD`; the UI lists
+configured/logged-in users and can create a new user while showing the generated
+key for copying. Open `/status/{userId}` in a browser to view a simple HTML
+status page for the user container. The switch creates missing containers from the configured image,
+enables the Hermes relay, dynamically publishes the configured container port,
+and persists workspace and Hermes home in named Docker volumes. Existing stopped
+containers are started; unhealthy running containers are restarted. Containers
+with no traffic for more than 60 minutes are stopped by the idle sweeper.
 
 Configuration:
 
-- `SWITCH_HOST` / `SWITCH_PORT`: listener, default `0.0.0.0:8080`
-- `SWITCH_CONFIG_DIR`: `.conf` directory, default current directory
+- `SWITCH_HOST` / `SWITCH_PORT`: listener, default `0.0.0.0:23004`
+- `SWITCH_CONFIG_DIR`: JSON config directory, default `config`
 - `HERMES_DOCKER_IMAGE`: default `silverretort-hermes`
 - `HERMES_CONTAINER_PORT`: default `23002`
 - `HERMES_DOCKER_HOST`: address used to reach Docker-published ports
@@ -46,6 +63,9 @@ Configuration:
 - `SWITCH_HEALTH_TIMEOUT_MS`: default `2000`
 - `SWITCH_RECOVERY_TIMEOUT_MS`: default `60000`
 - `SWITCH_HEALTH_INTERVAL_MS`: default `500`
+- `SWITCH_IDLE_STOP_MS`: default `3600000`
+- `SWITCH_IDLE_SWEEP_MS`: default `60000`
+- `SWITCH_ADMIN_PASSWORD`: default `Abcd1234`
 
 Terminate TLS in front of the switch when it is reachable over a network.
 

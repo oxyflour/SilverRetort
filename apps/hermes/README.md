@@ -9,6 +9,7 @@
 ## Modes
 
 - Local process: spawned by `apps/desktop`; exits when stdin closes
+- Packaged binary: built with PyInstaller and bundled into desktop resources; runs with the same local-process environment
 - Local Docker: container talks directly to `host.docker.internal` for `/mcp/`
 - Remote Docker: container enables relay; local uvicorn dials back into `/bridge`
 - Desktop-managed Docker: desktop uses `docker run` against the current `DOCKER_HOST`, but runtime semantics are still the same as Remote Docker
@@ -54,14 +55,24 @@ Docker daemon and configure desktop with the user-scoped switch URL:
 
 ```json
 {
-  "hermesUrl": "https://switch.example/endpoint/alice",
-  "hermesApiKey": "same-value-as-alice-conf"
+  "switchUrl": "https://switch.example/endpoint/$USERNAME",
+  "hermesApiKey": "same-value-as-config/alice.json"
 }
 ```
 
-The switch reads `alice.conf`, creates or recovers `hermes-alice`, waits for its
+The switch reads `config/alice.json`, creates or recovers `hermes-alice`, waits for its
 health endpoint, and proxies HTTP and `/bridge` WebSocket traffic. See
 `apps/switch/README.md` for configuration and single-executable packaging.
+
+## Packaged Binary
+
+Build the desktop-managed Hermes binary with:
+
+```bash
+pnpm --filter silverretort-hermes run build
+```
+
+The desktop build script runs this automatically and bundles `apps/hermes/dist` into Electron resources. If the bundled executable is present, packaged desktop starts Hermes locally just like development mode; `switchUrl` remains available as an optional remote/switch configuration.
 
 ## Local Docker
 
@@ -90,14 +101,7 @@ Image defaults:
 - `LISTEN_PORT=23002`
 - `MCP_URL=http://host.docker.internal:23001/mcp/`
 
-Desktop settings stay unchanged:
-
-```json
-{
-  "hermesUrl": "http://127.0.0.1:23002",
-  "hermesApiKey": "replace-with-32-plus-chars"
-}
-```
+Direct raw Hermes URLs do not provide the relay bridge used by SilverRetort MCP tools; use `apps/switch` for desktop remote mode.
 
 If you prefer a mounted env file:
 
