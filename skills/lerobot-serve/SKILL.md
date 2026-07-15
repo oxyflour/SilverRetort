@@ -7,6 +7,13 @@ description: Serve LeRobot-compatible USD articulations through standalone NVIDI
 
 Use standalone `ovphysx`; never import `isaacsim`, `omni.*`, or start Kit. Keep generic ROS routing in the bridge and isolate MOZ01-specific pickup behavior under `scripts/moz01`.
 
+## Windows shell safety
+
+- Treat ROS names, USD prim paths, and Kit settings that begin with `/` or `--/` as semantic values, not filesystem paths.
+- Run this skill's command blocks in PowerShell. Prefer `scripts\run_ros.ps1` and omit `-Articulation` and `-Namespace` when their slash-prefixed defaults are sufficient so the launcher constructs and forwards those values outside Git Bash.
+- Never pass slash-prefixed semantic values directly from Git Bash to a Windows-native executable because MSYS rewrites them as Windows paths; quoting does not prevent this conversion.
+- If a direct Git Bash invocation is unavoidable, set `MSYS2_ARG_CONV_EXCL='*'` for that command only and pass actual filesystem paths in Windows form. Never change `/lerobot`, `/tf`, `/World/...`, or `--/exts/...` to work around shell conversion.
+
 ## Prerequisites
 
 - Before running the ROS bridge or any ROS command, verify that the default ROS 2 root `C:\Programs\ros2-windows` exists as a directory and contains `setup.bat`.

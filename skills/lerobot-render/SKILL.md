@@ -7,6 +7,13 @@ description: Render multiple USD camera sensors from ROS 2 TF poses with the omn
 
 Use `omni.hydra.rtx` in Omniverse Kit; never import or launch Isaac Sim. Keep ROS and Kit in separate processes because their Python ABIs can differ.
 
+## Windows shell safety
+
+- Treat ROS names, USD prim paths, and Kit settings that begin with `/` or `--/` as semantic values, not filesystem paths.
+- Run this skill's command blocks in PowerShell. Prefer `scripts\run_render.ps1` and omit slash-prefixed options when their defaults are sufficient so the launcher constructs and forwards those values outside Git Bash.
+- Never pass slash-prefixed semantic values directly from Git Bash to a Windows-native executable because MSYS rewrites them as Windows paths; quoting does not prevent this conversion.
+- If a direct Git Bash invocation is unavoidable, set `MSYS2_ARG_CONV_EXCL='*'` for that command only and pass actual filesystem paths in Windows form. Never change `/lerobot`, `/tf`, `/World/...`, or `--/exts/...` to work around shell conversion.
+
 ## Prerequisites
 
 - Before any launch or ROS command, verify that `C:\isaacsim-6` and `C:\Programs\ros2-windows` each exist as directories. Also verify that the Kit root contains `kit\kit.exe` and the ROS 2 root contains `setup.bat`.
@@ -59,7 +66,7 @@ Preserve authored non-pose transforms when applying TF overrides, especially `xf
 
 ## Verification
 
-Verify the input and output independently:
+Verify the input and output independently from PowerShell, not Git Bash:
 
 ```powershell
 ros2 topic echo /tf --once

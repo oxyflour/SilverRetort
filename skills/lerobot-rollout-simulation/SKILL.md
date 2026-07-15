@@ -7,6 +7,13 @@ description: Evaluate a trained LeRobot policy on an ovphysx virtual robot over 
 
 Run a pretrained LeRobot policy against the ROS contract from `lerobot-serve` and optionally `lerobot-render`. Keep evaluation independent of project-specific code and LeRobot built-in Gym environments.
 
+## Windows shell safety
+
+- Treat ROS names, USD prim paths, and Kit settings that begin with `/` or `--/` as semantic values, not filesystem paths.
+- Run this skill's command blocks in PowerShell. Prefer the supplied `.ps1` launchers and omit slash-prefixed options when their defaults are sufficient so the launcher constructs and forwards those values outside Git Bash.
+- Never pass slash-prefixed semantic values directly from Git Bash to a Windows-native executable because MSYS rewrites them as Windows paths; quoting does not prevent this conversion.
+- If a direct Git Bash invocation is unavoidable, set `MSYS2_ARG_CONV_EXCL='*'` for that command only and pass actual filesystem paths in Windows form. Never change `/lerobot`, `/tf`, `/World/...`, or `--/exts/...` to work around shell conversion.
+
 ## Prepare
 
 1. Run `uv sync` in this skill directory.
