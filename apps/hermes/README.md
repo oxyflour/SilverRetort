@@ -54,7 +54,7 @@ Docker daemon and configure desktop with the user-scoped switch URL:
 
 ```json
 {
-  "switchUrl": "https://switch.example/endpoint/alice",
+  "switchUrl": "https://switch.example/endpoint/$USERNAME",
   "hermesApiKey": "same-value-as-config/alice.json"
 }
 ```

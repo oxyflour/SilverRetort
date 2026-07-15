@@ -9,6 +9,11 @@ function randomApiKey() {
     return crypto.randomBytes(32).toString("hex");
 }
 
+
+function expandSwitchUrl(url, username = os.userInfo().username) {
+    return `${url || ""}`.replace(/\$USERNAME/gu, encodeURIComponent(username));
+}
+
 function defaultSwitchHermesUrl(username = os.userInfo().username, switchBaseUrl = "http://localhost:23004") {
     return joinUrl(switchBaseUrl, `endpoint/${encodeURIComponent(username)}`);
 }
@@ -29,6 +34,7 @@ function resolveHermesMode(
     pythonPort,
     hermesPort,
     randomApiKeyFn = randomApiKey,
+    username,
 ) {
     const hermesApiKey = `${config.settings.hermesApiKey || ""}`.trim();
     const removedDockerKeys = Object.keys(config.settings).filter((key) => key.startsWith("hermesDocker"));
@@ -38,7 +44,7 @@ function resolveHermesMode(
         );
     }
 
-    const switchUrl = normalizeBaseUrl(config.settings.switchUrl);
+    const switchUrl = normalizeBaseUrl(expandSwitchUrl(config.settings.switchUrl, username));
     if (switchUrl) {
         if (!hermesApiKey) {
             throw new Error("DATA_DIR/settings.json has switchUrl but missing hermesApiKey");
@@ -92,6 +98,7 @@ async function startHermes(mode, config, supervisor, spawn = nodeSpawn) {
 
 module.exports = {
     defaultSwitchHermesUrl,
+    expandSwitchUrl,
     randomApiKey,
     resolveHermesRuntime,
     resolveHermesMode,

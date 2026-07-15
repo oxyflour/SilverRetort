@@ -3,7 +3,7 @@ const { mkdtempSync, rmSync } = require("node:fs");
 const os = require("node:os");
 const path = require("node:path");
 const test = require("node:test");
-const { defaultSwitchHermesUrl, resolveHermesMode } = require("../src/hermes-service.cjs");
+const { defaultSwitchHermesUrl, expandSwitchUrl, resolveHermesMode } = require("../src/hermes-service.cjs");
 
 function makeConfig(t, overrides = {}) {
     const dataDir = mkdtempSync(path.join(os.tmpdir(), "silverretort-hermes-"));
@@ -73,4 +73,20 @@ test("default switch URL points at localhost and encodes the user id", () => {
         defaultSwitchHermesUrl("Alice.Smith", "http://localhost:23004"),
         "http://localhost:23004/endpoint/Alice.Smith",
     );
+});
+
+
+test("switchUrl expands the USERNAME placeholder", () => {
+    assert.equal(
+        expandSwitchUrl("http://localhost:23004/endpoint/$USERNAME", "Alice Smith"),
+        "http://localhost:23004/endpoint/Alice%20Smith",
+    );
+});
+
+test("resolveHermesMode expands USERNAME in switchUrl", (t) => {
+    const config = makeConfig(t, {
+        settings: { switchUrl: "http://localhost:23004/endpoint/$USERNAME", hermesApiKey: "secret" },
+    });
+    const mode = resolveHermesMode(config, 23001, 23002, undefined, "Alice");
+    assert.equal(mode.url, "http://localhost:23004/endpoint/Alice");
 });
