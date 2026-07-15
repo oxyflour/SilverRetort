@@ -69,7 +69,12 @@ function getRuntime() {
     if (!runtime) {
         const config = loadDesktopConfig({ app, sourceDir: __dirname });
         const supervisor = createProcessSupervisor({
-            onUnexpectedExit: () => app.quit(),
+            onUnexpectedExit: ({ code }) => {
+                if (code === 42) {
+                    app.relaunch();
+                }
+                app.quit();
+            },
         });
         runtime = {
             config,
