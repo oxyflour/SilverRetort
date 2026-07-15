@@ -2,6 +2,7 @@
   "name": "silverretort-hermes",
   "private": true,
   "scripts": {
-    "dev": "uv run --project . python main.py"
+    "dev": "uv run --project . python main.py",
+    "build": "uv run --project . --with pyinstaller pyinstaller --noconfirm --clean --onedir --name silverretort-hermes --distpath dist --workpath build --specpath build main.py"
   }
 }

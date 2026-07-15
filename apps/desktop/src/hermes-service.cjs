@@ -1,11 +1,35 @@
 // @ts-check
 const crypto = require("node:crypto");
+const os = require("node:os");
 const path = require("node:path");
+const { existsSync } = require("node:fs");
 const { spawn: nodeSpawn } = require("node:child_process");
 const { ensureDir, joinUrl, normalizeBaseUrl } = require("./desktop-config.cjs");
 
 function randomApiKey() {
     return crypto.randomBytes(32).toString("hex");
+}
+
+
+function expandSwitchUrl(url, username = os.userInfo().username) {
+    return `${url || ""}`.replace(/\$USERNAME/gu, encodeURIComponent(username));
+}
+
+function defaultSwitchHermesUrl(username = os.userInfo().username, switchBaseUrl = "http://localhost:23004") {
+    return joinUrl(switchBaseUrl, `endpoint/${encodeURIComponent(username)}`);
+}
+
+function resolvePackagedHermesRuntime(config) {
+    const executable = path.join(
+        config.serviceRoot,
+        "hermes",
+        "silverretort-hermes",
+        process.platform === "win32" ? "silverretort-hermes.exe" : "silverretort-hermes",
+    );
+    if (!existsSync(executable)) {
+        return null;
+    }
+    return { command: executable, args: [], cwd: path.dirname(executable) };
 }
 
 function resolveHermesRuntime(config) {
@@ -16,7 +40,7 @@ function resolveHermesRuntime(config) {
             cwd: path.join(config.serviceRoot, "hermes"),
         };
     }
-    return null;
+    return resolvePackagedHermesRuntime(config);
 }
 
 function resolveHermesMode(
@@ -24,32 +48,32 @@ function resolveHermesMode(
     pythonPort,
     hermesPort,
     randomApiKeyFn = randomApiKey,
+    username,
 ) {
     const hermesApiKey = `${config.settings.hermesApiKey || ""}`.trim();
     const removedDockerKeys = Object.keys(config.settings).filter((key) => key.startsWith("hermesDocker"));
     if (removedDockerKeys.length) {
         throw new Error(
-            `${removedDockerKeys.join(", ")} are no longer supported; configure hermesUrl instead`,
+            `${removedDockerKeys.join(", ")} are no longer supported; configure switchUrl instead`,
         );
     }
 
-    const hermesUrl = normalizeBaseUrl(config.settings.hermesUrl);
-    if (hermesUrl) {
+    const switchUrl = normalizeBaseUrl(expandSwitchUrl(config.settings.switchUrl, username));
+    if (switchUrl) {
         if (!hermesApiKey) {
-            throw new Error("DATA_DIR/settings.json has hermesUrl but missing hermesApiKey");
+            throw new Error("DATA_DIR/settings.json has switchUrl but missing hermesApiKey");
         }
         return {
             mode: "remote",
-            url: hermesUrl,
+            url: switchUrl,
             apiKey: hermesApiKey,
-            healthUrl: joinUrl(hermesUrl, "health"),
+            healthUrl: joinUrl(switchUrl, "health"),
         };
     }
 
     const runtime = resolveHermesRuntime(config);
     if (runtime === null) {
-        console.warn("[main] packaged local hermes is not bundled yet; falling back to mock engine");
-        return { mode: "disabled" };
+        return { mode: "needs-switch-config", url: defaultSwitchHermesUrl() };
     }
     const apiKey = randomApiKeyFn();
     const url = `http://127.0.0.1:${hermesPort}`;
@@ -87,7 +111,11 @@ async function startHermes(mode, config, supervisor, spawn = nodeSpawn) {
 }
 
 module.exports = {
+    defaultSwitchHermesUrl,
+    expandSwitchUrl,
     randomApiKey,
+    resolveHermesRuntime,
+    resolvePackagedHermesRuntime,
     resolveHermesMode,
     startHermes,
 };

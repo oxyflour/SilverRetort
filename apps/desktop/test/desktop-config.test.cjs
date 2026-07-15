@@ -33,7 +33,7 @@ test("loadDesktopConfig resolves paths, settings, and child environment", (t) =>
     mkdirSync(sourceDir, { recursive: true });
     mkdirSync(dataDir, { recursive: true });
     writeFileSync(path.join(root, "desktop", ".env"), "FROM_FILE=yes\nSHARED=file\n");
-    writeFileSync(path.join(dataDir, "settings.json"), JSON.stringify({ hermesUrl: "https://example.test" }));
+    writeFileSync(path.join(dataDir, "settings.json"), JSON.stringify({ switchUrl: "https://example.test" }));
 
     const config = loadDesktopConfig({
         app: { isPackaged: false, getPath: () => path.join(root, "user-data") },
@@ -44,7 +44,7 @@ test("loadDesktopConfig resolves paths, settings, and child environment", (t) =>
     assert.equal(config.desktopRoot, path.join(root, "desktop"));
     assert.equal(config.serviceRoot, root);
     assert.equal(config.dataDir, dataDir);
-    assert.deepEqual(config.settings, { hermesUrl: "https://example.test" });
+    assert.deepEqual(config.settings, { switchUrl: "https://example.test" });
     assert.deepEqual(config.buildChildEnv({ SHARED: "override" }), {
         SILVERRETORT_DATA_DIR: dataDir,
         SHARED: "override",

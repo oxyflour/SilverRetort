@@ -9,9 +9,9 @@ const DEFAULT_NEXT_PORT = 23000;
 const DEFAULT_PYTHON_PORT = 23001;
 const DEFAULT_HERMES_PORT = 23002;
 
-async function assertUrl(url, options = {}, retry = 30) {
+async function assertUrl(url, options = {}, retry = 30, retryDelayMs = 1000) {
     while (retry-- > 0) {
-        await new Promise((resolve) => setTimeout(resolve, 1000));
+        await new Promise((resolve) => setTimeout(resolve, retryDelayMs));
         try {
             const response = await fetch(url, options);
             const text = await response.text();
@@ -19,6 +19,20 @@ async function assertUrl(url, options = {}, retry = 30) {
                 return text;
             }
             throw new Error(`${response.status}: ${text}`);
+        } catch {
+            console.warn(`[main] waiting for url ${url} (${retry} retries left)`);
+        }
+    }
+    throw new Error(`failed to request ${url}`);
+}
+
+async function waitForHttpResponse(url, options = {}, retry = 30, retryDelayMs = 1000) {
+    while (retry-- > 0) {
+        await new Promise((resolve) => setTimeout(resolve, retryDelayMs));
+        try {
+            const response = await fetch(url, options);
+            const text = await response.text();
+            return response.status === 200 ? text : `${response.status}: ${text}`;
         } catch {
             console.warn(`[main] waiting for url ${url} (${retry} retries left)`);
         }
@@ -79,6 +93,8 @@ function buildUvicornEnv(config, hermesMode, pythonPort) {
     return config.buildChildEnv({
         LISTEN_PORT: `${pythonPort}`,
         DATA_DIR: config.dataDir,
+        SILVERRETORT_DESKTOP_MODE: config.isPackaged ? "packaged" : "development",
+        SILVERRETORT_HERMES_MODE: hermesMode.mode,
         ...(hermesMode.mode === "disabled" ? {} : {
             HERMES_URL: hermesMode.url,
             HERMES_API_KEY: hermesMode.apiKey,
@@ -123,7 +139,8 @@ async function startServiceStack({ config, supervisor, utilityProcess, ports = {
         assertUrl(`http://127.0.0.1:${nextPort}/health`),
     ];
     if (hermesMode.mode !== "disabled") {
-        healthChecks.push(assertUrl(hermesMode.healthUrl, {
+        const hermesHealthCheck = hermesMode.mode === "local" ? waitForHttpResponse : assertUrl;
+        healthChecks.push(hermesHealthCheck(hermesMode.healthUrl, {
             headers: { Authorization: `Bearer ${hermesMode.apiKey}` },
         }));
     }
@@ -137,6 +154,7 @@ async function startServiceStack({ config, supervisor, utilityProcess, ports = {
 
 module.exports = {
     assertUrl,
+    waitForHttpResponse,
     buildUvicornEnv,
     resolveNextEntry,
     resolvePythonRuntime,
