@@ -55,7 +55,25 @@ class ToolPart(ApiModel):
     tool_call: ToolCall
 
 
-MessagePart = Union[TextPart, ToolPart]
+class ArtifactInputPart(ApiModel):
+    type: Literal["artifact-input"] = "artifact-input"
+    artifact_id: str
+    submission_id: str
+    action: str
+    data: Any
+    display_text: str | None = None
+
+
+class ArtifactContextPart(ApiModel):
+    type: Literal["artifact-context"] = "artifact-context"
+    artifact_id: str
+    revision: int
+    action: str
+    data: Any
+    display_text: str | None = None
+
+
+MessagePart = Union[TextPart, ToolPart, ArtifactInputPart, ArtifactContextPart]
 
 
 class Message(ApiModel):
@@ -170,3 +188,19 @@ class SendChatResponse(ApiModel):
     run_id: str
     user_message_id: str
     assistant_message_id: str
+
+
+class ArtifactContextUpdateRequest(ApiModel):
+    action: str = Field(min_length=1, max_length=80)
+    data: Any
+    display_text: str | None = Field(default=None, min_length=1, max_length=500)
+
+
+class ArtifactContext(ApiModel):
+    artifact_id: str
+    session_id: str
+    revision: int
+    action: str
+    data: Any
+    display_text: str | None = None
+    updated_at: str

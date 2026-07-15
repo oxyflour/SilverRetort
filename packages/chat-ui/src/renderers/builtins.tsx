@@ -2,6 +2,7 @@ import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { IframeArtifactPayloadSchema } from "silverretort-protocol";
 import { registerArtifactRenderer, ArtifactRendererProps } from "../registry";
+import { IframeRenderer as InteractiveIframeRenderer } from "./iframe";
 
 function IframeRenderer({ artifact }: ArtifactRendererProps) {
   const parsed = IframeArtifactPayloadSchema.safeParse(artifact.payload);
@@ -10,12 +11,7 @@ function IframeRenderer({ artifact }: ArtifactRendererProps) {
   }
 
   return (
-    <iframe
-      title={artifact.title}
-      className="h-full w-full border-0 bg-white"
-      sandbox="allow-scripts allow-forms allow-popups allow-modals allow-downloads"
-      src={`/api/artifacts/${encodeURIComponent(artifact.id)}/content/`}
-    />
+    <InteractiveIframeRenderer artifact={artifact} />
   );
 }
 

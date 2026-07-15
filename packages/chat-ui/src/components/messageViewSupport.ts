@@ -16,6 +16,14 @@ export interface MessageViewProps {
 
 export type MessagePartGroup =
   | { type: "text"; part: Extract<MessagePart, { type: "text" }>; index: number }
+  | {
+      type: "artifact-context";
+      part: Extract<
+        MessagePart,
+        { type: "artifact-input" | "artifact-context" }
+      >;
+      index: number;
+    }
   | { type: "tools"; toolCalls: ToolCall[]; index: number };
 
 function isBlankTextPart(part: MessagePart | undefined): boolean {
@@ -29,6 +37,10 @@ export function groupConsecutiveToolCalls(parts: MessagePart[]): MessagePartGrou
     const part = parts[index]!;
     if (part.type === "text") {
       groups.push({ type: "text", part, index });
+      continue;
+    }
+    if (part.type === "artifact-input" || part.type === "artifact-context") {
+      groups.push({ type: "artifact-context", part, index });
       continue;
     }
 
@@ -143,7 +155,17 @@ export function getShownArtifactId(toolCall: ToolCall): string | null {
 
 export function messageText(message: Message): string {
   return message.parts.reduce(
-    (text, part) => (part.type === "text" ? text + part.text : text),
+    (text, part) => {
+      if (part.type === "text") {
+        return text + part.text;
+      }
+      if (part.type === "artifact-input" || part.type === "artifact-context") {
+        const summary = part.displayText ?? part.action;
+        const data = JSON.stringify(part.data, null, 2);
+        return `${text}${summary}\n${data}`;
+      }
+      return text;
+    },
     "",
   );
 }

@@ -48,6 +48,29 @@ relative URLs such as `./style.css` or `./assets/app.js`; files in parent
 directories are not valid artifact assets. Local-process mode lets uvicorn read
 the shared directory directly; Docker and remote modes stream through relay.
 
+Interactive iframe artifacts can save JSON context for the user's next chat
+turn. Load the host bridge and call it when meaningful state changes:
+
+```html
+<button id="submit-selection">Submit</button>
+<script src="/artifact-bridge-v1.js"></script>
+<script>
+  document.querySelector("#submit-selection").addEventListener("click", async () => {
+    await window.silverRetort.setContext(
+      "confirm-selection",
+      { selectedIds: ["a", "b"] },
+      { displayText: "Selected two items" },
+    );
+  });
+</script>
+```
+
+The host saves only the latest context revision and does not start an agent
+run. The context is attached when the user next sends a normal chat message.
+Context is JSON-only and limited to 64 KiB. Complex interfaces should debounce
+rapid state changes. `submit()` remains as a compatibility alias for
+`setContext()` and has the same deferred behavior.
+
 ## User-Scoped Docker Switch
 
 Desktop no longer manages Docker containers. Run `apps/switch` next to the

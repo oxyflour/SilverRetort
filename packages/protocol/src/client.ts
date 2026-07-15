@@ -1,6 +1,9 @@
 import { z } from "zod";
 import {
   Artifact,
+  ArtifactContext,
+  ArtifactContextSchema,
+  ArtifactContextUpdateRequest,
   ArtifactSchema,
   Attachment,
   AttachmentSchema,
@@ -155,6 +158,44 @@ export class ApiClient {
 
   getArtifact(artifactId: string): Promise<Artifact> {
     return this.request(ArtifactSchema, `/api/artifacts/${artifactId}`);
+  }
+
+  setArtifactContext(
+    artifactId: string,
+    body: ArtifactContextUpdateRequest,
+  ): Promise<ArtifactContext> {
+    return this.request(
+      ArtifactContextSchema,
+      `/api/artifacts/${encodeURIComponent(artifactId)}/context`,
+      {
+        method: "PUT",
+        headers: {
+          "content-type": "application/json",
+          "x-silverretort-artifact-bridge": "1",
+        },
+        body: JSON.stringify(body),
+      },
+    );
+  }
+
+  listArtifactContexts(sessionId: string): Promise<ArtifactContext[]> {
+    return this.request(
+      z.array(ArtifactContextSchema),
+      `/api/sessions/${encodeURIComponent(sessionId)}/artifact-contexts`,
+    );
+  }
+
+  async clearArtifactContext(artifactId: string): Promise<void> {
+    const res = await fetch(
+      `${this.baseUrl}/api/artifacts/${encodeURIComponent(artifactId)}/context`,
+      {
+        method: "DELETE",
+        headers: { "x-silverretort-artifact-bridge": "1" },
+      },
+    );
+    if (!res.ok) {
+      throw new Error(`DELETE artifact context failed: HTTP ${res.status}`);
+    }
   }
 
   artifactContentUrl(artifactId: string, assetPath?: string): string {
