@@ -1,11 +1,28 @@
 // @ts-check
 const crypto = require("node:crypto");
+const fs = require("node:fs");
+const os = require("node:os");
 const path = require("node:path");
 const { spawn: nodeSpawn } = require("node:child_process");
 const { ensureDir, joinUrl, normalizeBaseUrl } = require("./desktop-config.cjs");
 
 function randomApiKey() {
     return crypto.randomBytes(32).toString("hex");
+}
+
+function packagedHermesExecutable(config) {
+    const names = process.platform === "win32"
+        ? ["silverretort-hermes.exe", "hermes.exe"]
+        : ["silverretort-hermes", "hermes"];
+    for (const name of names) {
+        const executable = path.join(config.serviceRoot, "hermes", name);
+        if (fs.existsSync(executable)) return executable;
+    }
+    return null;
+}
+
+function defaultSwitchHermesUrl(username = os.userInfo().username, switchBaseUrl = "http://localhost:8080") {
+    return joinUrl(switchBaseUrl, `endpoint/${encodeURIComponent(username)}`);
 }
 
 function resolveHermesRuntime(config) {
@@ -16,7 +33,9 @@ function resolveHermesRuntime(config) {
             cwd: path.join(config.serviceRoot, "hermes"),
         };
     }
-    return null;
+    const executable = packagedHermesExecutable(config);
+    if (!executable) return null;
+    return { command: executable, args: [], cwd: path.dirname(executable) };
 }
 
 function resolveHermesMode(
@@ -48,8 +67,7 @@ function resolveHermesMode(
 
     const runtime = resolveHermesRuntime(config);
     if (runtime === null) {
-        console.warn("[main] packaged local hermes is not bundled yet; falling back to mock engine");
-        return { mode: "disabled" };
+        return { mode: "needs-switch-config", url: defaultSwitchHermesUrl() };
     }
     const apiKey = randomApiKeyFn();
     const url = `http://127.0.0.1:${hermesPort}`;
@@ -87,7 +105,10 @@ async function startHermes(mode, config, supervisor, spawn = nodeSpawn) {
 }
 
 module.exports = {
+    defaultSwitchHermesUrl,
+    packagedHermesExecutable,
     randomApiKey,
+    resolveHermesRuntime,
     resolveHermesMode,
     startHermes,
 };

@@ -1,6 +1,6 @@
 // @ts-check
 const path = require("node:path");
-const { existsSync, mkdirSync, readFileSync } = require("node:fs");
+const { existsSync, mkdirSync, readFileSync, writeFileSync } = require("node:fs");
 
 function stripEnvValue(rawValue) {
     const value = rawValue.trim();
@@ -58,6 +58,13 @@ function joinUrl(baseUrl, route) {
     return new URL(route, `${normalizeBaseUrl(baseUrl)}/`).toString();
 }
 
+function writeDesktopSettings(config, nextSettings) {
+    const settings = { ...config.settings, ...nextSettings };
+    writeFileSync(config.settingsPath, `${JSON.stringify(settings, null, 2)}\n`, "utf8");
+    config.settings = settings;
+    return settings;
+}
+
 function toWebSocketUrl(baseUrl, route = "") {
     const url = new URL(route, `${normalizeBaseUrl(baseUrl)}/`);
     url.protocol = url.protocol === "https:" ? "wss:" : "ws:";
@@ -92,7 +99,8 @@ function loadDesktopConfig({
     const dataDir = ensureDir(configuredDataDir
         ? path.resolve(configuredDataDir)
         : path.join(app.getPath("userData"), "data"));
-    const settings = readJsonObject(path.join(dataDir, "settings.json"));
+    const settingsPath = path.join(dataDir, "settings.json");
+    const settings = readJsonObject(settingsPath);
 
     return {
         isPackaged: app.isPackaged,
@@ -104,6 +112,7 @@ function loadDesktopConfig({
         processEnv,
         dataDir,
         settings,
+        settingsPath,
         buildChildEnv(overrides = {}) {
             return {
                 ...processEnv,
@@ -122,4 +131,5 @@ module.exports = {
     parseDesktopEnv,
     readJsonObject,
     toWebSocketUrl,
+    writeDesktopSettings,
 };

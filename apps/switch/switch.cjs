@@ -221,7 +221,7 @@ function parseRoute(rawTarget) {
 }
 
 function parseEnv(text) {
-    const values = Object.create(null);
+    const values = {};
     for (const rawLine of text.split(/\r?\n/u)) {
         const line = rawLine.trim();
         if (!line || line.startsWith("#")) continue;
@@ -417,17 +417,40 @@ async function handleRequest(request, response) {
     }
 }
 
-const server = http.createServer(handleRequest);
-server.requestTimeout = 0;
-server.on("upgrade", handleUpgrade);
-server.on("clientError", (_error, socket) => socketResponse(socket, 400, "close"));
-server.listen(settings.listenPort, settings.listenHost, () => {
-    console.log(
-        `[switch] listening on http://${settings.listenHost}:${settings.listenPort}; `
-        + `configs=${settings.configDir}; docker=${settings.dockerHost}`,
-    );
-});
-
-for (const signal of ["SIGINT", "SIGTERM"]) {
-    process.once(signal, () => server.close(() => process.exit(0)));
+function createServer() {
+    const server = http.createServer(handleRequest);
+    server.requestTimeout = 0;
+    server.on("upgrade", handleUpgrade);
+    server.on("clientError", (_error, socket) => socketResponse(socket, 400, "close"));
+    return server;
 }
+
+function startServer() {
+    const server = createServer();
+    server.listen(settings.listenPort, settings.listenHost, () => {
+        console.log(
+            `[switch] listening on http://${settings.listenHost}:${settings.listenPort}; `
+            + `configs=${settings.configDir}; docker=${settings.dockerHost}`,
+        );
+    });
+    for (const signal of ["SIGINT", "SIGTERM"]) {
+        process.once(signal, () => server.close(() => process.exit(0)));
+    }
+    return server;
+}
+
+if (require.main === module) {
+    startServer();
+}
+
+module.exports = {
+    SwitchError,
+    authorize,
+    connectionTokens,
+    createServer,
+    forwardedHeaders,
+    parseEnv,
+    parseRoute,
+    responseHeaders,
+    startServer,
+};
