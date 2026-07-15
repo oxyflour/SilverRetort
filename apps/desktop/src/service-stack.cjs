@@ -41,11 +41,17 @@ async function waitForHttpResponse(url, options = {}, retry = 30, retryDelayMs =
 }
 
 function resolveNextEntry(config) {
-    const target = config.isPackaged
-        ? path.join(config.serviceRoot, "next", "apps", "next", "server.js")
-        : path.join(config.serviceRoot, "next", "node_modules", "next", "dist", "bin", "next");
+    const target = path.join(config.serviceRoot, "next", "node_modules", "next", "dist", "bin", "next");
     if (!existsSync(target)) {
         throw new Error(`missing next entrypoint: ${target}`);
+    }
+    return target;
+}
+
+function resolvePackagedFrontendDir(config) {
+    const target = path.join(config.serviceRoot, "frontend");
+    if (!existsSync(path.join(target, "index.html"))) {
+        throw new Error(`missing packaged frontend: ${target}`);
     }
     return target;
 }
@@ -72,14 +78,8 @@ function resolvePythonRuntime(config, pythonPort) {
 
 function startNextServer(config, utilityProcess, nextPort, pythonPort) {
     const command = resolveNextEntry(config);
-    const cwd = config.isPackaged
-        ? path.join(config.serviceRoot, "next", "apps", "next")
-        : path.join(config.serviceRoot, "next");
-    const args = config.isPackaged
-        ? []
-        : ["dev", "-H", "127.0.0.1", "-p", `${nextPort}`];
-    return utilityProcess.fork(command, args, {
-        cwd,
+    return utilityProcess.fork(command, ["dev", "-H", "127.0.0.1", "-p", `${nextPort}`], {
+        cwd: path.join(config.serviceRoot, "next"),
         env: config.buildChildEnv({
             PORT: `${nextPort}`,
             HOSTNAME: "127.0.0.1",
@@ -95,6 +95,7 @@ function buildUvicornEnv(config, hermesMode, pythonPort) {
         DATA_DIR: config.dataDir,
         SILVERRETORT_DESKTOP_MODE: config.isPackaged ? "packaged" : "development",
         SILVERRETORT_HERMES_MODE: hermesMode.mode,
+        ...(config.isPackaged ? { FRONTEND_DIST: resolvePackagedFrontendDir(config) } : {}),
         ...(hermesMode.mode === "disabled" ? {} : {
             HERMES_URL: hermesMode.url,
             HERMES_API_KEY: hermesMode.apiKey,
@@ -131,12 +132,15 @@ async function startServiceStack({ config, supervisor, utilityProcess, ports = {
     if (hermesMode.mode === "local") {
         await startHermes(hermesMode, config, supervisor);
     }
-    const nextjs = startNextServer(config, utilityProcess, nextPort, pythonPort);
-    supervisor.monitor("nextjs", nextjs);
+    if (!config.isPackaged) {
+        const nextjs = startNextServer(config, utilityProcess, nextPort, pythonPort);
+        supervisor.monitor("nextjs", nextjs);
+    }
 
+    const webPort = config.isPackaged ? pythonPort : nextPort;
     const healthChecks = [
         assertUrl(`http://127.0.0.1:${pythonPort}/health`),
-        assertUrl(`http://127.0.0.1:${nextPort}/health`),
+        assertUrl(`http://127.0.0.1:${webPort}/health`),
     ];
     if (hermesMode.mode !== "disabled") {
         const hermesHealthCheck = hermesMode.mode === "local" ? waitForHttpResponse : assertUrl;
@@ -149,7 +153,7 @@ async function startServiceStack({ config, supervisor, utilityProcess, ports = {
         ? "hermes=mock"
         : `hermes=${hermesHealth}`;
     console.log(`[main] HEALTH: api=${apiHealth}; web=${nextHealth}; ${hermesSummary}; data=${config.dataDir}`);
-    return `http://127.0.0.1:${nextPort}`;
+    return `http://127.0.0.1:${webPort}`;
 }
 
 module.exports = {
@@ -157,6 +161,7 @@ module.exports = {
     waitForHttpResponse,
     buildUvicornEnv,
     resolveNextEntry,
+    resolvePackagedFrontendDir,
     resolvePythonRuntime,
     startServiceStack,
 };

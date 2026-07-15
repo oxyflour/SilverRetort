@@ -3,7 +3,9 @@ import os
 import sys
 import threading
 
-from fastapi import FastAPI
+from fastapi import FastAPI, HTTPException
+from fastapi.responses import FileResponse
+from fastapi.staticfiles import StaticFiles
 import uvicorn
 
 import bridge_client
@@ -37,9 +39,39 @@ app.include_router(router)
 app.mount("/mcp", mcp_server.mcp.streamable_http_app())
 
 
+def frontend_dist() -> str | None:
+    path = os.getenv("FRONTEND_DIST", "").strip()
+    if not path:
+        return None
+    index_path = os.path.join(path, "index.html")
+    return path if os.path.isfile(index_path) else None
+
+
+static_frontend = frontend_dist()
+if static_frontend:
+    next_static = os.path.join(static_frontend, "_next")
+    if os.path.isdir(next_static):
+        app.mount("/_next", StaticFiles(directory=next_static), name="next-static")
+    frontend_assets = os.path.join(static_frontend, "assets")
+    if os.path.isdir(frontend_assets):
+        app.mount("/assets", StaticFiles(directory=frontend_assets), name="frontend-assets")
+
+
 @app.get("/health")
 def health() -> dict[str, str]:
     return {"status": "ok"}
+
+
+@app.get("/{path:path}", include_in_schema=False)
+def serve_frontend(path: str):
+    root = frontend_dist()
+    if not root:
+        raise HTTPException(404, "frontend is not bundled")
+    requested = os.path.abspath(os.path.join(root, path))
+    root_abs = os.path.abspath(root)
+    if path and requested.startswith(root_abs + os.sep) and os.path.isfile(requested):
+        return FileResponse(requested)
+    return FileResponse(os.path.join(root, "index.html"))
 
 
 def main() -> None:

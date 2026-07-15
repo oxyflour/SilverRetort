@@ -24,8 +24,8 @@
     ],
     "extraResources": [
       {
-        "from": "../next/.next/desktop-standalone",
-        "to": "next",
+        "from": "../next/.next/desktop-static",
+        "to": "frontend",
         "filter": [
           "**/*"
         ]
