@@ -132,8 +132,6 @@ def set_hermes_connection(body: dict = Body(...)) -> dict:
         elif not settings.get("hermesApiKey"):
             raise HTTPException(400, "hermesApiKey is required")
     elif mode == "local":
-        if os.getenv("SILVERRETORT_DESKTOP_MODE") == "packaged":
-            raise HTTPException(400, "packaged mode requires switchUrl")
         settings.pop("switchUrl", None)
         settings.pop("hermesApiKey", None)
     else:
