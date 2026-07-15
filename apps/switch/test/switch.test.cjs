@@ -5,8 +5,9 @@ const {
     SwitchError,
     authorize,
     forwardedHeaders,
-    parseEnv,
+    normalizeUserConfig,
     parseRoute,
+    parseStatusRoute,
 } = require("../switch.cjs");
 
 test("parseRoute accepts encoded Windows-style account names", () => {
@@ -22,11 +23,35 @@ test("parseRoute rejects unsupported user identifiers", () => {
     assert.throws(() => parseRoute("/endpoint/-alice"), /unsupported/u);
 });
 
-test("parseEnv reads quoted values from user config", () => {
-    assert.deepEqual(parseEnv("# user\nHERMES_API_KEY='secret key'\nEMPTY=\n"), {
-        HERMES_API_KEY: "secret key",
-        EMPTY: "",
+test("parseStatusRoute accepts a user status route", () => {
+    assert.deepEqual(parseStatusRoute("/status/Alice.Smith-01"), { id: "Alice.Smith-01" });
+});
+
+test("normalizeUserConfig reads JSON startup settings", () => {
+    assert.deepEqual(normalizeUserConfig("alice", "config/alice.json", {
+        hermesApiKey: "secret",
+        image: "custom-hermes",
+        containerPort: 23003,
+        env: { OPENAI_MODEL_ID: "gpt-test" },
+        volumes: ["alice-cache:/cache"],
+        args: ["--verbose"],
+    }), {
+        id: "alice",
+        configPath: "config/alice.json",
+        apiKey: "secret",
+        image: "custom-hermes",
+        containerPort: 23003,
+        env: { OPENAI_MODEL_ID: "gpt-test", HERMES_API_KEY: "secret" },
+        volumes: ["alice-cache:/cache"],
+        args: ["--verbose"],
     });
+});
+
+test("normalizeUserConfig requires hermesApiKey", () => {
+    assert.throws(
+        () => normalizeUserConfig("alice", "config/alice.json", { env: {} }),
+        /missing hermesApiKey/u,
+    );
 });
 
 test("authorize requires the configured bearer token", () => {
