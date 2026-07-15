@@ -31,7 +31,7 @@ test("resolveHermesMode creates the development local mode", (t) => {
 
 test("resolveHermesMode accepts a configured remote service", (t) => {
     const config = makeConfig(t, {
-        settings: { hermesUrl: "https://example.test/hermes/", hermesApiKey: "secret" },
+        settings: { switchUrl: "https://example.test/hermes/", hermesApiKey: "secret" },
     });
     assert.deepEqual(resolveHermesMode(config, 23001, 23002), {
         mode: "remote",
@@ -42,21 +42,21 @@ test("resolveHermesMode accepts a configured remote service", (t) => {
 });
 
 test("resolveHermesMode rejects a remote service without an API key", (t) => {
-    const config = makeConfig(t, { settings: { hermesUrl: "http://example.test:23002" } });
+    const config = makeConfig(t, { settings: { switchUrl: "http://example.test:23002" } });
     assert.throws(() => resolveHermesMode(config, 23001, 23002), /missing hermesApiKey/u);
 });
 
-test("removed Docker settings direct users to hermesUrl", (t) => {
+test("removed Docker settings direct users to switchUrl", (t) => {
     const config = makeConfig(t, {
         settings: {
             hermesDockerImage: "silverretort-hermes:test",
-            hermesUrl: "https://switch.example/endpoint/alice",
+            switchUrl: "https://switch.example/endpoint/alice",
             hermesApiKey: "secret",
         },
     });
     assert.throws(
         () => resolveHermesMode(config, 23001, 23002),
-        /no longer supported; configure hermesUrl instead/u,
+        /no longer supported; configure switchUrl instead/u,
     );
 });
 

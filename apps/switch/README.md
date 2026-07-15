@@ -36,7 +36,7 @@ Desktop configuration points at the user-scoped base URL and uses the same key:
 
 ```json
 {
-  "hermesUrl": "https://switch.example/endpoint/alice",
+  "switchUrl": "https://switch.example/endpoint/alice",
   "hermesApiKey": "replace-with-a-long-random-key"
 }
 ```
