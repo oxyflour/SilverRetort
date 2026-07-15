@@ -435,7 +435,7 @@ function ConnectionCard({
               type="url"
               value={hermesUrl}
               onChange={(event) => onUrlChange(event.target.value)}
-              placeholder="http://localhost:8080/endpoint/<userId>"
+              placeholder="http://localhost:23004/endpoint/<userId>"
               className="mt-1.5 w-full rounded-lg border border-neutral-300 bg-white px-3 py-2 text-sm text-neutral-900 outline-none focus:border-neutral-500 dark:border-neutral-700 dark:bg-neutral-800 dark:text-neutral-100"
             />
           </label>
