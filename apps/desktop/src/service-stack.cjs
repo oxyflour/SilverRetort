@@ -78,9 +78,13 @@ function startNextServer(config, utilityProcess, nextPort, pythonPort) {
     const args = config.isPackaged
         ? []
         : ["dev", "-H", "127.0.0.1", "-p", `${nextPort}`];
+    const nodePath = config.isPackaged
+        ? path.join(config.serviceRoot, "next", "node_modules", ".pnpm", "node_modules")
+        : undefined;
     return utilityProcess.fork(command, args, {
         cwd,
         env: config.buildChildEnv({
+            ...(nodePath ? { NODE_PATH: nodePath } : {}),
             PORT: `${nextPort}`,
             HOSTNAME: "127.0.0.1",
             API_REWRITE: `http://127.0.0.1:${pythonPort}/`,

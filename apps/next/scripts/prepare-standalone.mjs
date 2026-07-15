@@ -43,25 +43,20 @@ async function replaceDir(from, to) {
   });
 }
 
-async function copyDirContents(from, to) {
-  await mkdir(to, { recursive: true });
-
-  await cp(from, to, {
-    dereference: true,
-    filter: shouldCopyStandaloneEntry,
-    force: true,
+async function removeAppNodeModules(standaloneAppDir) {
+  await rm(path.join(standaloneAppDir, "node_modules"), {
     recursive: true,
+    force: true,
   });
 }
 
 async function main() {
   const publicDir = path.join(appRoot, "public");
   const staticDir = path.join(nextDir, "static");
-  const hoistedNodeModulesDir = path.join(standaloneDir, "node_modules", ".pnpm", "node_modules");
   const standaloneAppDir = path.join(desktopStandaloneDir, "apps", "next");
 
   await replaceDir(standaloneDir, desktopStandaloneDir);
-  await copyDirContents(hoistedNodeModulesDir, path.join(standaloneAppDir, "node_modules"));
+  await removeAppNodeModules(standaloneAppDir);
 
   if (await pathExists(publicDir)) {
     await replaceDir(publicDir, path.join(standaloneAppDir, "public"));
