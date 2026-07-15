@@ -1,6 +1,6 @@
 ---
 name: lerobot-render
-description: Render multiple USD camera sensors from ROS 2 TF poses with the omni.hydra.rtx Hydra renderer and publish each captured frame as its own sensor_msgs/Image topic. Use when Codex needs to visualize the virtual robot served by lerobot-serve, build multi-camera RTX ROS streams, or diagnose pose-to-render synchronization without launching Isaac Sim.
+description: Render multiple USD camera sensors from ROS 2 TF poses with the omni.hydra.rtx Hydra renderer and publish each captured frame as its own sensor_msgs/Image topic. Use when Codex needs to visualize the virtual robot served by lerobot-serve, build multi-camera RTX ROS streams, or diagnose pose-to-render synchronization without launching Isaac Sim. Before rendering, verify the standalone ROS 2 and Kit roots exist and ask the user to confirm any location whose default root is unavailable.
 ---
 
 # LeRobot Render
@@ -9,10 +9,13 @@ Use `omni.hydra.rtx` in Omniverse Kit; never import or launch Isaac Sim. Keep RO
 
 ## Prerequisites
 
-- Use the Kit runtime and extension folders under `C:\isaacsim-6` by default. Reuse `kit\kit.exe` and `omni.hydra.rtx`; never launch `isaac-sim.bat` or an Isaac Sim app configuration.
-- Require the standalone ROS 2 installation at `C:\Programs\ros2-windows` unless the user supplies another path.
+- Before any launch or ROS command, verify that `C:\isaacsim-6` and `C:\Programs\ros2-windows` each exist as directories. Also verify that the Kit root contains `kit\kit.exe` and the ROS 2 root contains `setup.bat`.
+- If either default root or its required entry point is missing, stop and ask the user to confirm that root's actual location. Resume only after validating every user-provided directory and entry point; do not guess another location, install a runtime, or mutate an existing installation.
+- Use the validated Kit runtime and extension folders. Reuse `kit\kit.exe` and `omni.hydra.rtx`; never launch `isaac-sim.bat` or an Isaac Sim app configuration.
+- Use the validated standalone ROS 2 installation root and pass it through `-RosRoot` when it differs from the default.
 - Reuse the ROS-compatible Python already present in the ROS tree, or select it through `-RosPython` or `ROS_PYTHON`. The supplied ROS tree currently keeps that runtime under `.pixi\envs\default`; never invoke Pixi, install an environment, or mutate the ROS installation.
 - Auto-discover all cameras authored in the USD. Pass `-SensorsFile` to assign stable sensor names, or use `-Camera` for legacy single-camera operation. Create one transient fallback camera only when none exist.
+- Bind every sensor to its own viewport for the lifetime of the renderer. Never multiplex cameras by changing one viewport's `camera_path` between captures because RTX viewport updates are asynchronous and can assign a previous camera's frame to the next sensor.
 - Add neutral session-layer dome and key lights only when the USD contains no authored lights. Discard up to 30 all-black RTX warm-up captures, then fail instead of publishing unusable training data.
 
 ## Start rendering

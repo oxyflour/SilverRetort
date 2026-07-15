@@ -37,6 +37,7 @@ async def write_packet(writer: asyncio.StreamWriter, header: dict, payload: byte
 class Extension(omni.ext.IExt):
     def on_startup(self, _ext_id: str) -> None:
         self._server = None
+        self._viewport_windows = []
         self._task = asyncio.ensure_future(self._start())
         self._task.add_done_callback(self._on_task_done)
         self._xform_ops = {}
@@ -55,6 +56,9 @@ class Extension(omni.ext.IExt):
             self._server.close()
         if self._task is not None:
             self._task.cancel()
+        for window in self._viewport_windows:
+            window.destroy()
+        self._viewport_windows.clear()
 
     async def _start(self) -> None:
         settings = carb.settings.get_settings()
@@ -117,24 +121,45 @@ class Extension(omni.ext.IExt):
         carb.log_info("LeRobot renderer added session-layer fallback lighting")
 
     async def _configure_viewport(self) -> None:
-        self._viewport_window = None
+        self._sensors = self._load_sensors()
+        viewport = None
         for _ in range(30):
-            self._viewport = viewport_utility.get_active_viewport()
-            if self._viewport is not None:
+            viewport = viewport_utility.get_active_viewport()
+            if viewport is not None:
                 break
             await omni.kit.app.get_app().next_update_async()
-        if self._viewport is None:
-            self._viewport_window = viewport_utility.create_viewport_window(
-                name="LeRobot Render Viewport", width=self._width, height=self._height
+        first_sensor, first_camera = next(iter(self._sensors.items()))
+        if viewport is None:
+            window = viewport_utility.create_viewport_window(
+                name=f"LeRobot Render {first_sensor}",
+                width=self._width,
+                height=self._height,
+                camera_path=first_camera,
             )
-            if self._viewport_window is not None:
-                self._viewport = self._viewport_window.viewport_api
-        if self._viewport is None:
+            if window is not None:
+                self._viewport_windows.append(window)
+                viewport = window.viewport_api
+        if viewport is None:
             raise RuntimeError("No active Kit viewport is available")
 
-        self._sensors = self._load_sensors()
-        self._viewport.camera_path = next(iter(self._sensors.values()))
-        self._viewport.resolution = (self._width, self._height)
+        viewport.camera_path = first_camera
+        viewport.resolution = (self._width, self._height)
+        self._viewports = {first_sensor: viewport}
+        for sensor, camera_path in list(self._sensors.items())[1:]:
+            window = viewport_utility.create_viewport_window(
+                name=f"LeRobot Render {sensor}",
+                width=self._width,
+                height=self._height,
+                camera_path=camera_path,
+            )
+            if window is None:
+                raise RuntimeError(f"Could not create a Kit viewport for sensor {sensor}")
+            self._viewport_windows.append(window)
+            sensor_viewport = window.viewport_api
+            sensor_viewport.camera_path = camera_path
+            sensor_viewport.resolution = (self._width, self._height)
+            self._viewports[sensor] = sensor_viewport
+        await omni.kit.app.get_app().next_update_async()
         carb.log_info(f"LeRobot renderer sensors: {self._sensors}")
 
     @staticmethod
@@ -219,7 +244,7 @@ class Extension(omni.ext.IExt):
                 payloads = []
                 offset = 0
                 for sensor, camera_path in self._sensors.items():
-                    metadata, pixels = await self._capture(camera_path)
+                    metadata, pixels = await self._capture(sensor, camera_path)
                     frames.append(metadata | {
                         "sensor": sensor,
                         "camera": camera_path,
@@ -287,11 +312,11 @@ class Extension(omni.ext.IExt):
             op.Set(scale_matrix * local)
             cache.Clear()
 
-    async def _capture(self, camera_path: str) -> tuple[dict, bytes]:
-        self._viewport.camera_path = camera_path
+    async def _capture(self, sensor: str, camera_path: str) -> tuple[dict, bytes]:
+        viewport = self._viewports[sensor]
         for attempt in range(30):
-            await viewport_utility.next_viewport_frame_async(self._viewport)
-            metadata, data = await self._capture_once()
+            await viewport_utility.next_viewport_frame_async(viewport)
+            metadata, data = await self._capture_once(viewport)
             channels = metadata["step"] // metadata["width"]
             if any(data[offset] for offset in range(0, len(data), channels)) or any(
                 data[offset] for offset in range(1, len(data), channels)
@@ -305,7 +330,7 @@ class Extension(omni.ext.IExt):
             f"RTX viewport returned 30 consecutive all-black color frames for camera {camera_path}"
         )
 
-    async def _capture_once(self) -> tuple[dict, bytes]:
+    async def _capture_once(self, viewport) -> tuple[dict, bytes]:
         loop = asyncio.get_running_loop()
         result = loop.create_future()
 
@@ -338,7 +363,7 @@ class Extension(omni.ext.IExt):
             except Exception as exc:
                 result.set_exception(exc)
 
-        capture = self._viewport.schedule_capture(ByteCapture(completed))
+        capture = viewport.schedule_capture(ByteCapture(completed))
         aovs = await capture.wait_for_result()
         if not aovs:
             raise RuntimeError("RTX viewport returned no color AOV")
