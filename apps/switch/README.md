@@ -41,8 +41,11 @@ Desktop configuration points at the user-scoped base URL and uses the same key:
 }
 ```
 
-Open `/status/{userId}` in a browser to view a simple HTML status page for the
-user container. The switch creates missing containers from the configured image,
+Open `/admin` for a simple management UI. The default admin password is
+`Abcd1234` and can be changed with `SWITCH_ADMIN_PASSWORD`; the UI lists
+configured/logged-in users and can create a new user while showing the generated
+key for copying. Open `/status/{userId}` in a browser to view a simple HTML
+status page for the user container. The switch creates missing containers from the configured image,
 enables the Hermes relay, dynamically publishes the configured container port,
 and persists workspace and Hermes home in named Docker volumes. Existing stopped
 containers are started; unhealthy running containers are restarted. Containers
@@ -62,6 +65,7 @@ Configuration:
 - `SWITCH_HEALTH_INTERVAL_MS`: default `500`
 - `SWITCH_IDLE_STOP_MS`: default `3600000`
 - `SWITCH_IDLE_SWEEP_MS`: default `60000`
+- `SWITCH_ADMIN_PASSWORD`: default `Abcd1234`
 
 Terminate TLS in front of the switch when it is reachable over a network.
 

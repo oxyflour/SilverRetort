@@ -61,6 +61,7 @@ const settings = Object.freeze({
     healthInterval: numberEnv("SWITCH_HEALTH_INTERVAL_MS", 500),
     idleStopMs: numberEnv("SWITCH_IDLE_STOP_MS", 60 * 60 * 1000),
     idleSweepMs: numberEnv("SWITCH_IDLE_SWEEP_MS", 60 * 1000),
+    adminPassword: process.env.SWITCH_ADMIN_PASSWORD || "Abcd1234",
 });
 if (!settings.dockerImage.trim()) throw new Error("HERMES_DOCKER_IMAGE must not be empty");
 
@@ -182,6 +183,115 @@ function parseStatusRoute(rawTarget) {
 
 function touchUser(userId, now = Date.now()) {
     lastTraffic.set(userId, now);
+}
+
+
+function randomApiKey() {
+    return crypto.randomBytes(32).toString("hex");
+}
+
+function adminCookieValue() {
+    return crypto.createHash("sha256").update(settings.adminPassword).digest("hex");
+}
+
+function isAdminRequest(request) {
+    return `${request.headers.cookie || ""}`.split(";").some((part) => part.trim() === `switch_admin=${adminCookieValue()}`);
+}
+
+function parseForm(body) {
+    return Object.fromEntries(new URLSearchParams(body));
+}
+
+function adminLoginPage(message = "") {
+    return `<!doctype html><html><head><meta charset="utf-8"><title>Switch Admin</title></head><body>
+<h1>Switch Admin</h1>${message ? `<p style="color:red">${escapeHtml(message)}</p>` : ""}
+<form method="post" action="/admin/login"><label>Password <input type="password" name="password" autofocus></label><button>Login</button></form>
+</body></html>`;
+}
+
+async function listConfiguredUsers() {
+    let entries;
+    try {
+        entries = await fs.readdir(settings.configDir, { withFileTypes: true });
+    } catch (error) {
+        if (error.code === "ENOENT") return [];
+        throw error;
+    }
+    return entries
+        .filter((entry) => entry.isFile() && entry.name.endsWith(".json"))
+        .map((entry) => entry.name.slice(0, -5))
+        .filter((id) => USER_ID_PATTERN.test(id))
+        .sort();
+}
+
+async function createUserConfig(userId) {
+    if (!USER_ID_PATTERN.test(userId)) throw new SwitchError(400, "userId contains unsupported characters");
+    await fs.mkdir(settings.configDir, { recursive: true });
+    const apiKey = randomApiKey();
+    const configPath = path.join(settings.configDir, `${userId}.json`);
+    const payload = {
+        hermesApiKey: apiKey,
+        image: settings.dockerImage,
+        containerPort: settings.containerPort,
+        env: {},
+        volumes: [],
+        args: [],
+    };
+    await fs.writeFile(configPath, `${JSON.stringify(payload, null, 2)}\n`, { encoding: "utf8", flag: "wx" });
+    return { userId, apiKey, configPath };
+}
+
+async function adminPage(created = null) {
+    const users = await listConfiguredUsers();
+    const activeUsers = [...lastTraffic.entries()].sort(([left], [right]) => left.localeCompare(right));
+    const userRows = users.map((user) => `<tr><td>${escapeHtml(user)}</td><td>${escapeHtml(lastTraffic.get(user) ? new Date(lastTraffic.get(user)).toISOString() : "never")}</td><td><a href="/status/${encodeURIComponent(user)}">status</a></td></tr>`).join("");
+    const activeRows = activeUsers.map(([user, last]) => `<tr><td>${escapeHtml(user)}</td><td>${escapeHtml(new Date(last).toISOString())}</td></tr>`).join("");
+    const createdDialog = created ? `<dialog open><h2>User created</h2><p>${escapeHtml(created.userId)}</p><textarea rows="3" cols="72" readonly>${escapeHtml(created.apiKey)}</textarea><form method="dialog"><button>Close</button></form><script>document.querySelector('textarea').select();</script></dialog>` : "";
+    return `<!doctype html><html><head><meta charset="utf-8"><title>Switch Admin</title>
+<style>body{font-family:system-ui,sans-serif;margin:2rem;line-height:1.5}td,th{padding:.35rem .75rem;border-bottom:1px solid #ddd;text-align:left}input{padding:.35rem}.card{margin:1rem 0;padding:1rem;border:1px solid #ddd;border-radius:8px}</style>
+</head><body><h1>Switch Admin</h1>${createdDialog}
+<section class="card"><h2>Create user</h2><form method="post" action="/admin/users"><label>User ID <input name="userId" pattern="[A-Za-z0-9][A-Za-z0-9_.-]{0,63}" required></label><button>Create</button></form></section>
+<section class="card"><h2>Configured users</h2><table><tr><th>User</th><th>Last traffic</th><th>Status</th></tr>${userRows}</table></section>
+<section class="card"><h2>Logged-in users</h2><table><tr><th>User</th><th>Last traffic</th></tr>${activeRows}</table></section>
+</body></html>`;
+}
+
+async function readBody(request) {
+    const chunks = [];
+    for await (const chunk of request) chunks.push(chunk);
+    return Buffer.concat(chunks).toString("utf8");
+}
+
+async function handleAdmin(request, response) {
+    const url = request.url || "/";
+    if (request.method === "POST" && url === "/admin/login") {
+        const form = parseForm(await readBody(request));
+        if (form.password !== settings.adminPassword) {
+            return sendHtml(response, 401, adminLoginPage("Invalid password"));
+        }
+        response.writeHead(303, {
+            location: "/admin",
+            "set-cookie": `switch_admin=${adminCookieValue()}; HttpOnly; SameSite=Lax; Path=/admin`,
+            connection: "close",
+        });
+        return response.end();
+    }
+    if (!isAdminRequest(request)) {
+        return sendHtml(response, 200, adminLoginPage());
+    }
+    if (request.method === "POST" && url === "/admin/users") {
+        try {
+            const form = parseForm(await readBody(request));
+            return sendHtml(response, 200, await adminPage(await createUserConfig(`${form.userId || ""}`.trim())));
+        } catch (error) {
+            const status = error instanceof SwitchError ? error.status : 500;
+            return sendHtml(response, status, `${await adminPage()}<p>${escapeHtml(error.message)}</p>`);
+        }
+    }
+    if (request.method === "GET" && url === "/admin") {
+        return sendHtml(response, 200, await adminPage());
+    }
+    return sendHtml(response, 404, "<p>not found</p>");
 }
 
 async function createContainer(user) {
@@ -527,6 +637,9 @@ async function handleRequest(request, response) {
     if (["GET", "HEAD"].includes(request.method) && request.url === "/health") {
         return sendJson(response, 200, { status: "ok" });
     }
+    if ((request.url || "").startsWith("/admin")) {
+        return handleAdmin(request, response);
+    }
     if (["GET", "HEAD"].includes(request.method) && (request.url || "").startsWith("/status/")) {
         try {
             return sendHtml(response, 200, await renderStatusPage(parseStatusRoute(request.url || "/")));
@@ -587,8 +700,12 @@ module.exports = {
     connectionTokens,
     createServer,
     forwardedHeaders,
+    adminCookieValue,
+    createUserConfig,
+    listConfiguredUsers,
     normalizeUserConfig,
     parseEnv,
+    parseForm,
     parseRoute,
     parseStatusRoute,
     responseHeaders,
