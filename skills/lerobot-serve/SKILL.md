@@ -1,18 +1,24 @@
 ---
 name: lerobot-serve
-description: Serve LeRobot-compatible USD articulations through standalone NVIDIA ovphysx and ROS 2, control MOZ01's imported four-bar gripper, generate cube-pick demonstrations, and author USD-only collision overlays. Use when Codex needs to inspect or start a virtual robot bridge, replace proxy collision cubes, verify a MOZ01 pickup, or create camera-conditioned LeRobot pickup data.
+description: Serve LeRobot-compatible USD articulations through standalone NVIDIA ovphysx and ROS 2, control MOZ01's imported four-bar gripper, generate cube-pick demonstrations, and author USD-only collision overlays. Use when Codex needs to inspect or start a virtual robot bridge, replace proxy collision cubes, verify a MOZ01 pickup, or create camera-conditioned LeRobot pickup data. Before ROS work, verify the standalone ROS 2 root exists and ask the user to confirm its location when the default root is unavailable.
 ---
 
 # LeRobot Serve
 
 Use standalone `ovphysx`; never import `isaacsim`, `omni.*`, or start Kit. Keep generic ROS routing in the bridge and isolate MOZ01-specific pickup behavior under `scripts/moz01`.
 
+## Prerequisites
+
+- Before running the ROS bridge or any ROS command, verify that the default ROS 2 root `C:\Programs\ros2-windows` exists as a directory and contains `setup.bat`.
+- If either check fails, stop and ask the user to confirm the standalone ROS 2 root. Resume only after validating the user-provided directory and its `setup.bat`; do not guess another location, install ROS, or mutate an existing ROS installation.
+- This skill does not use Kit. Do not request or probe for a Kit root while performing `lerobot-serve` work.
+
 ## Start the bridge
 
 1. Verify the USD path exists.
 2. Inspect it with `uv run python scripts/serve.py --inspect <usd>`.
 3. Confirm at least one articulation and review missing assets or closed-articulation diagnostics.
-4. On Windows, run `scripts/run_ros.ps1 <usd>` to load `C:\Programs\ros2-windows` and start ROS.
+4. On Windows, run `scripts/run_ros.ps1 <usd>` with the validated ROS root and pass `-RosRoot` when it differs from `C:\Programs\ros2-windows`.
 5. Verify `/lerobot/joint_states` before starting an independent recorder or renderer.
 
 ```powershell
