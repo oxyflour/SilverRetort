@@ -3,6 +3,7 @@
 import json
 import mimetypes
 import os
+import threading
 from pathlib import Path, PurePosixPath
 import uuid
 from urllib.parse import quote, unquote, urlparse
@@ -141,6 +142,16 @@ def set_hermes_connection(body: dict = Body(...)) -> dict:
     response = _hermes_connection_response()
     response["restartRequired"] = True
     return response
+
+
+
+@router.post("/app/restart")
+def restart_app() -> dict:
+    def exit_soon() -> None:
+        os._exit(42)
+
+    threading.Timer(0.2, exit_soon).start()
+    return {"ok": True}
 
 
 # ---- sessions ----

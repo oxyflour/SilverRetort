@@ -53,6 +53,16 @@ async function getJson<T>(path: string): Promise<T> {
   return response.json() as Promise<T>;
 }
 
+async function postJson<T>(path: string, body: unknown = {}): Promise<T> {
+  const response = await fetch(path, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify(body),
+  });
+  if (!response.ok) throw new Error(`${path} 请求失败（HTTP ${response.status}）`);
+  return response.json() as Promise<T>;
+}
+
 async function putJson<T>(path: string, body: unknown): Promise<T> {
   const response = await fetch(path, {
     method: "PUT",
@@ -74,6 +84,7 @@ export function ModelSettings() {
   const [separateVision, setSeparateVision] = useState(false);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
+  const [restarting, setRestarting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [saved, setSaved] = useState(false);
 
@@ -176,6 +187,17 @@ export function ModelSettings() {
       setError(cause instanceof Error ? cause.message : String(cause));
     } finally {
       setSaving(false);
+    }
+  };
+
+  const restartApp = async () => {
+    setRestarting(true);
+    setError(null);
+    try {
+      await postJson<{ ok: boolean }>("/api/app/restart");
+    } catch (cause) {
+      setRestarting(false);
+      setError(cause instanceof Error ? cause.message : String(cause));
     }
   };
 
@@ -350,13 +372,24 @@ export function ModelSettings() {
                 </p>
               )}
             </div>
-            <button
-              disabled={saving}
-              onClick={() => void (connectionMode === "local" && !connection?.packaged ? save() : saveConnection())}
-              className="rounded-lg bg-neutral-900 px-5 py-2 text-sm text-white transition-opacity disabled:opacity-40 dark:bg-neutral-100 dark:text-neutral-900"
-            >
-              {saving ? "保存中…" : connectionMode === "local" && !connection?.packaged ? "保存模型设置" : "保存连接设置"}
-            </button>
+            <div className="flex items-center gap-2">
+              {(connection?.packaged || connectionMode === "remote") && (
+                <button
+                  disabled={restarting}
+                  onClick={() => void restartApp()}
+                  className="rounded-lg border border-neutral-300 px-5 py-2 text-sm transition-opacity disabled:opacity-40 dark:border-neutral-700"
+                >
+                  {restarting ? "正在重启…" : "重启应用"}
+                </button>
+              )}
+              <button
+                disabled={saving}
+                onClick={() => void (connectionMode === "local" && !connection?.packaged ? save() : saveConnection())}
+                className="rounded-lg bg-neutral-900 px-5 py-2 text-sm text-white transition-opacity disabled:opacity-40 dark:bg-neutral-100 dark:text-neutral-900"
+              >
+                {saving ? "保存中…" : connectionMode === "local" && !connection?.packaged ? "保存模型设置" : "保存连接设置"}
+              </button>
+            </div>
           </div>
         </div>
       )}
