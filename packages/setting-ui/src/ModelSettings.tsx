@@ -259,8 +259,6 @@ export function ModelSettings() {
               onModeChange={(mode) => { setConnectionMode(mode); setSaved(false); }}
               onUrlChange={(value) => { setSwitchUrl(value); setSaved(false); }}
               onApiKeyChange={(value) => { setHermesApiKey(value); setSaved(false); }}
-              onSave={() => void saveConnection()}
-              saving={saving}
             />
           )}
 
@@ -357,7 +355,7 @@ export function ModelSettings() {
               onClick={() => void (connectionMode === "local" && !connection?.packaged ? save() : saveConnection())}
               className="rounded-lg bg-neutral-900 px-5 py-2 text-sm text-white transition-opacity disabled:opacity-40 dark:bg-neutral-100 dark:text-neutral-900"
             >
-              {saving ? "保存中…" : "保存设置"}
+              {saving ? "保存中…" : connectionMode === "local" && !connection?.packaged ? "保存模型设置" : "保存连接设置"}
             </button>
           </div>
         </div>
@@ -374,8 +372,6 @@ function ConnectionCard({
   onModeChange,
   onUrlChange,
   onApiKeyChange,
-  onSave,
-  saving,
 }: {
   connection: HermesConnection;
   mode: "local" | "remote";
@@ -384,28 +380,17 @@ function ConnectionCard({
   onModeChange: (mode: "local" | "remote") => void;
   onUrlChange: (value: string) => void;
   onApiKeyChange: (value: string) => void;
-  onSave: () => void;
-  saving: boolean;
 }) {
   const remoteOnly = connection.packaged;
   return (
     <div className="rounded-xl border border-neutral-200 p-5 dark:border-neutral-700">
-      <div className="flex items-start justify-between gap-4">
-        <div>
-          <p className="text-sm font-medium">Hermes 连接</p>
-          <p className="mt-1 text-xs leading-5 text-neutral-500 dark:text-neutral-400">
-            {remoteOnly
-              ? "打包模式只使用远程 Hermes，请配置 apps/switch 提供的 URL 和 API Key。"
-              : "开发模式可以使用本地模型配置，也可以切换到远程 switchUrl。"}
-          </p>
-        </div>
-        <button
-          disabled={saving}
-          onClick={onSave}
-          className="rounded-lg border border-neutral-300 px-3 py-1.5 text-xs transition-opacity disabled:opacity-40 dark:border-neutral-700"
-        >
-          {saving ? "保存中…" : "保存连接"}
-        </button>
+      <div>
+        <p className="text-sm font-medium">Hermes 连接</p>
+        <p className="mt-1 text-xs leading-5 text-neutral-500 dark:text-neutral-400">
+          {remoteOnly
+            ? "打包模式只使用远程 Hermes，请配置 apps/switch 提供的 URL 和 API Key。"
+            : "开发模式可以使用本地模型配置，也可以切换到远程 switchUrl。"}
+        </p>
       </div>
 
       {!remoteOnly && (
