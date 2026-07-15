@@ -3,9 +3,11 @@ const test = require("node:test");
 
 const {
     SwitchError,
+    adminCookieValue,
     authorize,
     forwardedHeaders,
     normalizeUserConfig,
+    parseForm,
     parseRoute,
     parseStatusRoute,
 } = require("../switch.cjs");
@@ -81,4 +83,17 @@ test("forwardedHeaders removes hop headers and adds proxy metadata", () => {
     assert.equal(headers["x-forwarded-prefix"], "/endpoint/alice");
     assert.equal(headers["x-drop"], undefined);
     assert.equal(headers.connection, undefined);
+});
+
+
+test("parseForm reads admin form data", () => {
+    assert.deepEqual(parseForm("userId=alice&password=Abcd1234"), {
+        userId: "alice",
+        password: "Abcd1234",
+    });
+});
+
+test("adminCookieValue is stable", () => {
+    assert.equal(adminCookieValue(), adminCookieValue());
+    assert.ok(adminCookieValue().length > 20);
 });
