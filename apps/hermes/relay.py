@@ -38,6 +38,22 @@ HOP_BY_HOP_HEADERS = {
 TOOL_TIMEOUT_SECONDS = 60
 LOOPBACK_HOSTS = {"127.0.0.1", "::1", "localhost"}
 
+UI_SHOW_ARTIFACT_DESCRIPTION = """Show an artifact and immediately return its artifact_id.
+
+For iframe artifacts, payload must be exactly {path: <workspace-relative HTML
+path>}; keep all assets beside that entry file or below it. To send a user
+interaction back to the agent, load /artifact-bridge-v1.js and call
+window.silverRetort.setContext(action, jsonData, {displayText: "summary"}) when
+meaningful UI state changes. Debounce rapid changes in complex UIs. The host
+saves only the latest revision without starting a run, then attaches it when
+the user next sends a normal chat message. JSON is limited to 64 KiB. This tool
+returns immediately; it does not wait for context updates."""
+
+UI_UPDATE_ARTIFACT_DESCRIPTION = """Replace an artifact payload.
+
+Iframe payload stays {path: <workspace-relative HTML path>}; interactive user
+context must be saved through /artifact-bridge-v1.js instead."""
+
 import workspaces
 
 
@@ -183,7 +199,7 @@ class RelayState:
 def _create_mcp_server(bridge: BridgeRegistry) -> FastMCP:
     mcp = FastMCP("silverretort-ui", stateless_http=True, streamable_http_path="/")
 
-    @mcp.tool()
+    @mcp.tool(description=UI_SHOW_ARTIFACT_DESCRIPTION)
     async def ui_show_artifact(
         session_id: str, type: str, title: str, payload: dict[str, Any] | None = None
     ) -> str:
@@ -194,7 +210,7 @@ def _create_mcp_server(bridge: BridgeRegistry) -> FastMCP:
             )
         )
 
-    @mcp.tool()
+    @mcp.tool(description=UI_UPDATE_ARTIFACT_DESCRIPTION)
     async def ui_update_artifact(artifact_id: str, payload: dict[str, Any]) -> str:
         return str(
             await bridge.call_tool(

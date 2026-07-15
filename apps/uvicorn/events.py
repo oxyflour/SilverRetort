@@ -28,6 +28,20 @@ async def subscribe() -> AsyncGenerator[str, None]:
 
 # ---- 事件构造 ----
 
+def user_message(session_id: str, message: dict) -> dict:
+    return {"type": "user-message", "sessionId": session_id, "message": message}
+
+
+def artifact_context(
+    session_id: str, artifact_id: str, context: dict | None
+) -> dict:
+    return {
+        "type": "artifact-context",
+        "sessionId": session_id,
+        "artifactId": artifact_id,
+        "context": context,
+    }
+
 def run_started(session_id: str, run_id: str, message_id: str) -> dict:
     return {"type": "run-started", "sessionId": session_id, "runId": run_id, "messageId": message_id}
 

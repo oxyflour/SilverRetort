@@ -12,10 +12,13 @@ export function ChatInput() {
     s.currentSessionId ? s.buckets[s.currentSessionId]?.runId != null : false,
   );
   const pendingAttachments = useChatStore((s) => s.pendingAttachments);
+  const artifactContexts = useChatStore((s) => s.artifactContexts);
+  const artifacts = useChatStore((s) => s.artifacts);
   const sendMessage = useChatStore((s) => s.sendMessage);
   const stopRun = useChatStore((s) => s.stopRun);
   const addAttachment = useChatStore((s) => s.addAttachment);
   const removeAttachment = useChatStore((s) => s.removeAttachment);
+  const clearArtifactContext = useChatStore((s) => s.clearArtifactContext);
   const slashCommands = useChatStore((s) => s.slashCommands);
   const refreshHermesControls = useChatStore((s) => s.refreshHermesControls);
   const [text, setText] = useState("");
@@ -23,6 +26,13 @@ export function ChatInput() {
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const trimmedText = text.trim();
+  const pendingArtifactContexts = useMemo(
+    () =>
+      Object.values(artifactContexts).filter(
+        (context) => context.sessionId === currentSessionId,
+      ),
+    [artifactContexts, currentSessionId],
+  );
   const canSubmit =
     Boolean(currentSessionId) &&
     !running &&
@@ -91,6 +101,33 @@ export function ChatInput() {
         }}
       />
       <div className="mx-auto max-w-3xl">
+        {pendingArtifactContexts.length > 0 && (
+          <div className="mb-2 flex flex-wrap gap-2">
+            {pendingArtifactContexts.map((context) => (
+              <span
+                key={context.artifactId}
+                className="inline-flex items-center gap-2 rounded-full border border-blue-300 bg-blue-50 px-3 py-1 text-xs text-blue-800 dark:border-blue-700 dark:bg-blue-950/40 dark:text-blue-200"
+              >
+                <span className="rounded-full bg-blue-100 px-1.5 py-0.5 text-[10px] font-medium tracking-wide dark:bg-blue-900/60">
+                  CTX
+                </span>
+                <span className="max-w-52 truncate">
+                  {context.displayText ??
+                    artifacts[context.artifactId]?.title ??
+                    context.action}
+                </span>
+                <button
+                  type="button"
+                  onClick={() => void clearArtifactContext(context.artifactId)}
+                  aria-label={`Remove artifact context ${context.displayText ?? context.action}`}
+                  className="text-blue-400 transition-colors hover:text-red-500"
+                >
+                  <AppIcon icon={X} className="h-3.5 w-3.5" />
+                </button>
+              </span>
+            ))}
+          </div>
+        )}
         {pendingAttachments.length > 0 && (
           <div className="mb-2 flex flex-wrap gap-2">
             {pendingAttachments.map((attachment) => (

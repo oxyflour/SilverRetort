@@ -10,11 +10,12 @@ from urllib.parse import quote, unquote, urlparse
 from urllib.request import url2pathname
 
 import httpx
-from fastapi import APIRouter, HTTPException, UploadFile, Body
+from fastapi import APIRouter, Body, HTTPException, Request, UploadFile
 from fastapi.responses import FileResponse, StreamingResponse
 from sse_starlette.sse import EventSourceResponse
 
 import db
+import artifact_contexts
 import events
 import mcp_server
 import runs
@@ -23,6 +24,8 @@ from engines import create_engine
 from models import (
     ApiModel,
     Artifact,
+    ArtifactContext,
+    ArtifactContextUpdateRequest,
     Attachment,
     CreateWorkspaceRequest,
     CreateSessionRequest,
@@ -423,6 +426,32 @@ def get_artifact(artifact_id: str) -> Artifact:
     return artifact
 
 
+@router.get("/sessions/{session_id}/artifact-contexts")
+def list_artifact_contexts(session_id: str) -> list[ArtifactContext]:
+    if db.get_session(session_id) is None:
+        raise HTTPException(404, "session not found")
+    return db.list_pending_artifact_contexts(session_id)
+
+
+@router.put("/artifacts/{artifact_id}/context")
+async def set_artifact_context(
+    artifact_id: str,
+    body: ArtifactContextUpdateRequest,
+    request: Request,
+) -> ArtifactContext:
+    if request.headers.get("x-silverretort-artifact-bridge") != "1":
+        raise HTTPException(403, "artifact bridge header is required")
+    return artifact_contexts.set_context(artifact_id, body)
+
+
+@router.delete("/artifacts/{artifact_id}/context")
+async def clear_artifact_context(artifact_id: str, request: Request) -> dict[str, bool]:
+    if request.headers.get("x-silverretort-artifact-bridge") != "1":
+        raise HTTPException(403, "artifact bridge header is required")
+    artifact_contexts.clear_context(artifact_id)
+    return {"ok": True}
+
+
 async def _workspace_file_response(
     workspace_id: str,
     relative_path: str,
@@ -441,6 +470,15 @@ async def _workspace_file_response(
         headers["Cache-Control"] = "no-cache"
         headers["Access-Control-Allow-Origin"] = "*"
         headers["Cross-Origin-Resource-Policy"] = "cross-origin"
+        headers["Content-Security-Policy"] = (
+            "default-src 'self' data: blob:; "
+            "script-src 'self' 'unsafe-inline'; "
+            "style-src 'self' 'unsafe-inline'; "
+            "img-src 'self' data: blob:; "
+            "font-src 'self' data:; "
+            "connect-src 'self'; form-action 'none'; object-src 'none'; "
+            "base-uri 'none'; frame-src 'none'"
+        )
     if download_name:
         headers["Content-Disposition"] = f"attachment; filename*=UTF-8''{quote(Path(download_name).name)}"
     local_path = workspace_service.local_file_path(workspace_id, relative_path)
@@ -526,8 +564,13 @@ async def send_chat(session_id: str, body: SendChatRequest) -> SendChatResponse:
         status="streaming",
         created_at=now,
     )
-    db.insert_message(user_message)
+    consumed_contexts = db.insert_message_with_pending_artifact_contexts(user_message)
     db.insert_message(assistant_message)
+    events.broadcast(
+        events.user_message(session_id, user_message.model_dump(by_alias=True))
+    )
+    for context in consumed_contexts:
+        events.broadcast(events.artifact_context(session_id, context.artifact_id, None))
 
     # 首条消息时用内容生成标题
     if session.title == DEFAULT_TITLE and not history:

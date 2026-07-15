@@ -50,9 +50,44 @@ export const ToolCallSchema = z.object({
 });
 export type ToolCall = z.infer<typeof ToolCallSchema>;
 
+export type JsonValue =
+  | null
+  | boolean
+  | number
+  | string
+  | JsonValue[]
+  | { [key: string]: JsonValue };
+
+export const JsonValueSchema: z.ZodType<JsonValue> = z.lazy(() =>
+  z.union([
+    z.null(),
+    z.boolean(),
+    z.number(),
+    z.string(),
+    z.array(JsonValueSchema),
+    z.record(JsonValueSchema),
+  ]),
+);
+
 export const MessagePartSchema = z.discriminatedUnion("type", [
   z.object({ type: z.literal("text"), text: z.string() }),
   z.object({ type: z.literal("tool"), toolCall: ToolCallSchema }),
+  z.object({
+    type: z.literal("artifact-input"),
+    artifactId: z.string(),
+    submissionId: z.string(),
+    action: z.string(),
+    data: JsonValueSchema,
+    displayText: z.string().optional(),
+  }),
+  z.object({
+    type: z.literal("artifact-context"),
+    artifactId: z.string(),
+    revision: z.number().int().positive(),
+    action: z.string(),
+    data: JsonValueSchema,
+    displayText: z.string().optional(),
+  }),
 ]);
 export type MessagePart = z.infer<typeof MessagePartSchema>;
 
@@ -79,6 +114,17 @@ export const ArtifactSchema = z.object({
 });
 export type Artifact = z.infer<typeof ArtifactSchema>;
 
+export const ArtifactContextSchema = z.object({
+  artifactId: z.string(),
+  sessionId: z.string(),
+  revision: z.number().int().positive(),
+  action: z.string(),
+  data: JsonValueSchema,
+  displayText: z.string().optional(),
+  updatedAt: z.string(),
+});
+export type ArtifactContext = z.infer<typeof ArtifactContextSchema>;
+
 // ---- UI 命令（hermes 经 MCP 下发） ----
 
 export const UiCommandSchema = z.discriminatedUnion("command", [
@@ -101,6 +147,17 @@ const runBase = {
 };
 
 export const ChatEventSchema = z.discriminatedUnion("type", [
+  z.object({
+    type: z.literal("user-message"),
+    sessionId: z.string(),
+    message: MessageSchema,
+  }),
+  z.object({
+    type: z.literal("artifact-context"),
+    sessionId: z.string(),
+    artifactId: z.string(),
+    context: ArtifactContextSchema.nullable(),
+  }),
   z.object({ type: z.literal("run-started"), ...runBase }),
   z.object({ type: z.literal("text-delta"), ...runBase, delta: z.string() }),
   z.object({
@@ -225,3 +282,20 @@ export const SendChatResponseSchema = z.object({
   assistantMessageId: z.string(),
 });
 export type SendChatResponse = z.infer<typeof SendChatResponseSchema>;
+
+export const ArtifactContextMessageSchema = z.object({
+  type: z.literal("silverretort.artifact.context"),
+  version: z.literal(1),
+  requestId: z.string().min(1).max(100),
+  action: z.string().trim().min(1).max(80),
+  data: JsonValueSchema,
+  displayText: z.string().trim().min(1).max(500).optional(),
+});
+export type ArtifactContextMessage = z.infer<typeof ArtifactContextMessageSchema>;
+
+export const ArtifactContextUpdateRequestSchema = ArtifactContextMessageSchema.pick({
+  action: true,
+  data: true,
+  displayText: true,
+});
+export type ArtifactContextUpdateRequest = z.infer<typeof ArtifactContextUpdateRequestSchema>;

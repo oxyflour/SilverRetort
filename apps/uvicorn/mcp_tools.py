@@ -52,6 +52,15 @@ def ui_show_artifact(
     entry file. Put referenced resources in the same directory as that HTML file
     or in child directories, then reference them with relative URLs such as
     ./style.css or ./assets/app.js. Parent-directory assets are not served.
+
+    To return a user interaction from an iframe to the agent, include
+    <script src="/artifact-bridge-v1.js"></script> in the HTML and call
+    window.silverRetort.setContext(action, jsonData, {displayText: "summary"})
+    when meaningful UI state changes. Debounce rapid changes in complex UIs.
+    The host saves only the latest revision and does not start an agent run.
+    The context is attached when the user next sends a normal chat message.
+    Context must be JSON and no larger than 64 KiB. This tool returns the
+    artifact_id immediately and does not wait for context updates.
     """
     if db.get_session(session_id) is None:
         return f"error: session not found: {session_id}"
@@ -79,7 +88,12 @@ def ui_show_artifact(
 
 
 def ui_update_artifact(artifact_id: str, payload: dict[str, Any]) -> str:
-    """Replace the payload of an existing artifact."""
+    """Replace an existing artifact payload.
+
+    An iframe payload remains exactly {path: <workspace-relative HTML path>}.
+    Interactive iframe code should use /artifact-bridge-v1.js to save user
+    context; do not put that context into this payload.
+    """
     artifact = db.get_artifact(artifact_id)
     if artifact is None:
         return f"error: artifact not found: {artifact_id}"

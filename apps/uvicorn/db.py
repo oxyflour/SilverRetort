@@ -12,7 +12,17 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 
-from models import Artifact, Attachment, Message, Session, TextPart, Workspace
+from models import (
+    Artifact,
+    ArtifactContext,
+    ArtifactContextPart,
+    ArtifactInputPart,
+    Attachment,
+    Message,
+    Session,
+    TextPart,
+    Workspace,
+)
 
 _lock = threading.Lock()
 _conn: sqlite3.Connection | None = None
@@ -79,6 +89,18 @@ CREATE TABLE IF NOT EXISTS artifacts (
     created_at TEXT NOT NULL
 );
 CREATE INDEX IF NOT EXISTS idx_artifacts_session ON artifacts(session_id, created_at);
+CREATE TABLE IF NOT EXISTS artifact_contexts (
+    artifact_id TEXT PRIMARY KEY,
+    session_id TEXT NOT NULL,
+    revision INTEGER NOT NULL,
+    action TEXT NOT NULL,
+    data TEXT NOT NULL,
+    display_text TEXT,
+    updated_at TEXT NOT NULL,
+    consumed_by_message_id TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_artifact_contexts_session
+    ON artifact_contexts(session_id, consumed_by_message_id, updated_at);
 """
 
 
@@ -169,6 +191,7 @@ def _delete_artifacts_by_ids(conn: sqlite3.Connection, artifact_ids: list[str]) 
     if not artifact_ids:
         return
     placeholders = ",".join("?" for _ in artifact_ids)
+    conn.execute(f"DELETE FROM artifact_contexts WHERE artifact_id IN ({placeholders})", tuple(artifact_ids))
     conn.execute(f"DELETE FROM artifacts WHERE id IN ({placeholders})", tuple(artifact_ids))
 
 
@@ -216,6 +239,7 @@ def delete_workspace(workspace_id: str) -> None:
         if session_ids:
             placeholders = ",".join("?" for _ in session_ids)
             conn.execute(f"DELETE FROM messages WHERE session_id IN ({placeholders})", tuple(session_ids))
+            conn.execute(f"DELETE FROM artifact_contexts WHERE session_id IN ({placeholders})", tuple(session_ids))
             conn.execute(f"DELETE FROM artifacts WHERE session_id IN ({placeholders})", tuple(session_ids))
         conn.execute("DELETE FROM sessions WHERE workspace_id = ?", (workspace_id,))
         conn.execute("DELETE FROM workspaces WHERE id = ?", (workspace_id,))
@@ -254,6 +278,7 @@ def touch_session(session_id: str) -> None:
 
 def delete_session(session_id: str) -> None:
     _execute("DELETE FROM messages WHERE session_id = ?", (session_id,))
+    _execute("DELETE FROM artifact_contexts WHERE session_id = ?", (session_id,))
     _execute("DELETE FROM artifacts WHERE session_id = ?", (session_id,))
     _execute("DELETE FROM sessions WHERE id = ?", (session_id,))
 
@@ -305,6 +330,61 @@ def insert_message(message: Message) -> None:
     )
 
 
+def insert_message_with_pending_artifact_contexts(
+    message: Message,
+) -> list[ArtifactContext]:
+    with _lock:
+        conn = connect()
+        try:
+            rows = conn.execute(
+                "SELECT * FROM artifact_contexts "
+                "WHERE session_id = ? AND consumed_by_message_id IS NULL "
+                "ORDER BY updated_at, artifact_id",
+                (message.session_id,),
+            ).fetchall()
+            contexts = [_row_to_artifact_context(row) for row in rows]
+            message.parts.extend(
+                ArtifactContextPart(
+                    artifact_id=context.artifact_id,
+                    revision=context.revision,
+                    action=context.action,
+                    data=context.data,
+                    display_text=context.display_text,
+                )
+                for context in contexts
+            )
+            conn.execute(
+                "INSERT INTO messages "
+                "(id, session_id, role, parts, attachments, artifact_ids, status, created_at) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+                (
+                    message.id,
+                    message.session_id,
+                    message.role,
+                    _dump_parts(message),
+                    _dump_attachments(message),
+                    _dump_string_list(message.artifact_ids),
+                    message.status,
+                    message.created_at,
+                ),
+            )
+            if contexts:
+                conn.executemany(
+                    "UPDATE artifact_contexts SET consumed_by_message_id = ? "
+                    "WHERE artifact_id = ? AND revision = ? "
+                    "AND consumed_by_message_id IS NULL",
+                    [
+                        (message.id, context.artifact_id, context.revision)
+                        for context in contexts
+                    ],
+                )
+            conn.commit()
+        except Exception:
+            conn.rollback()
+            raise
+    return contexts
+
+
 def update_message(message: Message) -> None:
     _execute(
         "UPDATE messages SET parts = ?, artifact_ids = ?, status = ? WHERE id = ?",
@@ -342,7 +422,12 @@ def restart_message(session_id: str, message_id: str, text: str) -> RestartMessa
             )
             old_text = _message_text(target_message)
 
-            target_message.parts = [TextPart(text=text)]
+            artifact_parts = [
+                part
+                for part in target_message.parts
+                if isinstance(part, (ArtifactContextPart, ArtifactInputPart))
+            ]
+            target_message.parts = [TextPart(text=text), *artifact_parts]
             target_message.artifact_ids = []
             target_message.status = "complete"
 
@@ -381,6 +466,72 @@ def restart_message(session_id: str, message_id: str, text: str) -> RestartMessa
 
 
 # ---- artifacts ----
+
+def _row_to_artifact_context(row: sqlite3.Row) -> ArtifactContext:
+    return ArtifactContext(
+        artifact_id=row["artifact_id"],
+        session_id=row["session_id"],
+        revision=row["revision"],
+        action=row["action"],
+        data=json.loads(row["data"]),
+        display_text=row["display_text"],
+        updated_at=row["updated_at"],
+    )
+
+
+def set_artifact_context(
+    artifact_id: str,
+    session_id: str,
+    action: str,
+    data: object,
+    display_text: str | None,
+) -> ArtifactContext:
+    updated_at = now_iso()
+    with _lock:
+        conn = connect()
+        conn.execute(
+            "INSERT INTO artifact_contexts "
+            "(artifact_id, session_id, revision, action, data, display_text, updated_at, consumed_by_message_id) "
+            "VALUES (?, ?, 1, ?, ?, ?, ?, NULL) "
+            "ON CONFLICT(artifact_id) DO UPDATE SET "
+            "session_id = excluded.session_id, revision = artifact_contexts.revision + 1, "
+            "action = excluded.action, data = excluded.data, display_text = excluded.display_text, "
+            "updated_at = excluded.updated_at, consumed_by_message_id = NULL",
+            (
+                artifact_id,
+                session_id,
+                action,
+                json.dumps(data, ensure_ascii=False),
+                display_text,
+                updated_at,
+            ),
+        )
+        row = conn.execute(
+            "SELECT * FROM artifact_contexts WHERE artifact_id = ?",
+            (artifact_id,),
+        ).fetchone()
+        conn.commit()
+    return _row_to_artifact_context(row)
+
+
+def list_pending_artifact_contexts(session_id: str) -> list[ArtifactContext]:
+    return [
+        _row_to_artifact_context(row)
+        for row in _query(
+            "SELECT * FROM artifact_contexts "
+            "WHERE session_id = ? AND consumed_by_message_id IS NULL "
+            "ORDER BY updated_at, artifact_id",
+            (session_id,),
+        )
+    ]
+
+
+def clear_artifact_context(artifact_id: str) -> None:
+    _execute(
+        "UPDATE artifact_contexts SET consumed_by_message_id = 'dismissed' "
+        "WHERE artifact_id = ? AND consumed_by_message_id IS NULL",
+        (artifact_id,),
+    )
 
 def _row_to_artifact(row: sqlite3.Row) -> Artifact:
     return Artifact(

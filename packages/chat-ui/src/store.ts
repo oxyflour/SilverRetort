@@ -2,6 +2,7 @@ import { create } from "zustand";
 import {
   ApiClient,
   Artifact,
+  ArtifactContext,
   Attachment,
   ChatEvent,
   HermesModel,
@@ -37,6 +38,7 @@ interface ChatState {
   currentSessionId: string | null;
   buckets: Record<string, SessionBucket>;
   artifacts: Record<string, Artifact>;
+  artifactContexts: Record<string, ArtifactContext>;
   artifactWorkspaces: Record<string, ArtifactWorkspaceState>;
   pendingAttachments: Attachment[];
   slashCommands: SlashCommand[];
@@ -63,6 +65,7 @@ interface ChatState {
   stopRun: (sessionId: string) => Promise<void>;
   addAttachment: (file: File) => Promise<void>;
   removeAttachment: (workspaceId: string, relativePath: string) => void;
+  clearArtifactContext: (artifactId: string) => Promise<void>;
   openArtifact: (id: string, sessionId?: string) => void;
   closeArtifact: (id: string) => void;
   setPanelOpen: (open: boolean) => void;
@@ -229,6 +232,23 @@ function replaceSessionArtifacts(
   };
 }
 
+function replaceSessionArtifactContexts(
+  currentContexts: Record<string, ArtifactContext>,
+  sessionId: string,
+  nextContexts: ArtifactContext[],
+): Record<string, ArtifactContext> {
+  return {
+    ...Object.fromEntries(
+      Object.entries(currentContexts).filter(
+        ([, context]) => context.sessionId !== sessionId,
+      ),
+    ),
+    ...Object.fromEntries(
+      nextContexts.map((context) => [context.artifactId, context]),
+    ),
+  };
+}
+
 function removeArtifacts(
   currentArtifacts: Record<string, Artifact>,
   artifactIds: Set<string>,
@@ -383,6 +403,7 @@ export const useChatStore = create<ChatState>((set, get) => {
     currentSessionId: null,
     buckets: {},
     artifacts: {},
+    artifactContexts: {},
     artifactWorkspaces: {},
     pendingAttachments: [],
     slashCommands: [],
@@ -460,6 +481,7 @@ export const useChatStore = create<ChatState>((set, get) => {
           artifactWorkspaces: Object.fromEntries(Object.entries(state.artifactWorkspaces).filter(([key]) => !removedIds.has(key))),
           sessionModels: Object.fromEntries(Object.entries(state.sessionModels).filter(([key]) => !removedIds.has(key))),
           artifacts: Object.fromEntries(Object.entries(state.artifacts).filter(([, artifact]) => !removedIds.has(artifact.sessionId))),
+          artifactContexts: Object.fromEntries(Object.entries(state.artifactContexts).filter(([, context]) => !removedIds.has(context.sessionId))),
           pendingAttachments: [],
         };
       });
@@ -487,11 +509,20 @@ export const useChatStore = create<ChatState>((set, get) => {
       void get().refreshSessionModel(id);
       const bucket = get().buckets[id];
       if (bucket?.loaded) {
+        const contexts = await get().client.listArtifactContexts(id);
+        set((state) => ({
+          artifactContexts: replaceSessionArtifactContexts(
+            state.artifactContexts,
+            id,
+            contexts,
+          ),
+        }));
         return;
       }
-      const [messages, artifacts] = await Promise.all([
+      const [messages, artifacts, contexts] = await Promise.all([
         get().client.listMessages(id),
         get().client.listArtifacts(id),
+        get().client.listArtifactContexts(id),
       ]);
       withBucket(id, (currentBucket) => ({
         ...currentBucket,
@@ -500,6 +531,11 @@ export const useChatStore = create<ChatState>((set, get) => {
       }));
       set((state) => ({
         artifacts: replaceSessionArtifacts(state.artifacts, id, artifacts),
+        artifactContexts: replaceSessionArtifactContexts(
+          state.artifactContexts,
+          id,
+          contexts,
+        ),
       }));
     },
 
@@ -549,6 +585,11 @@ export const useChatStore = create<ChatState>((set, get) => {
           sessions,
           buckets,
           artifacts: replaceSessionArtifacts(state.artifacts, id, []),
+          artifactContexts: replaceSessionArtifactContexts(
+            state.artifactContexts,
+            id,
+            [],
+          ),
           artifactWorkspaces,
           sessionModels,
           currentSessionId:
@@ -631,7 +672,14 @@ export const useChatStore = create<ChatState>((set, get) => {
           message.id === response.userMessageId
             ? ({
                 ...message,
-                parts: [{ type: "text", text }],
+                parts: [
+                  { type: "text", text },
+                  ...message.parts.filter(
+                    (part) =>
+                      part.type === "artifact-context" ||
+                      part.type === "artifact-input",
+                  ),
+                ],
                 artifactIds: [],
                 status: "complete",
               } satisfies Message)
@@ -665,6 +713,11 @@ export const useChatStore = create<ChatState>((set, get) => {
           },
         },
         artifacts: removeArtifacts(state.artifacts, removedArtifactIds),
+        artifactContexts: Object.fromEntries(
+          Object.entries(state.artifactContexts).filter(
+            ([artifactId]) => !removedArtifactIds.has(artifactId),
+          ),
+        ),
         artifactWorkspaces: {
           ...state.artifactWorkspaces,
           [sessionId]: removeWorkspaceArtifacts(
@@ -676,12 +729,20 @@ export const useChatStore = create<ChatState>((set, get) => {
       touchSession(sessionId);
 
       try {
-        const artifacts = await get().client.listArtifacts(sessionId);
+        const [artifacts, contexts] = await Promise.all([
+          get().client.listArtifacts(sessionId),
+          get().client.listArtifactContexts(sessionId),
+        ]);
         const validArtifactIds = new Set(
           artifacts.map((artifact) => artifact.id),
         );
         set((state) => ({
           artifacts: replaceSessionArtifacts(state.artifacts, sessionId, artifacts),
+          artifactContexts: replaceSessionArtifactContexts(
+            state.artifactContexts,
+            sessionId,
+            contexts,
+          ),
           artifactWorkspaces: {
             ...state.artifactWorkspaces,
             [sessionId]: keepWorkspaceArtifacts(
@@ -720,6 +781,15 @@ export const useChatStore = create<ChatState>((set, get) => {
           (attachment) => attachment.workspaceId !== workspaceId || attachment.relativePath !== relativePath,
         ),
       }));
+    },
+
+    clearArtifactContext: async (artifactId) => {
+      await get().client.clearArtifactContext(artifactId);
+      set((state) => {
+        const { [artifactId]: _removed, ...artifactContexts } =
+          state.artifactContexts;
+        return { artifactContexts };
+      });
     },
 
     openArtifact: (id, sessionId) => {
@@ -775,8 +845,18 @@ export const useChatStore = create<ChatState>((set, get) => {
       if (!id) {
         return;
       }
-      const messages = await get().client.listMessages(id);
+      const [messages, contexts] = await Promise.all([
+        get().client.listMessages(id),
+        get().client.listArtifactContexts(id),
+      ]);
       withBucket(id, (bucket) => ({ ...bucket, messages, loaded: true }));
+      set((state) => ({
+        artifactContexts: replaceSessionArtifactContexts(
+          state.artifactContexts,
+          id,
+          contexts,
+        ),
+      }));
     },
 
     applyEvent: (event) => {
@@ -784,6 +864,33 @@ export const useChatStore = create<ChatState>((set, get) => {
         flushAllTextDeltas();
       }
       switch (event.type) {
+        case "artifact-context":
+          set((state) => {
+            if (event.context) {
+              return {
+                artifactContexts: {
+                  ...state.artifactContexts,
+                  [event.artifactId]: event.context,
+                },
+              };
+            }
+            const { [event.artifactId]: _removed, ...artifactContexts } =
+              state.artifactContexts;
+            return { artifactContexts };
+          });
+          break;
+
+        case "user-message":
+          withBucket(event.sessionId, (bucket) => ({
+            ...bucket,
+            messages: bucket.messages.some((message) => message.id === event.message.id)
+              ? bucket.messages.map((message) =>
+                  message.id === event.message.id ? event.message : message,
+                )
+              : [...bucket.messages, event.message],
+          }));
+          break;
+
         case "run-started":
           withBucket(event.sessionId, (bucket) => ({
             ...ensureAssistantMessage(bucket, event.sessionId, event.messageId),

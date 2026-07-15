@@ -13,7 +13,7 @@ import {
 import ReactMarkdown from "react-markdown";
 import rehypeHighlight from "rehype-highlight";
 import remarkGfm from "remark-gfm";
-import { Message, ToolCall } from "silverretort-protocol";
+import { Message, MessagePart, ToolCall } from "silverretort-protocol";
 import { openArtifactInNewWindow } from "../openArtifactInNewWindow";
 import { useChatStore } from "../store";
 import { AppIcon } from "./icons";
@@ -31,6 +31,11 @@ import { isTodoTool } from "./toolCallGroupSupport";
 
 const markdownRemarkPlugins = [remarkGfm];
 const markdownRehypePlugins = [rehypeHighlight];
+type ArtifactContextMessagePart = Extract<
+  MessagePart,
+  { type: "artifact-input" | "artifact-context" }
+>;
+
 function ToolStatusIcon({ status }: { status: ToolCall["status"] }) {
   if (status === "running") {
     return (
@@ -190,7 +195,23 @@ function MessageViewComponent({
   const [submitError, setSubmitError] = useState<string | null>(null);
   const [fullToolCalls, setFullToolCalls] = useState<Record<string, ToolCall>>({});
   const isUser = message.role === "user";
-  const partGroups = groupConsecutiveToolCalls(message.parts);
+  const canRestart =
+    isUser &&
+    message.parts.some((part) => part.type === "text") &&
+    message.parts.every(
+      (part) =>
+        part.type === "text" ||
+        part.type === "artifact-context" ||
+        part.type === "artifact-input",
+    );
+  const artifactContextParts = message.parts.filter(
+    (part): part is ArtifactContextMessagePart =>
+      part.type === "artifact-context" || part.type === "artifact-input",
+  );
+  const contentParts = message.parts.filter(
+    (part) => part.type !== "artifact-context" && part.type !== "artifact-input",
+  );
+  const partGroups = groupConsecutiveToolCalls(contentParts);
   const lastToolGroupIndex = partGroups.findLast(
     (group) => group.type === "tools",
   )?.index;
@@ -312,20 +333,22 @@ function MessageViewComponent({
               >
                 <AppIcon icon={Copy} className="h-4 w-4" />
               </button>
-              <button
-                type="button"
-                title="Edit and restart"
-                onClick={beginEditing}
-                disabled={running || saving || editing}
-                className="rounded p-1 text-neutral-500 hover:text-neutral-900 disabled:cursor-not-allowed disabled:opacity-40 dark:hover:text-neutral-100"
-              >
-                <AppIcon icon={PencilLine} className="h-4 w-4" />
-              </button>
+              {canRestart && (
+                <button
+                  type="button"
+                  title="Edit and restart"
+                  onClick={beginEditing}
+                  disabled={running || saving || editing}
+                  className="rounded p-1 text-neutral-500 hover:text-neutral-900 disabled:cursor-not-allowed disabled:opacity-40 dark:hover:text-neutral-100"
+                >
+                  <AppIcon icon={PencilLine} className="h-4 w-4" />
+                </button>
+              )}
             </span>
           )}
         </div>
 
-        {message.attachments.length > 0 && (
+        {(message.attachments.length > 0 || artifactContextParts.length > 0) && (
           <div className="mb-2 flex flex-wrap gap-2">
             {message.attachments.map((attachment) =>
               attachment.kind === "image" ? (
@@ -347,6 +370,30 @@ function MessageViewComponent({
                 </a>
               ),
             )}
+            {artifactContextParts.map((part) => (
+              <span
+                key={
+                  part.type === "artifact-context"
+                    ? `${part.artifactId}:${part.revision}`
+                    : `${part.artifactId}:${part.submissionId}`
+                }
+                title={`${part.action}\n${JSON.stringify(part.data, null, 2)}`}
+                className="inline-flex max-w-full items-center gap-2 self-start rounded-full border border-blue-300 bg-blue-50 px-3 py-1 text-xs text-blue-800 dark:border-blue-700 dark:bg-blue-950/40 dark:text-blue-200"
+              >
+                <span className="rounded-full bg-blue-100 px-1.5 py-0.5 text-[10px] font-medium tracking-wide dark:bg-blue-900/60">
+                  CTX
+                </span>
+                <button
+                  type="button"
+                  onClick={() => openArtifact(part.artifactId, message.sessionId)}
+                  className="max-w-72 truncate hover:text-blue-950 dark:hover:text-white"
+                >
+                  {part.displayText ??
+                    artifacts[part.artifactId]?.title ??
+                    part.action}
+                </button>
+              </span>
+            ))}
           </div>
         )}
 
@@ -402,7 +449,12 @@ function MessageViewComponent({
             }
 
             const nextGroup = partGroups[groupIndex + 1];
-            const toolGroup = group.type === "tools" ? group : nextGroup?.type === "tools" ? nextGroup : null;
+            const toolGroup =
+              group.type === "tools"
+                ? group
+                : group.type === "text" && nextGroup?.type === "tools"
+                  ? nextGroup
+                  : null;
             const displayedToolCalls =
               toolGroup?.toolCalls.map(
                 (toolCall) => fullToolCalls[toolCall.id] ?? toolCall,
