@@ -7,6 +7,13 @@ description: Validate a robot USD with standalone NVIDIA ovphysx, detect missing
 
 Use standalone `ovphysx`; never import `isaacsim`, `omni.*`, or start Kit.
 
+## Windows shell safety
+
+- Treat USD prim paths and patterns that begin with `/` as semantic values, not filesystem paths.
+- Run this skill's command blocks in PowerShell. Omit `--articulation` when the default `/World/**` is sufficient so Python receives that value without crossing a Git Bash process boundary.
+- Never pass slash-prefixed semantic values directly from Git Bash to a Windows-native executable because MSYS rewrites them as Windows paths; quoting does not prevent this conversion.
+- If a direct Git Bash invocation is unavoidable, set `MSYS2_ARG_CONV_EXCL='*'` for that command only and pass actual filesystem paths in Windows form. Never change `/World/...` to work around shell conversion.
+
 ## Run the gate
 
 From this skill directory:
