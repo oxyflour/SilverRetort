@@ -39,10 +39,10 @@ function promptForSwitchUrl(config) {
             webPreferences: { nodeIntegration: true, contextIsolation: false },
         });
         const finish = (url) => {
-            const hermesUrl = `${url || ""}`.trim();
-            if (!hermesUrl) return;
+            const switchUrl = `${url || ""}`.trim();
+            if (!switchUrl) return;
             writeDesktopSettings(config, {
-                hermesUrl,
+                switchUrl,
                 hermesApiKey: `${config.settings.hermesApiKey || ""}`.trim() || randomApiKey(),
             });
             promptWindow.close();

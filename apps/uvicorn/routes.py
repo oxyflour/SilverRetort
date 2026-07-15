@@ -77,13 +77,13 @@ def _write_desktop_settings(settings: dict) -> None:
 
 def _hermes_connection_response() -> dict:
     settings = _read_desktop_settings()
-    configured_url = str(settings.get("hermesUrl") or "")
+    configured_url = str(settings.get("switchUrl") or "")
     runtime_mode = os.getenv("SILVERRETORT_HERMES_MODE")
-    hermes_url = configured_url or (str(os.getenv("HERMES_URL") or "") if runtime_mode == "remote" else "")
+    switch_url = configured_url or (str(os.getenv("HERMES_URL") or "") if runtime_mode == "remote" else "")
     return {
         "packaged": os.getenv("SILVERRETORT_DESKTOP_MODE") == "packaged",
         "mode": "remote" if configured_url or runtime_mode == "remote" else "local",
-        "hermesUrl": hermes_url,
+        "switchUrl": switch_url,
         "hasHermesApiKey": bool(settings.get("hermesApiKey") or (runtime_mode == "remote" and os.getenv("HERMES_API_KEY"))),
         "restartRequired": False,
     }
@@ -120,10 +120,11 @@ def set_hermes_connection(body: dict = Body(...)) -> dict:
     mode = str(body.get("mode") or "").strip().lower()
     settings = _read_desktop_settings()
     if mode == "remote":
-        hermes_url = str(body.get("hermesUrl") or "").strip().rstrip("/")
-        if not hermes_url:
-            raise HTTPException(400, "hermesUrl is required")
-        settings["hermesUrl"] = hermes_url
+        switch_url = str(body.get("switchUrl") or "").strip().rstrip("/")
+        if not switch_url:
+            raise HTTPException(400, "switchUrl is required")
+        settings["switchUrl"] = switch_url
+        settings.pop("hermesUrl", None)
         hermes_api_key = str(body.get("hermesApiKey") or "").strip()
         if hermes_api_key:
             settings["hermesApiKey"] = hermes_api_key
@@ -131,8 +132,8 @@ def set_hermes_connection(body: dict = Body(...)) -> dict:
             raise HTTPException(400, "hermesApiKey is required")
     elif mode == "local":
         if os.getenv("SILVERRETORT_DESKTOP_MODE") == "packaged":
-            raise HTTPException(400, "packaged mode requires hermesUrl")
-        settings.pop("hermesUrl", None)
+            raise HTTPException(400, "packaged mode requires switchUrl")
+        settings.pop("switchUrl", None)
         settings.pop("hermesApiKey", None)
     else:
         raise HTTPException(400, "mode must be local or remote")

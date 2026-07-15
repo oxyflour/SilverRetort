@@ -22,7 +22,7 @@ interface ModelValue {
 interface HermesConnection {
   packaged: boolean;
   mode: "local" | "remote";
-  hermesUrl: string;
+  switchUrl: string;
   hasHermesApiKey: boolean;
   restartRequired?: boolean;
 }
@@ -67,7 +67,7 @@ export function ModelSettings() {
   const [models, setModels] = useState<HermesModel[]>([]);
   const [connection, setConnection] = useState<HermesConnection | null>(null);
   const [connectionMode, setConnectionMode] = useState<"local" | "remote">("local");
-  const [hermesUrl, setHermesUrl] = useState("");
+  const [switchUrl, setSwitchUrl] = useState("");
   const [hermesApiKey, setHermesApiKey] = useState("");
   const [primary, setPrimary] = useState<ModelValue>(emptyModel);
   const [vision, setVision] = useState<ModelValue>(emptyModel);
@@ -87,7 +87,7 @@ export function ModelSettings() {
       if (cancelled) return;
       setConnection(connectionSettings);
       setConnectionMode(connectionSettings.mode);
-      setHermesUrl(connectionSettings.hermesUrl || "");
+      setSwitchUrl(connectionSettings.switchUrl || "");
       setHermesApiKey("");
 
       if (connectionSettings.packaged || connectionSettings.mode === "remote") {
@@ -147,10 +147,10 @@ export function ModelSettings() {
 
   const saveConnection = async () => {
     const nextMode = connection?.packaged ? "remote" : connectionMode;
-    const nextUrl = hermesUrl.trim().replace(/\/$/, "");
+    const nextUrl = switchUrl.trim().replace(/\/$/, "");
     const nextKey = hermesApiKey.trim();
     if (nextMode === "remote" && !nextUrl) {
-      setError("请填写 Hermes URL。");
+      setError("请填写 Switch URL。");
       return;
     }
     if (nextMode === "remote" && !nextKey && !connection?.hasHermesApiKey) {
@@ -164,12 +164,12 @@ export function ModelSettings() {
     try {
       const nextConnection = await putJson<HermesConnection>("/api/hermes/connection", {
         mode: nextMode,
-        hermesUrl: nextUrl,
+        switchUrl: nextUrl,
         hermesApiKey: nextKey,
       });
       setConnection(nextConnection);
       setConnectionMode(nextConnection.mode);
-      setHermesUrl(nextConnection.hermesUrl || "");
+      setSwitchUrl(nextConnection.switchUrl || "");
       setHermesApiKey("");
       setSaved(true);
     } catch (cause) {
@@ -254,10 +254,10 @@ export function ModelSettings() {
             <ConnectionCard
               connection={connection}
               mode={connectionMode}
-              hermesUrl={hermesUrl}
+              switchUrl={switchUrl}
               hermesApiKey={hermesApiKey}
               onModeChange={(mode) => { setConnectionMode(mode); setSaved(false); }}
-              onUrlChange={(value) => { setHermesUrl(value); setSaved(false); }}
+              onUrlChange={(value) => { setSwitchUrl(value); setSaved(false); }}
               onApiKeyChange={(value) => { setHermesApiKey(value); setSaved(false); }}
               onSave={() => void saveConnection()}
               saving={saving}
@@ -369,7 +369,7 @@ export function ModelSettings() {
 function ConnectionCard({
   connection,
   mode,
-  hermesUrl,
+  switchUrl,
   hermesApiKey,
   onModeChange,
   onUrlChange,
@@ -379,7 +379,7 @@ function ConnectionCard({
 }: {
   connection: HermesConnection;
   mode: "local" | "remote";
-  hermesUrl: string;
+  switchUrl: string;
   hermesApiKey: string;
   onModeChange: (mode: "local" | "remote") => void;
   onUrlChange: (value: string) => void;
@@ -396,7 +396,7 @@ function ConnectionCard({
           <p className="mt-1 text-xs leading-5 text-neutral-500 dark:text-neutral-400">
             {remoteOnly
               ? "打包模式只使用远程 Hermes，请配置 apps/switch 提供的 URL 和 API Key。"
-              : "开发模式可以使用本地模型配置，也可以切换到远程 hermesUrl。"}
+              : "开发模式可以使用本地模型配置，也可以切换到远程 switchUrl。"}
           </p>
         </div>
         <button
@@ -422,7 +422,7 @@ function ConnectionCard({
             onClick={() => onModeChange("remote")}
             className={`rounded-md px-3 py-2 ${mode === "remote" ? "bg-white shadow-sm dark:bg-neutral-900" : "text-neutral-500"}`}
           >
-            hermesUrl
+            switchUrl
           </button>
         </div>
       )}
@@ -430,10 +430,10 @@ function ConnectionCard({
       {(remoteOnly || mode === "remote") && (
         <div className="mt-5 grid gap-3">
           <label className="text-xs text-neutral-500 dark:text-neutral-400">
-            hermesUrl
+            switchUrl
             <input
               type="url"
-              value={hermesUrl}
+              value={switchUrl}
               onChange={(event) => onUrlChange(event.target.value)}
               placeholder="http://localhost:23004/endpoint/<userId>"
               className="mt-1.5 w-full rounded-lg border border-neutral-300 bg-white px-3 py-2 text-sm text-neutral-900 outline-none focus:border-neutral-500 dark:border-neutral-700 dark:bg-neutral-800 dark:text-neutral-100"

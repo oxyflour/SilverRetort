@@ -34,20 +34,20 @@ function resolveHermesMode(
     const removedDockerKeys = Object.keys(config.settings).filter((key) => key.startsWith("hermesDocker"));
     if (removedDockerKeys.length) {
         throw new Error(
-            `${removedDockerKeys.join(", ")} are no longer supported; configure hermesUrl instead`,
+            `${removedDockerKeys.join(", ")} are no longer supported; configure switchUrl instead`,
         );
     }
 
-    const hermesUrl = normalizeBaseUrl(config.settings.hermesUrl);
-    if (hermesUrl) {
+    const switchUrl = normalizeBaseUrl(config.settings.switchUrl);
+    if (switchUrl) {
         if (!hermesApiKey) {
-            throw new Error("DATA_DIR/settings.json has hermesUrl but missing hermesApiKey");
+            throw new Error("DATA_DIR/settings.json has switchUrl but missing hermesApiKey");
         }
         return {
             mode: "remote",
-            url: hermesUrl,
+            url: switchUrl,
             apiKey: hermesApiKey,
-            healthUrl: joinUrl(hermesUrl, "health"),
+            healthUrl: joinUrl(switchUrl, "health"),
         };
     }
 
