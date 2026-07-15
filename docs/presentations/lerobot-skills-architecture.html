@@ -1,0 +1,234 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>LeRobot Simulation Skills 架构介绍</title>
+  <style>
+    :root {
+      color-scheme: light;
+      --bg: #f6f8fb;
+      --card: #ffffff;
+      --ink: #172033;
+      --muted: #5c667a;
+      --accent: #3f7cff;
+      --accent-2: #00a887;
+      --line: #dfe6f3;
+      --code: #f0f4ff;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      background: var(--bg);
+      color: var(--ink);
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif;
+    }
+    .deck {
+      scroll-snap-type: y mandatory;
+      height: 100vh;
+      overflow-y: auto;
+    }
+    .slide {
+      min-height: 100vh;
+      padding: 54px 72px;
+      display: flex;
+      flex-direction: column;
+      justify-content: center;
+      scroll-snap-align: start;
+      position: relative;
+    }
+    .slide::after {
+      content: attr(data-page);
+      position: absolute;
+      right: 42px;
+      bottom: 28px;
+      color: #94a0b8;
+      font-size: 16px;
+    }
+    h1, h2 { margin: 0 0 24px; letter-spacing: -0.03em; }
+    h1 { font-size: 62px; line-height: 1.08; }
+    h2 { font-size: 42px; line-height: 1.18; }
+    p, li { font-size: 24px; line-height: 1.48; }
+    p { margin: 0 0 16px; }
+    ul, ol { margin: 0; padding-left: 1.25em; }
+    li { margin: 10px 0; }
+    strong { color: var(--accent); }
+    code {
+      background: var(--code);
+      color: #264a9f;
+      border-radius: 6px;
+      padding: 0.06em 0.32em;
+      font-family: ui-monospace, SFMono-Regular, Consolas, monospace;
+      font-size: 0.88em;
+    }
+    .subtitle { color: var(--muted); font-size: 28px; }
+    .grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 24px; }
+    .card {
+      background: var(--card);
+      border: 1px solid var(--line);
+      border-radius: 24px;
+      padding: 26px 30px;
+      box-shadow: 0 18px 45px rgba(31, 45, 78, 0.08);
+    }
+    .card h3 { margin: 0 0 12px; color: var(--accent); font-size: 27px; }
+    .card p, .card li { font-size: 20px; }
+    .pill {
+      display: inline-block;
+      margin: 0 10px 10px 0;
+      padding: 8px 13px;
+      border-radius: 999px;
+      background: #e9f1ff;
+      color: #2856b8;
+      font-size: 19px;
+      font-weight: 650;
+    }
+    .flow {
+      display: grid;
+      grid-template-columns: 1fr 1fr 1fr;
+      gap: 18px;
+      align-items: stretch;
+      margin-top: 8px;
+    }
+    .node {
+      background: var(--card);
+      border: 2px solid var(--line);
+      border-radius: 22px;
+      padding: 20px;
+      min-height: 132px;
+    }
+    .node h3 { margin: 0 0 8px; font-size: 25px; color: var(--accent); }
+    .node p { font-size: 18px; color: var(--muted); }
+    .arrow { text-align: center; color: var(--accent); font-size: 30px; font-weight: 800; align-self: center; }
+    .note {
+      margin-top: 24px;
+      padding: 18px 22px;
+      border-left: 6px solid var(--accent-2);
+      background: #ecfff9;
+      border-radius: 16px;
+      color: #075747;
+      font-size: 21px;
+    }
+    .small li { font-size: 21px; }
+    @media print {
+      body { background: white; }
+      .deck { height: auto; overflow: visible; }
+      .slide { page-break-after: always; min-height: 100vh; }
+    }
+  </style>
+</head>
+<body>
+  <main class="deck">
+    <section class="slide" data-page="1 / 9">
+      <h1>LeRobot Simulation Skills<br />架构介绍</h1>
+      <p class="subtitle">Isaac Sim 核心拆分 · 可插拔物理/渲染 · LeRobot 数据闭环</p>
+      <p>
+        面向智能体的仿真数据采集与自动评测，把重型一体化仿真应用拆成可组合的 skills。
+      </p>
+    </section>
+
+    <section class="slide" data-page="2 / 9">
+      <h2>1. 背景：为什么拆分 Isaac Sim</h2>
+      <ul>
+        <li><strong>Isaac Sim 是庞大的一体化软件包</strong>：仿真、渲染、UI、扩展系统、资产工具链都在同一应用栈中，组件多、依赖重、冷启动慢。</li>
+        <li><strong>MuJoCo 内置渲染器适合快速调试</strong>，但材质、光照、相机效果和合成数据真实性较弱。</li>
+        <li>我们的选择：保留 Isaac/Omniverse 里真正需要的核心能力，拆成物理仿真、RTX 渲染、数据记录、策略评测四类可组合 skill。</li>
+      </ul>
+    </section>
+
+    <section class="slide" data-page="3 / 9">
+      <h2>2. 目标：Isaac Sim 核心拆分 + LeRobot 数据格式</h2>
+      <div class="grid">
+        <div class="card">
+          <h3>统一数据契约</h3>
+          <p>以 <code>LeRobot Dataset</code> 作为训练、可视化、回放和评测的统一输入/输出格式。</p>
+        </div>
+        <div class="card">
+          <h3>低耦合通信</h3>
+          <p>用 ROS 2 topic 连接 physics、render、record、rollout，各 skill 可独立启动和替换。</p>
+        </div>
+        <div class="card">
+          <h3>可插拔物理</h3>
+          <p>当前使用 standalone <code>ovphysx</code>，后续可替换为其他物理后端。</p>
+        </div>
+        <div class="card">
+          <h3>可插拔渲染</h3>
+          <p>当前使用 <code>omni.hydra.rtx</code>，后续保留 Blender/离线渲染接入空间。</p>
+        </div>
+      </div>
+    </section>
+
+    <section class="slide" data-page="4 / 9">
+      <h2>3. 总体架构</h2>
+      <div class="flow">
+        <div class="node"><h3>USD Robot / Scene</h3><p>机器人、本体、传感器、场景资产</p></div>
+        <div class="arrow">→</div>
+        <div class="node"><h3>lerobot-serve</h3><p><code>ovphysx</code> 物理仿真；发布 joint state、TF、metadata、clock；订阅 command</p></div>
+        <div class="node"><h3>lerobot-render</h3><p>订阅 TF；用 Omni RTX 渲染多相机图像；发布 image topic</p></div>
+        <div class="arrow">→</div>
+        <div class="node"><h3>record / rollout</h3><p>记录 demonstration 或加载 policy 闭环评测，输出 LeRobot dataset</p></div>
+      </div>
+      <p class="note">核心协议：<code>/lerobot/joint_states</code>、<code>/lerobot/command</code>、<code>/tf</code>、<code>/lerobot/render/&lt;sensor&gt;/image_raw</code>、LeRobot dataset。</p>
+    </section>
+
+    <section class="slide" data-page="5 / 9">
+      <h2>4. lerobot-serve：可插拔物理仿真</h2>
+      <ul>
+        <li>当前实现使用 standalone <code>ovphysx</code>：加载 USD articulation，创建 PhysX tensor binding。</li>
+        <li>绑定 DOF position / velocity / target / effort，以及 root pose、link pose。</li>
+        <li>ROS 合约：发布 <code>/lerobot/joint_states</code>、<code>/lerobot/root_pose</code>、<code>/tf</code>、<code>/lerobot/metadata</code>、<code>/clock</code>。</li>
+        <li>订阅 <code>/lerobot/command</code>，按关节名把 position / velocity / effort 写回 ovphysx target。</li>
+        <li>MOZ01 可通过 <code>--control-profile moz01</code> 展开四连杆夹爪耦合；多 articulation 场景可使用 <code>&lt;root&gt;::&lt;joint&gt;</code> 命名。</li>
+      </ul>
+    </section>
+
+    <section class="slide" data-page="6 / 9">
+      <h2>5. lerobot-render：可插拔渲染器</h2>
+      <ul>
+        <li>当前使用 Omniverse Kit + <code>omni.hydra.rtx</code>，不启动完整 Isaac Sim app。</li>
+        <li>launcher 自动寻找 <code>kit.exe</code>，注入 skill app / extension，并通过 setting 传入 USD、相机、分辨率、端口。</li>
+        <li>extension 打开 USD 后切到 session layer，避免改写源资产；若场景无灯光，临时添加 dome/key light。</li>
+        <li>自动发现 USD Camera 或读取 sensors JSON；ROS bridge 订阅 <code>/tf</code>，发布 <code>/lerobot/render/&lt;sensor&gt;/image_raw</code>。</li>
+        <li>已尝试兼容 Blender 作为替代渲染后端，但现阶段帧率太低，暂不作为默认实时采集路径。</li>
+      </ul>
+    </section>
+
+    <section class="slide" data-page="7 / 9">
+      <h2>6. lerobot-record-simulation：自动采集 LeRobot 数据</h2>
+      <ul>
+        <li>目标：自动拉起或连接 <code>serve</code> 和 <code>render</code>，将仿真 demonstration 写成本地 LeRobot dataset。</li>
+        <li>记录字段：<code>observation.state</code>、<code>action</code>、<code>observation.images.&lt;sensor&gt;</code>、<code>task</code>。</li>
+        <li>支持 <code>--sensors auto|none|name1,name2</code>：可自动发现 render image topics，也可录制纯 proprioception 数据。</li>
+        <li>每个 episode 随机 reset 到 goal 附近，再用 smoothstep 轨迹生成专家动作。</li>
+        <li>每集 <code>save_episode()</code>，结束 <code>finalize()</code>，再重新打开 dataset 做校验，避免产出不可读数据。</li>
+      </ul>
+    </section>
+
+    <section class="slide" data-page="8 / 9">
+      <h2>7. lerobot-rollout-simulation：仿真环境自动评测</h2>
+      <ol class="small">
+        <li>自动拉起或连接 <code>serve</code> 和 <code>render</code>，发现 joints 和 sensors，创建与当前仿真一致的 LeRobot features。</li>
+        <li>加载本地或 Hugging Face LeRobot checkpoint，以及 preprocessor / postprocessor。</li>
+        <li>每个 episode 随机 reset：observation → policy inference → action → ROS command。</li>
+        <li>保存 rollout dataset，并写 <code>evaluation.json</code>。</li>
+      </ol>
+      <p class="note">指标包括 reset error、final/minimum goal error、success、inference latency、control overrun、success rate、P95 latency 等。</p>
+    </section>
+
+    <section class="slide" data-page="9 / 9">
+      <h2>8. 后续扩展路线</h2>
+      <p>
+        <span class="pill">moz-robot-setup</span>
+        <span class="pill">oven 场景搭建</span>
+        <span class="pill">资产重建 skill</span>
+        <span class="pill">渲染增强 skill</span>
+      </p>
+      <ul>
+        <li><strong>本体配置 skill</strong>：robot morphology、关节命名、control profile、传感器挂载。</li>
+        <li><strong>场景搭建 skill</strong>：任务场景、交互物体、随机化参数、评测目标。</li>
+        <li><strong>资产重建 skill</strong>：从扫描/图片/网格重建 USD asset，并补齐碰撞、材质、尺度、语义信息。</li>
+        <li><strong>渲染增强 skill</strong>：材质增强、光照随机化、domain randomization、合成数据质量检查。</li>
+      </ul>
+    </section>
+  </main>
+</body>
+</html>
