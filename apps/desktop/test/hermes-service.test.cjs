@@ -1,9 +1,9 @@
 const assert = require("node:assert/strict");
-const { mkdtempSync, rmSync } = require("node:fs");
+const { mkdtempSync, mkdirSync, rmSync, writeFileSync } = require("node:fs");
 const os = require("node:os");
 const path = require("node:path");
 const test = require("node:test");
-const { resolveHermesMode } = require("../src/hermes-service.cjs");
+const { defaultSwitchHermesUrl, resolveHermesMode, resolveHermesRuntime } = require("../src/hermes-service.cjs");
 
 function makeConfig(t, overrides = {}) {
     const dataDir = mkdtempSync(path.join(os.tmpdir(), "silverretort-hermes-"));
@@ -60,10 +60,30 @@ test("removed Docker settings direct users to hermesUrl", (t) => {
     );
 });
 
-test("packaged mode without Hermes configuration is disabled", (t) => {
+test("packaged mode without Hermes executable requests switch configuration", (t) => {
     const config = makeConfig(t, { isPackaged: true });
-    const originalWarn = console.warn;
-    t.after(() => { console.warn = originalWarn; });
-    console.warn = () => {};
-    assert.deepEqual(resolveHermesMode(config, 23001, 23002), { mode: "disabled" });
+    assert.deepEqual(resolveHermesMode(config, 23001, 23002), {
+        mode: "needs-switch-config",
+        url: defaultSwitchHermesUrl(),
+    });
+});
+
+test("packaged mode uses a bundled Hermes executable when present", (t) => {
+    const config = makeConfig(t, { isPackaged: true });
+    const hermesDir = path.join(config.serviceRoot, "hermes");
+    mkdirSync(hermesDir, { recursive: true });
+    const executable = path.join(hermesDir, process.platform === "win32" ? "silverretort-hermes.exe" : "silverretort-hermes");
+    writeFileSync(executable, "");
+    assert.deepEqual(resolveHermesRuntime(config), {
+        command: executable,
+        args: [],
+        cwd: hermesDir,
+    });
+});
+
+test("default switch URL points at localhost and encodes the user id", () => {
+    assert.equal(
+        defaultSwitchHermesUrl("Alice.Smith", "http://localhost:8080"),
+        "http://localhost:8080/endpoint/Alice.Smith",
+    );
 });

@@ -9,6 +9,7 @@
   "scripts": {
     "dev": "node switch.cjs",
     "start": "node switch.cjs",
+    "test": "node --test",
     "build": "node scripts/build-sea.cjs"
   },
   "engines": {
