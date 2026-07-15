@@ -10,11 +10,13 @@ const { execFile } = require("node:child_process");
 
 const USER_ID_PATTERN = /^[A-Za-z0-9][A-Za-z0-9_.-]{0,63}$/u;
 const ROUTE_PATTERN = /^\/endpoint\/([^/]+)(\/.*)?$/u;
+const STATUS_PATTERN = /^\/status\/([^/?#]+)\/?$/u;
 const HOP_HEADERS = new Set([
     "connection", "keep-alive", "proxy-authenticate", "proxy-authorization",
     "proxy-connection", "te", "trailer", "transfer-encoding", "upgrade",
 ]);
 const recoveries = new Map();
+const lastTraffic = new Map();
 
 class SwitchError extends Error {
     constructor(status, message) {
@@ -48,7 +50,7 @@ function dockerHost() {
 const settings = Object.freeze({
     listenHost: process.env.SWITCH_HOST || "0.0.0.0",
     listenPort: numberEnv("SWITCH_PORT", 23004, 1, 65535),
-    configDir: path.resolve(process.env.SWITCH_CONFIG_DIR || "."),
+    configDir: path.resolve(process.env.SWITCH_CONFIG_DIR || "config"),
     dockerCommand: process.env.DOCKER_COMMAND || "docker",
     dockerHost: dockerHost(),
     dockerImage: process.env.HERMES_DOCKER_IMAGE || "silverretort-hermes",
@@ -57,6 +59,8 @@ const settings = Object.freeze({
     healthTimeout: numberEnv("SWITCH_HEALTH_TIMEOUT_MS", 2_000),
     recoveryTimeout: numberEnv("SWITCH_RECOVERY_TIMEOUT_MS", 60_000),
     healthInterval: numberEnv("SWITCH_HEALTH_INTERVAL_MS", 500),
+    idleStopMs: numberEnv("SWITCH_IDLE_STOP_MS", 60 * 60 * 1000),
+    idleSweepMs: numberEnv("SWITCH_IDLE_SWEEP_MS", 60 * 1000),
 });
 if (!settings.dockerImage.trim()) throw new Error("HERMES_DOCKER_IMAGE must not be empty");
 
@@ -91,8 +95,8 @@ async function inspectContainer(name) {
     }
 }
 
-function publishedPort(container, name) {
-    const key = `${settings.containerPort}/tcp`;
+function publishedPort(container, name, containerPort = settings.containerPort) {
+    const key = `${containerPort}/tcp`;
     const bindings = container?.NetworkSettings?.Ports?.[key];
     if (!Array.isArray(bindings) || bindings.length === 0) {
         throw new SwitchError(502, `${name} does not publish ${key}`);
@@ -121,23 +125,87 @@ function checkHealth(port) {
     });
 }
 
+
+function envArgs(env) {
+    return Object.entries(env || {}).flatMap(([key, value]) => ["-e", `${key}=${value}`]);
+}
+
+function volumeSpec(volume) {
+    if (typeof volume === "string") return volume;
+    if (volume && typeof volume === "object" && volume.source && volume.target) {
+        return `${volume.source}:${volume.target}${volume.readOnly ? ":ro" : ""}`;
+    }
+    throw new SwitchError(500, "Invalid volume configuration");
+}
+
+function normalizeUserConfig(id, configPath, payload) {
+    if (!payload || Array.isArray(payload) || typeof payload !== "object") {
+        throw new SwitchError(500, "User configuration must be a JSON object");
+    }
+    const apiKey = `${payload.hermesApiKey || payload.HERMES_API_KEY || ""}`.trim();
+    if (!apiKey) throw new SwitchError(500, "User configuration is missing hermesApiKey");
+    const rawEnv = payload.env || {};
+    if (!rawEnv || Array.isArray(rawEnv) || typeof rawEnv !== "object") {
+        throw new SwitchError(500, "User configuration env must be an object");
+    }
+    const containerPort = Number(payload.containerPort || settings.containerPort);
+    if (!Number.isInteger(containerPort) || containerPort < 1 || containerPort > 65535) {
+        throw new SwitchError(500, "User configuration containerPort is invalid");
+    }
+    const env = Object.fromEntries(Object.entries(rawEnv).map(([key, value]) => [key, `${value}`]));
+    env.HERMES_API_KEY = apiKey;
+    return {
+        id,
+        configPath,
+        apiKey,
+        image: `${payload.image || settings.dockerImage}`.trim() || settings.dockerImage,
+        containerPort,
+        env,
+        args: Array.isArray(payload.args) ? payload.args.map(String) : [],
+        volumes: Array.isArray(payload.volumes) ? payload.volumes : [],
+    };
+}
+
+function parseStatusRoute(rawTarget) {
+    const pathname = rawTarget.split("?")[0];
+    const match = STATUS_PATTERN.exec(pathname);
+    if (!match) throw new SwitchError(404, "Expected /status/{userId}");
+    let id;
+    try {
+        id = decodeURIComponent(match[1]);
+    } catch {
+        throw new SwitchError(400, "userId is not valid URL encoding");
+    }
+    if (!USER_ID_PATTERN.test(id)) throw new SwitchError(400, "userId contains unsupported characters");
+    return { id };
+}
+
+function touchUser(userId, now = Date.now()) {
+    lastTraffic.set(userId, now);
+}
+
 async function createContainer(user) {
     const name = `hermes-${user.id}`;
     console.log(`[switch] creating ${name}`);
     await runDocker([
         "run", "-d", "--name", name,
         "--label", "com.silverretort.switch=true",
-        "-p", `${settings.containerPort}`,
-        "--env-file", user.configPath,
-        "-e", "WATCH_STDIN=0",
-        "-e", "LISTEN_HOST=0.0.0.0",
-        "-e", `LISTEN_PORT=${settings.containerPort}`,
-        "-e", "HERMES_RELAY_ENABLED=1",
-        "-e", "HERMES_WORKSPACES_DIR=/var/lib/silverretort/workspaces",
-        "-e", "HERMES_HOME=/var/lib/silverretort/home",
+        "--label", `com.silverretort.user=${user.id}`,
+        "-p", `${user.containerPort || settings.containerPort}`,
+        ...envArgs({
+            WATCH_STDIN: "0",
+            LISTEN_HOST: "0.0.0.0",
+            LISTEN_PORT: `${user.containerPort || settings.containerPort}`,
+            HERMES_RELAY_ENABLED: "1",
+            HERMES_WORKSPACES_DIR: "/var/lib/silverretort/workspaces",
+            HERMES_HOME: "/var/lib/silverretort/home",
+            ...user.env,
+        }),
         "-v", `${name}-workspaces:/var/lib/silverretort/workspaces`,
         "-v", `${name}-home:/var/lib/silverretort/home`,
-        settings.dockerImage,
+        ...user.volumes.flatMap((volume) => ["-v", volumeSpec(volume)]),
+        user.image,
+        ...user.args,
     ]);
 }
 
@@ -160,7 +228,7 @@ async function ensureHealthyNow(user) {
     const running = Boolean(container.State?.Running);
     if (running) {
         try {
-            const port = publishedPort(container, name);
+            const port = publishedPort(container, name, user.containerPort);
             if (await checkHealth(port)) return { host: settings.dockerHost, port };
         } catch (error) {
             if (!(error instanceof SwitchError)) throw error;
@@ -175,7 +243,7 @@ async function ensureHealthyNow(user) {
         if (!container) throw new SwitchError(502, `${name} disappeared during recovery`);
         if (container.State?.Running) {
             try {
-                const port = publishedPort(container, name);
+                const port = publishedPort(container, name, user.containerPort);
                 if (await checkHealth(port)) return { host: settings.dockerHost, port };
             } catch (error) {
                 lastError = error.message;
@@ -238,7 +306,7 @@ function parseEnv(text) {
 }
 
 async function resolveUser(route) {
-    const configPath = path.join(settings.configDir, `${route.id}.conf`);
+    const configPath = path.join(settings.configDir, `${route.id}.json`);
     let text;
     try {
         text = await fs.readFile(configPath, "utf8");
@@ -246,9 +314,13 @@ async function resolveUser(route) {
         if (error.code === "ENOENT") throw new SwitchError(404, "No configuration for user");
         throw new SwitchError(500, "Unable to read user configuration");
     }
-    const apiKey = `${parseEnv(text).HERMES_API_KEY || ""}`.trim();
-    if (!apiKey) throw new SwitchError(500, "User configuration is missing HERMES_API_KEY");
-    return { ...route, configPath, apiKey };
+    let payload;
+    try {
+        payload = JSON.parse(text);
+    } catch {
+        throw new SwitchError(500, "User configuration is invalid JSON");
+    }
+    return { ...route, ...normalizeUserConfig(route.id, configPath, payload) };
 }
 
 function authorize(request, user) {
@@ -357,6 +429,7 @@ async function handleUpgrade(request, socket, head) {
     try {
         const user = await resolveUser(parseRoute(request.url || "/"));
         authorize(request, user);
+        touchUser(user.id);
         const target = await ensureHealthy(user);
         const upstream = http.request({
             host: target.host,
@@ -401,13 +474,71 @@ async function handleUpgrade(request, socket, head) {
     }
 }
 
+
+function escapeHtml(value) {
+    return `${value}`.replace(/[&<>"']/gu, (char) => ({
+        "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;",
+    }[char]));
+}
+
+async function renderStatusPage(route) {
+    const user = await resolveUser({ ...route, prefix: `/status/${encodeURIComponent(route.id)}`, target: "/" });
+    const name = `hermes-${user.id}`;
+    const container = await inspectContainer(name);
+    const last = lastTraffic.get(user.id);
+    const state = container?.State?.Status || "not created";
+    const rows = [
+        ["User", user.id],
+        ["Container", name],
+        ["State", state],
+        ["Image", user.image],
+        ["Config", user.configPath],
+        ["Last traffic", last ? new Date(last).toISOString() : "never"],
+    ];
+    return `<!doctype html><html><head><meta charset="utf-8"><title>Hermes ${escapeHtml(user.id)}</title>
+<style>body{font-family:system-ui,sans-serif;margin:2rem;line-height:1.5}td{padding:.35rem .75rem;border-bottom:1px solid #ddd}td:first-child{font-weight:600}</style>
+</head><body><h1>Hermes user status</h1><table>${rows.map(([key, value]) => `<tr><td>${escapeHtml(key)}</td><td>${escapeHtml(value)}</td></tr>`).join("")}</table></body></html>`;
+}
+
+function sendHtml(response, status, html) {
+    const body = Buffer.from(html);
+    response.writeHead(status, {
+        "content-type": "text/html; charset=utf-8",
+        "content-length": body.length,
+        connection: "close",
+    });
+    response.end(response.req?.method === "HEAD" ? undefined : body);
+}
+
+async function stopIdleContainers(now = Date.now()) {
+    for (const [userId, last] of lastTraffic) {
+        if (now - last <= settings.idleStopMs) continue;
+        const name = `hermes-${userId}`;
+        const container = await inspectContainer(name);
+        if (container?.State?.Running) {
+            console.log(`[switch] stopping idle ${name}`);
+            await runDocker(["stop", name], true);
+        }
+        lastTraffic.delete(userId);
+    }
+}
+
 async function handleRequest(request, response) {
     if (["GET", "HEAD"].includes(request.method) && request.url === "/health") {
         return sendJson(response, 200, { status: "ok" });
     }
+    if (["GET", "HEAD"].includes(request.method) && (request.url || "").startsWith("/status/")) {
+        try {
+            return sendHtml(response, 200, await renderStatusPage(parseStatusRoute(request.url || "/")));
+        } catch (error) {
+            const status = error instanceof SwitchError ? error.status : 500;
+            return sendHtml(response, status, `<p>${escapeHtml(error.message)}</p>`);
+        }
+    }
     try {
         const user = await resolveUser(parseRoute(request.url || "/"));
         authorize(request, user);
+        touchUser(user.id);
         const target = await ensureHealthy(user);
         proxyHttp(request, response, user, target);
     } catch (error) {
@@ -433,8 +564,15 @@ function startServer() {
             + `configs=${settings.configDir}; docker=${settings.dockerHost}`,
         );
     });
+    const idleTimer = setInterval(() => {
+        void stopIdleContainers().catch((error) => console.warn(`[switch] idle cleanup failed: ${error.message}`));
+    }, settings.idleSweepMs);
+    idleTimer.unref?.();
     for (const signal of ["SIGINT", "SIGTERM"]) {
-        process.once(signal, () => server.close(() => process.exit(0)));
+        process.once(signal, () => {
+            clearInterval(idleTimer);
+            server.close(() => process.exit(0));
+        });
     }
     return server;
 }
@@ -449,8 +587,12 @@ module.exports = {
     connectionTokens,
     createServer,
     forwardedHeaders,
+    normalizeUserConfig,
     parseEnv,
     parseRoute,
+    parseStatusRoute,
     responseHeaders,
+    stopIdleContainers,
+    touchUser,
     startServer,
 };
