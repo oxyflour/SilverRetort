@@ -47,7 +47,7 @@ function dockerHost() {
 
 const settings = Object.freeze({
     listenHost: process.env.SWITCH_HOST || "0.0.0.0",
-    listenPort: numberEnv("SWITCH_PORT", 8080, 1, 65535),
+    listenPort: numberEnv("SWITCH_PORT", 23004, 1, 65535),
     configDir: path.resolve(process.env.SWITCH_CONFIG_DIR || "."),
     dockerCommand: process.env.DOCKER_COMMAND || "docker",
     dockerHost: dockerHost(),

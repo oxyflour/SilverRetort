@@ -36,7 +36,7 @@ are started; unhealthy running containers are restarted.
 
 Configuration:
 
-- `SWITCH_HOST` / `SWITCH_PORT`: listener, default `0.0.0.0:8080`
+- `SWITCH_HOST` / `SWITCH_PORT`: listener, default `0.0.0.0:23004`
 - `SWITCH_CONFIG_DIR`: `.conf` directory, default current directory
 - `HERMES_DOCKER_IMAGE`: default `silverretort-hermes`
 - `HERMES_CONTAINER_PORT`: default `23002`

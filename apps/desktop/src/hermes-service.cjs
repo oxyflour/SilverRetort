@@ -9,7 +9,7 @@ function randomApiKey() {
     return crypto.randomBytes(32).toString("hex");
 }
 
-function defaultSwitchHermesUrl(username = os.userInfo().username, switchBaseUrl = "http://localhost:8080") {
+function defaultSwitchHermesUrl(username = os.userInfo().username, switchBaseUrl = "http://localhost:23004") {
     return joinUrl(switchBaseUrl, `endpoint/${encodeURIComponent(username)}`);
 }
 

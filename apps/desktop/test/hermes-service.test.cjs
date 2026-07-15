@@ -70,7 +70,7 @@ test("packaged mode without Hermes configuration requests switch configuration",
 
 test("default switch URL points at localhost and encodes the user id", () => {
     assert.equal(
-        defaultSwitchHermesUrl("Alice.Smith", "http://localhost:8080"),
-        "http://localhost:8080/endpoint/Alice.Smith",
+        defaultSwitchHermesUrl("Alice.Smith", "http://localhost:23004"),
+        "http://localhost:23004/endpoint/Alice.Smith",
     );
 });
