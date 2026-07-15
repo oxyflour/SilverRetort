@@ -19,6 +19,14 @@ interface ModelValue {
   hasApiKey: boolean;
 }
 
+interface HermesConnection {
+  packaged: boolean;
+  mode: "local" | "remote";
+  switchUrl: string;
+  hasHermesApiKey: boolean;
+  restartRequired?: boolean;
+}
+
 interface ModelResponse {
   provider: string;
   model: string;
@@ -45,6 +53,16 @@ async function getJson<T>(path: string): Promise<T> {
   return response.json() as Promise<T>;
 }
 
+async function postJson<T>(path: string, body: unknown = {}): Promise<T> {
+  const response = await fetch(path, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify(body),
+  });
+  if (!response.ok) throw new Error(`${path} 请求失败（HTTP ${response.status}）`);
+  return response.json() as Promise<T>;
+}
+
 async function putJson<T>(path: string, body: unknown): Promise<T> {
   const response = await fetch(path, {
     method: "PUT",
@@ -57,11 +75,16 @@ async function putJson<T>(path: string, body: unknown): Promise<T> {
 
 export function ModelSettings() {
   const [models, setModels] = useState<HermesModel[]>([]);
+  const [connection, setConnection] = useState<HermesConnection | null>(null);
+  const [connectionMode, setConnectionMode] = useState<"local" | "remote">("local");
+  const [switchUrl, setSwitchUrl] = useState("");
+  const [hermesApiKey, setHermesApiKey] = useState("");
   const [primary, setPrimary] = useState<ModelValue>(emptyModel);
   const [vision, setVision] = useState<ModelValue>(emptyModel);
   const [separateVision, setSeparateVision] = useState(false);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
+  const [restarting, setRestarting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [saved, setSaved] = useState(false);
 
@@ -69,41 +92,60 @@ export function ModelSettings() {
     let cancelled = false;
     setLoading(true);
     setError(null);
-    Promise.all([
-      getJson<{ models?: HermesModel[] }>("/api/hermes/models"),
-      getJson<ModelResponse>("/api/hermes/default-model"),
-      getJson<ModelResponse>("/api/hermes/vision-model"),
-    ])
-      .then(([catalog, defaultModel, visionModel]) => {
-        if (cancelled) return;
-        const nextPrimary = {
-          provider: defaultModel.provider || "custom",
-          model: defaultModel.model || "",
-          baseUrl: defaultModel.baseUrl || "",
-          apiKey: "",
-          hasApiKey: Boolean(defaultModel.hasApiKey),
-        };
-        setModels(Array.isArray(catalog.models) ? catalog.models : []);
-        setPrimary(nextPrimary);
-        setSeparateVision(!visionModel.inherited);
-        setVision(
-          visionModel.inherited
-            ? nextPrimary
-            : {
-                provider: visionModel.provider,
-                model: visionModel.model,
-                baseUrl: visionModel.baseUrl || "",
-                apiKey: "",
-                hasApiKey: Boolean(visionModel.hasApiKey),
-              },
-        );
-      })
+
+    async function load() {
+      const connectionSettings = await getJson<HermesConnection>("/api/hermes/connection");
+      if (cancelled) return;
+      setConnection(connectionSettings);
+      setConnectionMode(connectionSettings.mode);
+      setSwitchUrl(connectionSettings.switchUrl || "");
+      setHermesApiKey("");
+
+      if (connectionSettings.mode === "remote") {
+        setModels([]);
+        setPrimary(emptyModel);
+        setVision(emptyModel);
+        setSeparateVision(false);
+        return;
+      }
+
+      const [catalog, defaultModel, visionModel] = await Promise.all([
+        getJson<{ models?: HermesModel[] }>("/api/hermes/models"),
+        getJson<ModelResponse>("/api/hermes/default-model"),
+        getJson<ModelResponse>("/api/hermes/vision-model"),
+      ]);
+      if (cancelled) return;
+      const nextPrimary = {
+        provider: defaultModel.provider || "custom",
+        model: defaultModel.model || "",
+        baseUrl: defaultModel.baseUrl || "",
+        apiKey: "",
+        hasApiKey: Boolean(defaultModel.hasApiKey),
+      };
+      setModels(Array.isArray(catalog.models) ? catalog.models : []);
+      setPrimary(nextPrimary);
+      setSeparateVision(!visionModel.inherited);
+      setVision(
+        visionModel.inherited
+          ? nextPrimary
+          : {
+              provider: visionModel.provider,
+              model: visionModel.model,
+              baseUrl: visionModel.baseUrl || "",
+              apiKey: "",
+              hasApiKey: Boolean(visionModel.hasApiKey),
+            },
+      );
+    }
+
+    void load()
       .catch((cause) => {
         if (!cancelled) setError(cause instanceof Error ? cause.message : String(cause));
       })
       .finally(() => {
         if (!cancelled) setLoading(false);
       });
+
     return () => {
       cancelled = true;
     };
@@ -113,6 +155,51 @@ export function ModelSettings() {
     () => Array.from(new Set(models.map((item) => item.provider).filter(Boolean))),
     [models],
   );
+
+  const saveConnection = async () => {
+    const nextMode = connectionMode;
+    const nextUrl = switchUrl.trim().replace(/\/$/, "");
+    const nextKey = hermesApiKey.trim();
+    if (nextMode === "remote" && !nextUrl) {
+      setError("请填写 Switch URL。");
+      return;
+    }
+    if (nextMode === "remote" && !nextKey && !connection?.hasHermesApiKey) {
+      setError("请填写 Hermes API Key。");
+      return;
+    }
+
+    setSaving(true);
+    setSaved(false);
+    setError(null);
+    try {
+      const nextConnection = await putJson<HermesConnection>("/api/hermes/connection", {
+        mode: nextMode,
+        switchUrl: nextUrl,
+        hermesApiKey: nextKey,
+      });
+      setConnection(nextConnection);
+      setConnectionMode(nextConnection.mode);
+      setSwitchUrl(nextConnection.switchUrl || "");
+      setHermesApiKey("");
+      setSaved(true);
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : String(cause));
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const restartApp = async () => {
+    setRestarting(true);
+    setError(null);
+    try {
+      await postJson<{ ok: boolean }>("/api/app/restart");
+    } catch (cause) {
+      setRestarting(false);
+      setError(cause instanceof Error ? cause.message : String(cause));
+    }
+  };
 
   const save = async () => {
     const nextPrimary = {
@@ -175,7 +262,7 @@ export function ModelSettings() {
     <section>
       <h3 className="text-xl font-semibold">模型</h3>
       <p className="mt-1 text-sm text-neutral-500 dark:text-neutral-400">
-        配置对话使用的主模型，以及处理图片时使用的视觉模型。
+        配置 Hermes 连接方式，以及开发模式下的本地模型。
       </p>
 
       {loading ? (
@@ -185,18 +272,32 @@ export function ModelSettings() {
         </div>
       ) : (
         <div className="mt-8 space-y-4">
-          <ModelCard
-            icon={Cpu}
-            title="主模型"
-            description="用于日常对话、推理和工具调用。"
-            value={primary}
-            models={models}
-            providers={providerSuggestions}
-            onChange={(patch) => {
-              setPrimary((current) => ({ ...current, ...patch }));
-              setSaved(false);
-            }}
-          />
+          {connection && (
+            <ConnectionCard
+              connection={connection}
+              mode={connectionMode}
+              switchUrl={switchUrl}
+              hermesApiKey={hermesApiKey}
+              onModeChange={(mode) => { setConnectionMode(mode); setSaved(false); }}
+              onUrlChange={(value) => { setSwitchUrl(value); setSaved(false); }}
+              onApiKeyChange={(value) => { setHermesApiKey(value); setSaved(false); }}
+            />
+          )}
+
+          {connectionMode === "local" && (
+            <>
+              <ModelCard
+                icon={Cpu}
+                title="主模型"
+                description="用于日常对话、推理和工具调用。"
+                value={primary}
+                models={models}
+                providers={providerSuggestions}
+                onChange={(patch) => {
+                  setPrimary((current) => ({ ...current, ...patch }));
+                  setSaved(false);
+                }}
+              />
 
           <div className="rounded-xl border border-neutral-200 p-5 dark:border-neutral-700">
             <div className="flex items-start justify-between gap-4">
@@ -259,27 +360,113 @@ export function ModelSettings() {
               </p>
             )}
           </div>
+            </>
+          )}
 
           <div className="flex min-h-9 items-center justify-between gap-4 pt-1">
             <div>
               {error && <p className="text-xs text-red-500">{error}</p>}
               {saved && !error && (
                 <p className="flex items-center gap-1.5 text-xs text-emerald-600 dark:text-emerald-400">
-                  <CheckCircle2 className="h-3.5 w-3.5" />模型设置已保存
+                  <CheckCircle2 className="h-3.5 w-3.5" />{connection?.restartRequired ? "设置已保存，重启后生效" : "设置已保存"}
                 </p>
               )}
             </div>
-            <button
-              disabled={saving}
-              onClick={() => void save()}
-              className="rounded-lg bg-neutral-900 px-5 py-2 text-sm text-white transition-opacity disabled:opacity-40 dark:bg-neutral-100 dark:text-neutral-900"
-            >
-              {saving ? "保存中…" : "保存设置"}
-            </button>
+            <div className="flex items-center gap-2">
+              {connectionMode === "remote" && (
+                <button
+                  disabled={restarting}
+                  onClick={() => void restartApp()}
+                  className="rounded-lg border border-neutral-300 px-5 py-2 text-sm transition-opacity disabled:opacity-40 dark:border-neutral-700"
+                >
+                  {restarting ? "正在重启…" : "重启应用"}
+                </button>
+              )}
+              <button
+                disabled={saving}
+                onClick={() => void (connectionMode === "local" ? save() : saveConnection())}
+                className="rounded-lg bg-neutral-900 px-5 py-2 text-sm text-white transition-opacity disabled:opacity-40 dark:bg-neutral-100 dark:text-neutral-900"
+              >
+                {saving ? "保存中…" : connectionMode === "local" ? "保存模型设置" : "保存连接设置"}
+              </button>
+            </div>
           </div>
         </div>
       )}
     </section>
+  );
+}
+
+function ConnectionCard({
+  connection,
+  mode,
+  switchUrl,
+  hermesApiKey,
+  onModeChange,
+  onUrlChange,
+  onApiKeyChange,
+}: {
+  connection: HermesConnection;
+  mode: "local" | "remote";
+  switchUrl: string;
+  hermesApiKey: string;
+  onModeChange: (mode: "local" | "remote") => void;
+  onUrlChange: (value: string) => void;
+  onApiKeyChange: (value: string) => void;
+}) {
+  return (
+    <div className="rounded-xl border border-neutral-200 p-5 dark:border-neutral-700">
+      <div>
+        <p className="text-sm font-medium">Hermes 连接</p>
+        <p className="mt-1 text-xs leading-5 text-neutral-500 dark:text-neutral-400">
+          本地 Hermes 可直接管理模型；也可以切换到远程 switchUrl。
+        </p>
+      </div>
+
+      <div className="mt-4 grid grid-cols-2 gap-2 rounded-lg bg-neutral-50 p-1 text-sm dark:bg-neutral-800/70">
+        <button
+          type="button"
+          onClick={() => onModeChange("local")}
+          className={`rounded-md px-3 py-2 ${mode === "local" ? "bg-white shadow-sm dark:bg-neutral-900" : "text-neutral-500"}`}
+        >
+          本地模型
+        </button>
+        <button
+          type="button"
+          onClick={() => onModeChange("remote")}
+          className={`rounded-md px-3 py-2 ${mode === "remote" ? "bg-white shadow-sm dark:bg-neutral-900" : "text-neutral-500"}`}
+        >
+          switchUrl
+        </button>
+      </div>
+
+      {mode === "remote" && (
+        <div className="mt-5 grid gap-3">
+          <label className="text-xs text-neutral-500 dark:text-neutral-400">
+            switchUrl
+            <input
+              type="url"
+              value={switchUrl}
+              onChange={(event) => onUrlChange(event.target.value)}
+              placeholder="http://localhost:23004/endpoint/$USERNAME"
+              className="mt-1.5 w-full rounded-lg border border-neutral-300 bg-white px-3 py-2 text-sm text-neutral-900 outline-none focus:border-neutral-500 dark:border-neutral-700 dark:bg-neutral-800 dark:text-neutral-100"
+            />
+          </label>
+          <label className="text-xs text-neutral-500 dark:text-neutral-400">
+            hermesApiKey
+            <input
+              type="password"
+              autoComplete="new-password"
+              value={hermesApiKey}
+              onChange={(event) => onApiKeyChange(event.target.value)}
+              placeholder={connection.hasHermesApiKey ? "留空保持现有密钥" : "请输入 apps/switch 用户配置中的 HERMES_API_KEY"}
+              className="mt-1.5 w-full rounded-lg border border-neutral-300 bg-white px-3 py-2 text-sm text-neutral-900 outline-none focus:border-neutral-500 dark:border-neutral-700 dark:bg-neutral-800 dark:text-neutral-100"
+            />
+          </label>
+          <p className="text-xs text-amber-600 dark:text-amber-400">连接方式保存后需要重启应用生效。</p>
+        </div>
+      )}
+    </div>
   );
 }
 

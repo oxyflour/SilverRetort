@@ -6,8 +6,8 @@
   "scripts": {
     "dev": "electron .",
     "test": "node --test",
-    "build:dir": "pnpm --filter silverretort-next run build && pnpm --filter silverretort-uvicorn run build && electron-builder --dir --publish never -c.directories.output=release-dir",
-    "build": "pnpm --filter silverretort-next run build && pnpm --filter silverretort-uvicorn run build && electron-builder --publish never"
+    "build:dir": "pnpm --filter silverretort-next run build && pnpm --filter silverretort-uvicorn run build && pnpm --filter silverretort-hermes run build && electron-builder --dir --publish never -c.directories.output=release-dir",
+    "build": "pnpm --filter silverretort-next run build && pnpm --filter silverretort-uvicorn run build && pnpm --filter silverretort-hermes run build && electron-builder --publish never"
   },
   "build": {
     "appId": "com.silverretort.app",
@@ -33,6 +33,13 @@
       {
         "from": "../uvicorn/dist",
         "to": "uvicorn",
+        "filter": [
+          "**/*"
+        ]
+      },
+      {
+        "from": "../hermes/dist",
+        "to": "hermes",
         "filter": [
           "**/*"
         ]

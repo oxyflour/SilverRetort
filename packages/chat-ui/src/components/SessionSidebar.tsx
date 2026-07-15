@@ -20,6 +20,7 @@ export function SessionSidebar() {
   const [creating, setCreating] = useState(false);
   const [createName, setCreateName] = useState("New workspace");
   const [deletingId, setDeletingId] = useState<string | null>(null);
+  const [expandedSessionCounts, setExpandedSessionCounts] = useState<Record<string, number>>({});
   const available = Boolean(
     store.workspaceCapability?.supported && store.workspaceCapability.writable,
   );
@@ -50,6 +51,9 @@ export function SessionSidebar() {
             (session) => session.workspaceId === workspace.id,
           );
           const collapsed = store.collapsedWorkspaceIds.includes(workspace.id);
+          const visibleSessionCount = expandedSessionCounts[workspace.id] ?? 5;
+          const visibleSessions = sessions.slice(0, visibleSessionCount);
+          const hiddenSessionCount = sessions.length - visibleSessions.length;
           const running = sessions.some(
             (session) => store.buckets[session.id]?.runId != null,
           );
@@ -131,13 +135,26 @@ export function SessionSidebar() {
                 </span>
               </div>
               {!collapsed &&
-                sessions.map((session) => (
+                visibleSessions.map((session) => (
                   <SessionRow
                     key={session.id}
                     sessionId={session.id}
                     title={session.title}
                   />
                 ))}
+              {!collapsed && hiddenSessionCount > 0 && (
+                <button
+                  className="ml-4 mt-1 w-[calc(100%-1rem)] rounded-md px-2 py-1.5 text-left text-sm text-neutral-500 hover:bg-neutral-100 hover:text-neutral-900 dark:text-neutral-400 dark:hover:bg-neutral-800 dark:hover:text-neutral-100"
+                  onClick={() =>
+                    setExpandedSessionCounts((counts) => ({
+                      ...counts,
+                      [workspace.id]: visibleSessionCount + 10,
+                    }))
+                  }
+                >
+                  显示更多（还有 {hiddenSessionCount} 个）
+                </button>
+              )}
             </section>
           );
         })}
