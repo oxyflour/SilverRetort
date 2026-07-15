@@ -1,9 +1,9 @@
 const assert = require("node:assert/strict");
-const { mkdtempSync, rmSync } = require("node:fs");
+const { mkdirSync, mkdtempSync, rmSync, writeFileSync } = require("node:fs");
 const os = require("node:os");
 const path = require("node:path");
 const test = require("node:test");
-const { defaultSwitchHermesUrl, expandSwitchUrl, resolveHermesMode } = require("../src/hermes-service.cjs");
+const { defaultSwitchHermesUrl, expandSwitchUrl, resolveHermesMode, resolveHermesRuntime } = require("../src/hermes-service.cjs");
 
 function makeConfig(t, overrides = {}) {
     const dataDir = mkdtempSync(path.join(os.tmpdir(), "silverretort-hermes-"));
@@ -58,6 +58,37 @@ test("removed Docker settings direct users to switchUrl", (t) => {
         () => resolveHermesMode(config, 23001, 23002),
         /no longer supported; configure switchUrl instead/u,
     );
+});
+
+
+test("packaged mode uses the bundled Hermes executable when available", (t) => {
+    const config = makeConfig(t, { isPackaged: true });
+    const executableDir = path.join(config.serviceRoot, "hermes", "silverretort-hermes");
+    mkdirSync(executableDir, { recursive: true });
+    const executable = path.join(
+        executableDir,
+        process.platform === "win32" ? "silverretort-hermes.exe" : "silverretort-hermes",
+    );
+    writeFileSync(executable, "", "utf8");
+    const runtime = resolveHermesRuntime(config);
+    assert.equal(runtime.command, executable);
+    assert.deepEqual(runtime.args, []);
+    assert.equal(runtime.cwd, executableDir);
+});
+
+test("packaged mode with bundled Hermes starts local mode", (t) => {
+    const config = makeConfig(t, { isPackaged: true });
+    const executableDir = path.join(config.serviceRoot, "hermes", "silverretort-hermes");
+    mkdirSync(executableDir, { recursive: true });
+    writeFileSync(
+        path.join(executableDir, process.platform === "win32" ? "silverretort-hermes.exe" : "silverretort-hermes"),
+        "",
+        "utf8",
+    );
+    const mode = resolveHermesMode(config, 23001, 23002, () => "packaged-key");
+    assert.equal(mode.mode, "local");
+    assert.equal(mode.apiKey, "packaged-key");
+    assert.equal(mode.env.HERMES_RELAY_ENABLED, "1");
 });
 
 test("packaged mode without Hermes configuration requests switch configuration", (t) => {

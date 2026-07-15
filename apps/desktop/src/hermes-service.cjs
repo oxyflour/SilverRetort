@@ -2,6 +2,7 @@
 const crypto = require("node:crypto");
 const os = require("node:os");
 const path = require("node:path");
+const { existsSync } = require("node:fs");
 const { spawn: nodeSpawn } = require("node:child_process");
 const { ensureDir, joinUrl, normalizeBaseUrl } = require("./desktop-config.cjs");
 
@@ -18,6 +19,19 @@ function defaultSwitchHermesUrl(username = os.userInfo().username, switchBaseUrl
     return joinUrl(switchBaseUrl, `endpoint/${encodeURIComponent(username)}`);
 }
 
+function resolvePackagedHermesRuntime(config) {
+    const executable = path.join(
+        config.serviceRoot,
+        "hermes",
+        "silverretort-hermes",
+        process.platform === "win32" ? "silverretort-hermes.exe" : "silverretort-hermes",
+    );
+    if (!existsSync(executable)) {
+        return null;
+    }
+    return { command: executable, args: [], cwd: path.dirname(executable) };
+}
+
 function resolveHermesRuntime(config) {
     if (!config.isPackaged) {
         return {
@@ -26,7 +40,7 @@ function resolveHermesRuntime(config) {
             cwd: path.join(config.serviceRoot, "hermes"),
         };
     }
-    return null;
+    return resolvePackagedHermesRuntime(config);
 }
 
 function resolveHermesMode(
@@ -101,6 +115,7 @@ module.exports = {
     expandSwitchUrl,
     randomApiKey,
     resolveHermesRuntime,
+    resolvePackagedHermesRuntime,
     resolveHermesMode,
     startHermes,
 };

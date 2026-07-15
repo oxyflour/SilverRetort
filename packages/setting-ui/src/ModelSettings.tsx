@@ -101,7 +101,7 @@ export function ModelSettings() {
       setSwitchUrl(connectionSettings.switchUrl || "");
       setHermesApiKey("");
 
-      if (connectionSettings.packaged || connectionSettings.mode === "remote") {
+      if (connectionSettings.mode === "remote") {
         setModels([]);
         setPrimary(emptyModel);
         setVision(emptyModel);
@@ -157,7 +157,7 @@ export function ModelSettings() {
   );
 
   const saveConnection = async () => {
-    const nextMode = connection?.packaged ? "remote" : connectionMode;
+    const nextMode = connectionMode;
     const nextUrl = switchUrl.trim().replace(/\/$/, "");
     const nextKey = hermesApiKey.trim();
     if (nextMode === "remote" && !nextUrl) {
@@ -284,7 +284,7 @@ export function ModelSettings() {
             />
           )}
 
-          {!connection?.packaged && connectionMode === "local" && (
+          {connectionMode === "local" && (
             <>
               <ModelCard
                 icon={Cpu}
@@ -373,7 +373,7 @@ export function ModelSettings() {
               )}
             </div>
             <div className="flex items-center gap-2">
-              {(connection?.packaged || connectionMode === "remote") && (
+              {connectionMode === "remote" && (
                 <button
                   disabled={restarting}
                   onClick={() => void restartApp()}
@@ -384,10 +384,10 @@ export function ModelSettings() {
               )}
               <button
                 disabled={saving}
-                onClick={() => void (connectionMode === "local" && !connection?.packaged ? save() : saveConnection())}
+                onClick={() => void (connectionMode === "local" ? save() : saveConnection())}
                 className="rounded-lg bg-neutral-900 px-5 py-2 text-sm text-white transition-opacity disabled:opacity-40 dark:bg-neutral-100 dark:text-neutral-900"
               >
-                {saving ? "保存中…" : connectionMode === "local" && !connection?.packaged ? "保存模型设置" : "保存连接设置"}
+                {saving ? "保存中…" : connectionMode === "local" ? "保存模型设置" : "保存连接设置"}
               </button>
             </div>
           </div>
@@ -414,38 +414,33 @@ function ConnectionCard({
   onUrlChange: (value: string) => void;
   onApiKeyChange: (value: string) => void;
 }) {
-  const remoteOnly = connection.packaged;
   return (
     <div className="rounded-xl border border-neutral-200 p-5 dark:border-neutral-700">
       <div>
         <p className="text-sm font-medium">Hermes 连接</p>
         <p className="mt-1 text-xs leading-5 text-neutral-500 dark:text-neutral-400">
-          {remoteOnly
-            ? "打包模式只使用远程 Hermes，请配置 apps/switch 提供的 URL 和 API Key。"
-            : "开发模式可以使用本地模型配置，也可以切换到远程 switchUrl。"}
+          本地 Hermes 可直接管理模型；也可以切换到远程 switchUrl。
         </p>
       </div>
 
-      {!remoteOnly && (
-        <div className="mt-4 grid grid-cols-2 gap-2 rounded-lg bg-neutral-50 p-1 text-sm dark:bg-neutral-800/70">
-          <button
-            type="button"
-            onClick={() => onModeChange("local")}
-            className={`rounded-md px-3 py-2 ${mode === "local" ? "bg-white shadow-sm dark:bg-neutral-900" : "text-neutral-500"}`}
-          >
-            本地模型
-          </button>
-          <button
-            type="button"
-            onClick={() => onModeChange("remote")}
-            className={`rounded-md px-3 py-2 ${mode === "remote" ? "bg-white shadow-sm dark:bg-neutral-900" : "text-neutral-500"}`}
-          >
-            switchUrl
-          </button>
-        </div>
-      )}
+      <div className="mt-4 grid grid-cols-2 gap-2 rounded-lg bg-neutral-50 p-1 text-sm dark:bg-neutral-800/70">
+        <button
+          type="button"
+          onClick={() => onModeChange("local")}
+          className={`rounded-md px-3 py-2 ${mode === "local" ? "bg-white shadow-sm dark:bg-neutral-900" : "text-neutral-500"}`}
+        >
+          本地模型
+        </button>
+        <button
+          type="button"
+          onClick={() => onModeChange("remote")}
+          className={`rounded-md px-3 py-2 ${mode === "remote" ? "bg-white shadow-sm dark:bg-neutral-900" : "text-neutral-500"}`}
+        >
+          switchUrl
+        </button>
+      </div>
 
-      {(remoteOnly || mode === "remote") && (
+      {mode === "remote" && (
         <div className="mt-5 grid gap-3">
           <label className="text-xs text-neutral-500 dark:text-neutral-400">
             switchUrl
