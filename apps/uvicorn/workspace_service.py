@@ -80,18 +80,31 @@ def remote_file_url(workspace_id: str, relative_path: str) -> str:
     return f"{_base_url()}/workspace-api/workspaces/{quote(workspace_id)}/files/{encoded}"
 
 
+def _supported_capability() -> dict:
+    return {"supported": True, "version": 1, "writable": True, "cwdEnforced": False}
+
+
+def _unsupported_capability() -> dict:
+    return {"supported": False, "version": 0, "writable": False, "cwdEnforced": False}
+
+
 async def capability() -> dict:
     if _local_root() is not None:
-        return {"supported": True, "version": 1, "writable": True, "cwdEnforced": False}
-    if not _base_url():
-        return {"supported": False, "version": 0, "writable": False, "cwdEnforced": False}
+        return _supported_capability()
+    base_url = _base_url()
+    if not base_url:
+        return _unsupported_capability()
     try:
-        async with httpx.AsyncClient(timeout=10) as client:
-            response = await client.get(f"{_base_url()}/workspace-api/capability", headers=_headers())
+        async with httpx.AsyncClient(timeout=15, follow_redirects=True) as client:
+            response = await client.get(f"{base_url}/workspace-api/capability", headers=_headers())
             response.raise_for_status()
             return response.json()
+    except httpx.HTTPStatusError as exc:
+        if exc.response.status_code in {401, 403, 404}:
+            return _unsupported_capability()
+        return _supported_capability()
     except (httpx.HTTPError, ValueError):
-        return {"supported": False, "version": 0, "writable": False, "cwdEnforced": False}
+        return _supported_capability()
 
 
 async def create_remote(workspace_id: str) -> None:
