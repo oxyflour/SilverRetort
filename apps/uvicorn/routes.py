@@ -84,11 +84,13 @@ def _hermes_connection_response() -> dict:
     configured_url = str(settings.get("switchUrl") or "")
     runtime_mode = os.getenv("SILVERRETORT_HERMES_MODE")
     switch_url = configured_url or (str(os.getenv("HERMES_URL") or "") if runtime_mode == "remote" else "")
+    local_hermes_enabled = os.getenv("SILVERRETORT_DESKTOP_MODE") != "packaged" or bool(str(os.getenv("ENABLE_LOCAL_HERMES") or "").strip())
     return {
         "packaged": os.getenv("SILVERRETORT_DESKTOP_MODE") == "packaged",
-        "mode": "remote" if configured_url or runtime_mode == "remote" else "local",
+        "mode": "remote" if configured_url or runtime_mode in {"remote", "disabled"} else "local",
         "switchUrl": switch_url,
         "hasHermesApiKey": bool(settings.get("hermesApiKey") or (runtime_mode == "remote" and os.getenv("HERMES_API_KEY"))),
+        "localHermesEnabled": local_hermes_enabled,
         "restartRequired": False,
     }
 

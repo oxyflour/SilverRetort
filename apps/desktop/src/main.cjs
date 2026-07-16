@@ -5,7 +5,7 @@ const { loadDesktopConfig, writeDesktopSettings } = require("./desktop-config.cj
 const { createDesktopWindow } = require("./desktop-window.cjs");
 const { createProcessSupervisor } = require("./process-supervisor.cjs");
 const { startServiceStack } = require("./service-stack.cjs");
-const { defaultSwitchHermesUrl, randomApiKey, resolveHermesMode } = require("./hermes-service.cjs");
+const { defaultSwitchHermesUrl, resolveHermesMode } = require("./hermes-service.cjs");
 
 const APP_ID = "com.silverretort.app";
 let runtime = null;
@@ -13,17 +13,31 @@ let mainWindow = null;
 let windowPromise = null;
 let isShuttingDown = false;
 
-function switchConfigHtml(defaultUrl) {
-    const escaped = `${defaultUrl}`
+function escapeHtml(value) {
+    return `${value}`
         .replace(/&/gu, "&amp;")
         .replace(/"/gu, "&quot;")
         .replace(/</gu, "&lt;");
+}
+
+function switchConfigHtml(defaultUrl, defaultApiKey = "") {
+    const escapedUrl = escapeHtml(defaultUrl);
+    const escapedApiKey = escapeHtml(defaultApiKey);
     return `<!doctype html><html><head><meta charset="utf-8"><title>Configure Hermes Switch</title>
-<style>body{font-family:system-ui,sans-serif;margin:24px;color:#171717}label,input{display:block;width:100%}input{box-sizing:border-box;margin-top:8px;padding:8px}button{margin-top:16px;padding:8px 14px}</style>
-</head><body><h2>Configure Hermes Switch</h2><p>Packaged Hermes is not bundled. Confirm the apps/switch URL, then SilverRetort will save it and restart.</p><label>Switch URL<input id="url" type="url" value="${escaped}" autofocus></label><button id="save">Save and restart</button><script>
+<style>body{font-family:system-ui,sans-serif;margin:24px;color:#171717;line-height:1.45}label,input{display:block;width:100%}label{margin-top:14px;font-weight:600}input{box-sizing:border-box;margin-top:8px;padding:8px;font:inherit}button{margin-top:18px;padding:8px 14px}.hint{color:#666;font-size:13px}.error{color:#b91c1c;font-size:13px;min-height:18px}</style>
+</head><body><h2>Configure Hermes Switch</h2><p>Packaged local Hermes is disabled by default. Enter the apps/switch URL and Hermes API Key, then SilverRetort will save them and restart.</p><label>Switch URL<input id="url" type="url" value="${escapedUrl}" autofocus></label><label>Hermes API Key<input id="key" type="password" value="${escapedApiKey}" autocomplete="new-password" placeholder="Paste the apps/switch user hermesApiKey"></label><p class="hint">The key must match the selected apps/switch user configuration.</p><p id="error" class="error"></p><button id="save">Save and restart</button><script>
 const { ipcRenderer } = require('electron');
-document.getElementById('save').addEventListener('click', () => ipcRenderer.send('save-switch-url', document.getElementById('url').value));
-document.getElementById('url').addEventListener('keydown', (event) => { if (event.key === 'Enter') document.getElementById('save').click(); });
+function save() {
+  const url = document.getElementById('url').value.trim();
+  const hermesApiKey = document.getElementById('key').value.trim();
+  if (!url || !hermesApiKey) {
+    document.getElementById('error').textContent = 'Switch URL and Hermes API Key are required.';
+    return;
+  }
+  ipcRenderer.send('save-switch-config', { switchUrl: url, hermesApiKey });
+}
+document.getElementById('save').addEventListener('click', save);
+for (const id of ['url', 'key']) document.getElementById(id).addEventListener('keydown', (event) => { if (event.key === 'Enter') save(); });
 </script></body></html>`;
 }
 
@@ -33,24 +47,25 @@ function promptForSwitchUrl(config) {
         const defaultUrl = defaultSwitchHermesUrl();
         const promptWindow = new BrowserWindow({
             width: 520,
-            height: 300,
+            height: 430,
             resizable: false,
             title: "Configure Hermes Switch",
             webPreferences: { nodeIntegration: true, contextIsolation: false },
         });
-        const finish = (url) => {
-            const switchUrl = `${url || ""}`.trim();
-            if (!switchUrl) return;
-            writeDesktopSettings(config, {
-                switchUrl,
-                hermesApiKey: `${config.settings.hermesApiKey || ""}`.trim() || randomApiKey(),
-            });
+        const finish = (payload) => {
+            const switchUrl = `${payload?.switchUrl || ""}`.trim();
+            const hermesApiKey = `${payload?.hermesApiKey || ""}`.trim();
+            if (!switchUrl || !hermesApiKey) return;
+            writeDesktopSettings(config, { switchUrl, hermesApiKey });
             promptWindow.close();
             resolve(true);
         };
-        ipcMain.once("save-switch-url", (_event, url) => finish(url));
+        ipcMain.once("save-switch-config", (_event, payload) => finish(payload));
         promptWindow.once("closed", () => resolve(false));
-        void promptWindow.loadURL(`data:text/html;charset=utf-8,${encodeURIComponent(switchConfigHtml(defaultUrl))}`);
+        void promptWindow.loadURL(`data:text/html;charset=utf-8,${encodeURIComponent(switchConfigHtml(
+            defaultUrl,
+            `${config.settings.hermesApiKey || ""}`.trim(),
+        ))}`);
     });
 }
 

@@ -58,6 +58,20 @@ function joinUrl(baseUrl, route) {
     return new URL(route, `${normalizeBaseUrl(baseUrl)}/`).toString();
 }
 
+function normalizeSettingsEnv(settings) {
+    const rawEnv = settings && typeof settings.env === "object" && !Array.isArray(settings.env)
+        ? settings.env
+        : {};
+    const env = {};
+    for (const [rawKey, rawValue] of Object.entries(rawEnv)) {
+        const key = `${rawKey}`.trim();
+        if (key) {
+            env[key] = `${rawValue}`;
+        }
+    }
+    return env;
+}
+
 function writeDesktopSettings(config, nextSettings) {
     const settings = { ...config.settings, ...nextSettings };
     writeFileSync(config.settingsPath, `${JSON.stringify(settings, null, 2)}\n`, "utf8");
@@ -117,6 +131,7 @@ function loadDesktopConfig({
             return {
                 ...processEnv,
                 ...desktopEnv,
+                ...normalizeSettingsEnv(this.settings),
                 ...overrides,
             };
         },
@@ -128,6 +143,7 @@ module.exports = {
     joinUrl,
     loadDesktopConfig,
     normalizeBaseUrl,
+    normalizeSettingsEnv,
     parseDesktopEnv,
     readJsonObject,
     toWebSocketUrl,
