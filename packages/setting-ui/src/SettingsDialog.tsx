@@ -7,16 +7,18 @@ import {
   ChevronRight,
   Monitor,
   Moon,
+  Network,
   Palette,
   Settings,
   Sun,
   X,
   type LucideIcon,
 } from "lucide-react";
+import { McpSettingsCard } from "./McpSettingsCard";
 import { ModelSettings } from "./ModelSettings";
 import { useThemePreference, type ThemePreference } from "./theme";
 
-type SettingsPage = "general" | "models" | "appearance";
+type SettingsPage = "general" | "models" | "mcp" | "appearance";
 
 interface SettingsDialogProps {
   open: boolean;
@@ -28,6 +30,7 @@ const pages: Array<{ id: SettingsPage; label: string; icon: LucideIcon }> = [
   { id: "general", label: "常规", icon: Settings },
   { id: "models", label: "模型", icon: BrainCircuit },
   { id: "appearance", label: "外观", icon: Palette },
+  { id: "mcp", label: "MCP", icon: Network },
 ];
 
 const themeOptions: Array<{
@@ -99,6 +102,7 @@ export function SettingsDialog({ open, onClose, userName }: SettingsDialogProps)
           </button>
           {page === "general" && <GeneralSettings userName={userName} />}
           {page === "models" && <ModelSettings />}
+          {page === "mcp" && <McpSettings />}
           {page === "appearance" && (
             <AppearanceSettings theme={theme} onThemeChange={setTheme} />
           )}
@@ -116,6 +120,20 @@ function GeneralSettings({ userName }: { userName: string }) {
       <div className="mt-8 rounded-xl border border-neutral-200 p-4 dark:border-neutral-700">
         <p className="text-xs font-medium uppercase tracking-wide text-neutral-500">当前用户</p>
         <p className="mt-2 font-medium">{userName}</p>
+      </div>
+    </section>
+  );
+}
+
+function McpSettings() {
+  return (
+    <section>
+      <h3 className="text-xl font-semibold">MCP</h3>
+      <p className="mt-1 text-sm text-neutral-500 dark:text-neutral-400">
+        管理远程 Hermes 可通过 bridge 转发访问的本机 MCP server。
+      </p>
+      <div className="mt-8">
+        <McpSettingsCard />
       </div>
     </section>
   );

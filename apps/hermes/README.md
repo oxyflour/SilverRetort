@@ -154,3 +154,26 @@ In relay mode:
 - `/v1/*`, `/health`, and `/v1/models` are proxied to the internal gateway
 - Hermes resolves MCP via `http://127.0.0.1:<LISTEN_PORT>/mcp/`
 - local uvicorn auto-derives `<HERMES_URL>/bridge` unless `HERMES_BRIDGE_URL` is set explicitly
+
+### Forward local MCP servers
+
+Remote relay mode can also expose explicitly configured local HTTP MCP servers
+through the bridge. Add them to desktop `DATA_DIR/settings.json`:
+
+```json
+{
+  "mcpServers": {
+    "filesystem": {
+      "url": "http://127.0.0.1:9901/mcp/",
+      "headers": {
+        "Authorization": "Bearer local-token"
+      }
+    }
+  }
+}
+```
+
+Only loopback `http://127.0.0.1`, `http://localhost`, or `http://[::1]`
+servers are forwarded. The relay writes these names into remote Hermes
+`mcp_servers` as `http://127.0.0.1:<LISTEN_PORT>/mcp/<name>/` and tunnels the
+HTTP MCP traffic back to the configured local URL.

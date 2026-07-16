@@ -1,13 +1,15 @@
 """Relay server for remote Hermes deployments.
 
 When enabled, the relay fronts the public Hermes API, proxies requests to the
-internal gateway, exposes a local MCP endpoint for Hermes, and accepts a
-reverse bridge connection from uvicorn for tool execution.
+internal gateway, and tunnels MCP HTTP traffic over a reverse bridge connection
+from uvicorn.
 """
 
 import asyncio
+import base64
 import json
 import os
+import re
 import time
 import uuid
 from contextlib import asynccontextmanager
@@ -16,8 +18,8 @@ from urllib.parse import unquote
 
 import httpx
 import uvicorn
+import yaml
 from fastapi import FastAPI, HTTPException
-from mcp.server.fastmcp import FastMCP
 from starlette.requests import Request
 from starlette.responses import PlainTextResponse, Response, StreamingResponse
 from starlette.websockets import WebSocket, WebSocketDisconnect
@@ -37,22 +39,9 @@ HOP_BY_HOP_HEADERS = {
 }
 TOOL_TIMEOUT_SECONDS = 60
 LOOPBACK_HOSTS = {"127.0.0.1", "::1", "localhost"}
-
-UI_SHOW_ARTIFACT_DESCRIPTION = """Show an artifact and immediately return its artifact_id.
-
-For iframe artifacts, payload must be exactly {path: <workspace-relative HTML
-path>}; keep all assets beside that entry file or below it. To send a user
-interaction back to the agent, load /artifact-bridge-v1.js and call
-window.silverRetort.setContext(action, jsonData, {displayText: "summary"}) when
-meaningful UI state changes. Debounce rapid changes in complex UIs. The host
-saves only the latest revision without starting a run, then attaches it when
-the user next sends a normal chat message. JSON is limited to 64 KiB. This tool
-returns immediately; it does not wait for context updates."""
-
-UI_UPDATE_ARTIFACT_DESCRIPTION = """Replace an artifact payload.
-
-Iframe payload stays {path: <workspace-relative HTML path>}; interactive user
-context must be saved through /artifact-bridge-v1.js instead."""
+MCP_SERVER_NAME = "silverretort-ui"
+REMOTE_MCP_NAME_RE = re.compile(r"^[A-Za-z0-9_-]{1,64}$")
+REMOTE_MCP_MARKER = "silverretortRemoteBridge"
 
 import workspaces
 
@@ -69,14 +58,6 @@ def _bearer_token(headers: Any) -> str:
     return ""
 
 
-def _is_loopback_client(scope: dict[str, Any]) -> bool:
-    client = scope.get("client")
-    if not client:
-        return False
-    host = str(client[0] or "").lower()
-    return host in LOOPBACK_HOSTS
-
-
 def _filter_headers(headers: httpx.Headers | dict[str, str]) -> dict[str, str]:
     return {
         key: value
@@ -85,45 +66,21 @@ def _filter_headers(headers: httpx.Headers | dict[str, str]) -> dict[str, str]:
     }
 
 
-class LoopbackOrBearerAuthApp:
-    def __init__(self, app: Any, api_key: str) -> None:
-        self.app = app
-        self.api_key = api_key.strip()
-
-    async def __call__(self, scope: dict[str, Any], receive: Any, send: Any) -> None:
-        if not self.api_key or _is_loopback_client(scope):
-            await self.app(scope, receive, send)
-            return
-
-        headers = {key.decode("latin-1"): value.decode("latin-1") for key, value in scope["headers"]}
-        if _bearer_token(headers) == self.api_key:
-            await self.app(scope, receive, send)
-            return
-
-        response = PlainTextResponse("unauthorized", status_code=401)
-        await response(scope, receive, send)
+def _authorized_request(request: Request, api_key: str) -> bool:
+    if not api_key.strip():
+        return True
+    if request.client and request.client.host.lower() in LOOPBACK_HOSTS:
+        return True
+    return _bearer_token(request.headers) == api_key.strip()
 
 
 class BridgeSession:
-    def __init__(self, websocket: WebSocket) -> None:
+    def __init__(self, websocket: WebSocket, relay_base_url: str) -> None:
         self.websocket = websocket
+        self.relay_base_url = relay_base_url.rstrip("/")
         self._closed = asyncio.Event()
-        self._pending: dict[str, asyncio.Future[Any]] = {}
+        self._http_streams: dict[str, tuple[asyncio.Future[dict[str, Any]], asyncio.Queue[Any]]] = {}
         self._send_lock = asyncio.Lock()
-
-    async def send_request(self, name: str, args: dict[str, Any]) -> Any:
-        if self._closed.is_set():
-            raise RuntimeError("bridge disconnected")
-
-        request_id = uuid.uuid4().hex
-        future = asyncio.get_running_loop().create_future()
-        self._pending[request_id] = future
-        try:
-            async with self._send_lock:
-                await self.websocket.send_json({"id": request_id, "name": name, "args": args})
-            return await asyncio.wait_for(future, timeout=TOOL_TIMEOUT_SECONDS)
-        finally:
-            self._pending.pop(request_id, None)
 
     async def run(self) -> None:
         error: Exception | None = None
@@ -132,14 +89,8 @@ class BridgeSession:
                 payload = await self.websocket.receive_json()
                 if not isinstance(payload, dict):
                     continue
-                request_id = str(payload.get("id") or "")
-                future = self._pending.get(request_id)
-                if future is None or future.done():
+                if await self._handle_control_payload(payload):
                     continue
-                if payload.get("ok"):
-                    future.set_result(payload.get("result"))
-                else:
-                    future.set_exception(RuntimeError(str(payload.get("error") or "bridge call failed")))
         except WebSocketDisconnect as exc:
             error = RuntimeError(f"bridge disconnected: {exc.code}")
         except Exception as exc:
@@ -157,10 +108,105 @@ class BridgeSession:
             return
 
     async def _fail_all(self, error: Exception) -> None:
-        for future in list(self._pending.values()):
+        for future, queue in list(self._http_streams.values()):
             if not future.done():
                 future.set_exception(error)
-        self._pending.clear()
+            queue.put_nowait(error)
+        self._http_streams.clear()
+
+    async def stream_http_request(
+        self,
+        server_name: str,
+        method: str,
+        path: str,
+        query: str,
+        headers: dict[str, str],
+        body: bytes,
+    ) -> tuple[int, dict[str, str], Any]:
+        if self._closed.is_set():
+            raise RuntimeError("bridge disconnected")
+
+        request_id = uuid.uuid4().hex
+        start = asyncio.get_running_loop().create_future()
+        queue: asyncio.Queue[Any] = asyncio.Queue()
+        self._http_streams[request_id] = (start, queue)
+        try:
+            async with self._send_lock:
+                await self.websocket.send_json(
+                    {
+                        "kind": "mcp_http_request",
+                        "id": request_id,
+                        "server": server_name,
+                        "method": method,
+                        "path": path,
+                        "query": query,
+                        "headers": headers,
+                        "body": base64.b64encode(body).decode("ascii") if body else "",
+                    }
+                )
+            started = await asyncio.wait_for(start, timeout=TOOL_TIMEOUT_SECONDS)
+            return int(started["status"]), dict(started.get("headers") or {}), self._stream_http_chunks(request_id, queue)
+        except Exception:
+            self._http_streams.pop(request_id, None)
+            raise
+
+    async def _stream_http_chunks(self, request_id: str, queue: asyncio.Queue[Any]) -> Any:
+        try:
+            while True:
+                item = await queue.get()
+                if item is None:
+                    break
+                if isinstance(item, Exception):
+                    raise item
+                yield item
+        finally:
+            self._http_streams.pop(request_id, None)
+
+    async def _handle_control_payload(self, payload: dict[str, Any]) -> bool:
+        kind = payload.get("kind")
+        if kind == "mcp_servers":
+            servers = payload.get("servers")
+            names = []
+            if isinstance(servers, list):
+                for item in servers:
+                    raw_name = item.get("name") if isinstance(item, dict) else item
+                    name = str(raw_name or "").strip()
+                    if REMOTE_MCP_NAME_RE.fullmatch(name) and name != MCP_SERVER_NAME:
+                        names.append(name)
+            await _sync_remote_mcp_servers(sorted(set(names)), self.relay_base_url)
+            return True
+
+        request_id = str(payload.get("id") or "")
+        stream = self._http_streams.get(request_id)
+        if stream is None:
+            return False
+        start, queue = stream
+        if kind == "mcp_http_response_start":
+            if not start.done():
+                start.set_result(
+                    {
+                        "status": int(payload.get("status") or 502),
+                        "headers": payload.get("headers") if isinstance(payload.get("headers"), dict) else {},
+                    }
+                )
+            return True
+        if kind == "mcp_http_response_chunk":
+            try:
+                chunk = base64.b64decode(str(payload.get("body") or ""))
+            except ValueError:
+                chunk = b""
+            await queue.put(chunk)
+            return True
+        if kind == "mcp_http_response_end":
+            await queue.put(None)
+            return True
+        if kind == "mcp_http_response_error":
+            error = RuntimeError(str(payload.get("error") or "MCP proxy request failed"))
+            if not start.done():
+                start.set_exception(error)
+            await queue.put(error)
+            return True
+        return False
 
 
 class BridgeRegistry:
@@ -181,50 +227,81 @@ class BridgeRegistry:
             if self._active is session:
                 self._active = None
 
-    async def call_tool(self, name: str, args: dict[str, Any]) -> Any:
+    async def stream_http_request(
+        self,
+        server_name: str,
+        method: str,
+        path: str,
+        query: str,
+        headers: dict[str, str],
+        body: bytes,
+    ) -> tuple[int, dict[str, str], Any]:
         async with self._lock:
             session = self._active
         if session is None:
             raise RuntimeError("bridge unavailable")
-        return await session.send_request(name, args)
+        return await session.stream_http_request(server_name, method, path, query, headers, body)
 
 
 class RelayState:
-    def __init__(self, bridge: BridgeRegistry, gateway_base_url: str) -> None:
+    def __init__(self, bridge: BridgeRegistry, gateway_base_url: str, relay_base_url: str) -> None:
         self.bridge = bridge
         self.gateway_base_url = _strip_base_url(gateway_base_url)
+        self.relay_base_url = _strip_base_url(relay_base_url)
         self.http = httpx.AsyncClient(timeout=httpx.Timeout(None, connect=10))
 
 
-def _create_mcp_server(bridge: BridgeRegistry) -> FastMCP:
-    mcp = FastMCP("silverretort-ui", stateless_http=True, streamable_http_path="/")
+def _hermes_config_path() -> str:
+    home = os.getenv("HERMES_HOME", "").strip()
+    if not home:
+        home = str(os.path.join(os.path.dirname(__file__), "home"))
+    os.makedirs(home, exist_ok=True)
+    return os.path.join(home, "config.yaml")
 
-    @mcp.tool(description=UI_SHOW_ARTIFACT_DESCRIPTION)
-    async def ui_show_artifact(
-        session_id: str, type: str, title: str, payload: dict[str, Any] | None = None
-    ) -> str:
-        return str(
-            await bridge.call_tool(
-                "ui_show_artifact",
-                {"session_id": session_id, "type": type, "title": title, "payload": payload},
-            )
-        )
 
-    @mcp.tool(description=UI_UPDATE_ARTIFACT_DESCRIPTION)
-    async def ui_update_artifact(artifact_id: str, payload: dict[str, Any]) -> str:
-        return str(
-            await bridge.call_tool(
-                "ui_update_artifact",
-                {"artifact_id": artifact_id, "payload": payload},
-            )
-        )
+def _sync_remote_mcp_servers_sync(server_names: list[str], relay_base_url: str) -> None:
+    config_path = _hermes_config_path()
+    config: dict[str, Any] = {}
+    if os.path.exists(config_path):
+        with open(config_path, encoding="utf-8") as input_file:
+            config = yaml.safe_load(input_file) or {}
+    servers = config.setdefault("mcp_servers", {})
+    if not isinstance(servers, dict):
+        servers = {}
+        config["mcp_servers"] = servers
 
-    @mcp.tool()
-    async def ui_list_render_types() -> list[str]:
-        result = await bridge.call_tool("ui_list_render_types", {})
-        return list(result) if isinstance(result, list) else []
+    for name, entry in list(servers.items()):
+        if isinstance(entry, dict) and entry.get(REMOTE_MCP_MARKER):
+            servers.pop(name, None)
 
-    return mcp
+    for name in server_names:
+        servers[name] = {
+            "url": f"{relay_base_url}/mcp/{name}/",
+            "transport": "streamable_http",
+            "enabled": True,
+            REMOTE_MCP_MARKER: True,
+        }
+
+    with open(config_path, "w", encoding="utf-8") as output:
+        yaml.safe_dump(config, output, allow_unicode=True, sort_keys=False)
+
+
+async def _reload_hermes_mcp() -> None:
+    def reload_now() -> None:
+        try:
+            from tools.mcp_tool import discover_mcp_tools, shutdown_mcp_servers
+
+            shutdown_mcp_servers()
+            discover_mcp_tools()
+        except Exception:
+            return
+
+    await asyncio.to_thread(reload_now)
+
+
+async def _sync_remote_mcp_servers(server_names: list[str], relay_base_url: str) -> None:
+    await asyncio.to_thread(_sync_remote_mcp_servers_sync, server_names, relay_base_url)
+    asyncio.create_task(_reload_hermes_mcp())
 
 
 async def _stream_proxy_response(response: httpx.Response) -> Any:
@@ -280,7 +357,7 @@ async def _bridge_endpoint(websocket: WebSocket) -> None:
 
     await websocket.accept()
     state: RelayState = app.state.relay_state
-    session = BridgeSession(websocket)
+    session = BridgeSession(websocket, state.relay_base_url)
     await state.bridge.attach(session)
     try:
         await session.run()
@@ -288,18 +365,39 @@ async def _bridge_endpoint(websocket: WebSocket) -> None:
         await state.bridge.detach(session)
 
 
-def create_relay_app(gateway_base_url: str, api_key: str) -> FastAPI:
+async def _mcp_proxy_request(server_name: str, request: Request, path: str = "") -> Response:
+    if not _authorized_request(request, request.app.state.bridge_api_key):
+        return PlainTextResponse("unauthorized", status_code=401)
+    if not REMOTE_MCP_NAME_RE.fullmatch(server_name):
+        raise HTTPException(404, "MCP server not found")
+    state: RelayState = request.app.state.relay_state
+    try:
+        status, headers, stream = await state.bridge.stream_http_request(
+            server_name,
+            request.method,
+            path,
+            request.url.query,
+            _filter_headers(dict(request.headers.items())),
+            await request.body(),
+        )
+    except RuntimeError as exc:
+        raise HTTPException(503, str(exc)) from exc
+    return StreamingResponse(stream, status_code=status, headers=_filter_headers(headers))
+
+
+async def _builtin_mcp_proxy_request(request: Request) -> Response:
+    return await _mcp_proxy_request(MCP_SERVER_NAME, request, "")
+
+
+def create_relay_app(gateway_base_url: str, api_key: str, relay_base_url: str) -> FastAPI:
     bridge = BridgeRegistry()
-    mcp = _create_mcp_server(bridge)
-    protected_mcp = LoopbackOrBearerAuthApp(mcp.streamable_http_app(), api_key)
 
     @asynccontextmanager
     async def lifespan(app: FastAPI):
         app.state.bridge_api_key = api_key.strip()
-        app.state.relay_state = RelayState(bridge, gateway_base_url)
+        app.state.relay_state = RelayState(bridge, gateway_base_url, relay_base_url)
         try:
-            async with mcp.session_manager.run():
-                yield
+            yield
         finally:
             await app.state.relay_state.http.aclose()
 
@@ -380,7 +478,10 @@ def create_relay_app(gateway_base_url: str, api_key: str) -> FastAPI:
         methods=["GET", "HEAD"],
     )
 
-    app.mount("/mcp", protected_mcp)
+    app.api_route("/mcp", methods=HTTP_METHODS)(_builtin_mcp_proxy_request)
+    app.api_route("/mcp/", methods=HTTP_METHODS)(_builtin_mcp_proxy_request)
+    app.api_route("/mcp/{server_name}", methods=HTTP_METHODS)(_mcp_proxy_request)
+    app.api_route("/mcp/{server_name}/{path:path}", methods=HTTP_METHODS)(_mcp_proxy_request)
     app.websocket("/bridge")(_bridge_endpoint)
     app.api_route("/", methods=HTTP_METHODS)(_proxy_request)
     app.api_route("/{path:path}", methods=HTTP_METHODS)(_proxy_request)
@@ -388,7 +489,7 @@ def create_relay_app(gateway_base_url: str, api_key: str) -> FastAPI:
 
 
 def start_background_server(listen_host: str, listen_port: int, gateway_base_url: str, api_key: str) -> None:
-    app = create_relay_app(gateway_base_url, api_key)
+    app = create_relay_app(gateway_base_url, api_key, f"http://127.0.0.1:{listen_port}")
     config = uvicorn.Config(app, host=listen_host, port=listen_port, log_level="info")
     server = uvicorn.Server(config)
     errors: list[BaseException] = []
