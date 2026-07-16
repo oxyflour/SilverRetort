@@ -167,6 +167,35 @@ def patch_hermes() -> None:
         return {}
 
     model_metadata.fetch_model_metadata = disabled_fetch_model_metadata
+    patch_api_server_usage_tracking()
+
+
+def patch_api_server_usage_tracking() -> None:
+    try:
+        from gateway.platforms.api_server import APIServerAdapter
+    except Exception:
+        return
+
+    if getattr(APIServerAdapter, "_silverretort_usage_tracking_patched", False):
+        return
+
+    original_create_agent = APIServerAdapter._create_agent
+
+    def create_agent_with_usage_tracking(self, *args: Any, **kwargs: Any) -> Any:
+        agent = original_create_agent(self, *args, **kwargs)
+        session_key = str(
+            kwargs.get("gateway_session_key") or kwargs.get("session_id") or ""
+        )
+        if session_key:
+            agents = getattr(self, "_silverretort_usage_agents", None)
+            if not isinstance(agents, dict):
+                agents = {}
+                self._silverretort_usage_agents = agents
+            agents[session_key] = agent
+        return agent
+
+    APIServerAdapter._create_agent = create_agent_with_usage_tracking
+    APIServerAdapter._silverretort_usage_tracking_patched = True
 
 
 def main() -> None:

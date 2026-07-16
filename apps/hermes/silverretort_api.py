@@ -16,6 +16,7 @@ from model_settings import (
     set_vision_model,
     vision_model,
 )
+from usage import usage_response
 
 SESSION_KEY_RE = re.compile(r"^[A-Za-z0-9_.:-]{1,200}$")
 LOOPBACK_HOSTS = {"127.0.0.1", "::1", "localhost"}
@@ -344,6 +345,16 @@ def register_silverretort_routes(app: Any, api_key: str) -> None:
     async def silverretort_models(request: Request) -> dict[str, Any]:
         _require_auth(request, api_key)
         return await run_ui_operation("models", collect_models)
+
+    @app.get("/silverretort/usage")
+    async def silverretort_usage(request: Request) -> dict[str, Any]:
+        _require_auth(request, api_key)
+        session_key = str(request.query_params.get("sessionKey") or "").strip()
+        if session_key and not SESSION_KEY_RE.match(session_key):
+            raise HTTPException(400, "invalid sessionKey")
+        return await run_ui_operation(
+            "usage", lambda: usage_response(session_key)
+        )
 
     @app.get("/silverretort/default-model")
     async def silverretort_default_model(request: Request) -> dict[str, Any]:

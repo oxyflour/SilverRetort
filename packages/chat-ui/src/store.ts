@@ -6,6 +6,7 @@ import {
   Attachment,
   ChatEvent,
   HermesModel,
+  HermesUsageResponse,
   Message,
   SessionModel,
   Session,
@@ -43,12 +44,14 @@ interface ChatState {
   pendingAttachments: Attachment[];
   slashCommands: SlashCommand[];
   hermesModels: HermesModel[];
+  hermesUsage: HermesUsageResponse | null;
   defaultModel: { provider: string; model: string };
   sessionModels: Record<string, SessionModel>;
   hermesControlsAvailable: boolean;
 
   refreshSessions: () => Promise<void>;
   refreshHermesControls: () => Promise<void>;
+  refreshHermesUsage: (id?: string | null) => Promise<void>;
   createWorkspace: (name: string) => Promise<void>;
   renameWorkspace: (id: string, name: string) => Promise<void>;
   deleteWorkspace: (id: string) => Promise<void>;
@@ -408,6 +411,7 @@ export const useChatStore = create<ChatState>((set, get) => {
     pendingAttachments: [],
     slashCommands: [],
     hermesModels: [],
+    hermesUsage: null,
     defaultModel: { provider: "", model: "" },
     sessionModels: {},
     hermesControlsAvailable: true,
@@ -429,13 +433,15 @@ export const useChatStore = create<ChatState>((set, get) => {
 
     refreshHermesControls: async () => {
       try {
-        const [commands, modelPayload] = await Promise.all([
+        const [commands, modelPayload, usage] = await Promise.all([
           get().client.listSlashCommands(),
           get().client.listHermesModels(),
+          get().client.getHermesUsage(get().currentSessionId).catch(() => null),
         ]);
         set({
           slashCommands: commands,
           hermesModels: modelPayload.models,
+          hermesUsage: usage,
           defaultModel: {
             provider: modelPayload.defaultProvider,
             model: modelPayload.defaultModel,
@@ -446,8 +452,19 @@ export const useChatStore = create<ChatState>((set, get) => {
         set({
           slashCommands: [],
           hermesModels: [],
+          hermesUsage: null,
           hermesControlsAvailable: false,
         });
+      }
+    },
+
+    refreshHermesUsage: async (id) => {
+      try {
+        const sessionId = id === undefined ? get().currentSessionId : id;
+        const usage = await get().client.getHermesUsage(sessionId);
+        set({ hermesUsage: usage });
+      } catch {
+        set({ hermesUsage: null });
       }
     },
 
@@ -507,6 +524,7 @@ export const useChatStore = create<ChatState>((set, get) => {
       const session = get().sessions.find((item) => item.id === id);
       set({ currentSessionId: id, currentWorkspaceId: session?.workspaceId ?? get().currentWorkspaceId, pendingAttachments: [] });
       void get().refreshSessionModel(id);
+      void get().refreshHermesUsage(id);
       const bucket = get().buckets[id];
       if (bucket?.loaded) {
         const contexts = await get().client.listArtifactContexts(id);
@@ -571,6 +589,7 @@ export const useChatStore = create<ChatState>((set, get) => {
         sessionModels: { ...state.sessionModels, [id]: sessionModel },
         hermesControlsAvailable: true,
       }));
+      void get().refreshHermesUsage(id);
     },
 
     deleteSession: async (id) => {
@@ -994,6 +1013,7 @@ export const useChatStore = create<ChatState>((set, get) => {
             runId: null,
           }));
           touchSession(event.sessionId);
+          void get().refreshHermesUsage(event.sessionId);
           void get()
             .client.listSessions()
             .then((sessions) => set({ sessions }));

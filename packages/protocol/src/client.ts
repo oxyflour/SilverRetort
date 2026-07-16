@@ -23,6 +23,8 @@ import {
   WorkspaceSchema,
   HermesModelsResponse,
   HermesModelsResponseSchema,
+  HermesUsageResponse,
+  HermesUsageResponseSchema,
   SessionModel,
   SessionModelSchema,
   SetModelRequest,
@@ -70,6 +72,11 @@ export class ApiClient {
 
   listHermesModels(): Promise<HermesModelsResponse> {
     return this.request(HermesModelsResponseSchema, "/api/hermes/models");
+  }
+
+  getHermesUsage(sessionId?: string | null): Promise<HermesUsageResponse> {
+    const query = sessionId ? `?sessionId=${encodeURIComponent(sessionId)}` : "";
+    return this.request(HermesUsageResponseSchema, `/api/hermes/usage${query}`);
   }
 
   getDefaultModel(): Promise<SessionModel> {
