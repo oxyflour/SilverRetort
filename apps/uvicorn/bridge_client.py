@@ -1,18 +1,32 @@
 """Outbound bridge client for remote Hermes relay instances."""
 
 import asyncio
+import base64
 import json
 import os
 from contextlib import suppress
 from typing import Any
 from urllib.parse import urlsplit, urlunsplit
 
+import httpx
 from websockets.asyncio.client import connect
 
-import mcp_tools
+import local_mcp_servers
 
 RETRY_DELAYS = (1, 2, 5)
 LOOPBACK_HOSTS = {"127.0.0.1", "localhost", "::1"}
+HOP_BY_HOP_HEADERS = {
+    "connection",
+    "content-length",
+    "host",
+    "keep-alive",
+    "proxy-authenticate",
+    "proxy-authorization",
+    "te",
+    "trailer",
+    "transfer-encoding",
+    "upgrade",
+}
 
 
 def _normalized_base_url(url: str) -> str:
@@ -59,17 +73,86 @@ def resolve_bridge_url() -> str | None:
     return urlunsplit((scheme, parsed.netloc, path, "", ""))
 
 
-async def _handle_request(payload: dict[str, Any]) -> dict[str, Any]:
+def _filter_headers(headers: dict[str, str]) -> dict[str, str]:
+    return {
+        key: value
+        for key, value in headers.items()
+        if key.lower() not in HOP_BY_HOP_HEADERS
+    }
+
+
+def _target_url(base_url: str, path: str, query: str) -> str:
+    suffix = str(path or "")
+    if suffix:
+        url = f"{base_url.rstrip('/')}/{suffix.lstrip('/')}"
+    else:
+        url = base_url
+    return f"{url}?{query}" if query else url
+
+
+async def _send_json(websocket: Any, send_lock: asyncio.Lock, payload: dict[str, Any]) -> None:
+    async with send_lock:
+        await websocket.send(json.dumps(payload, ensure_ascii=False))
+
+
+async def _send_local_mcp_servers(websocket: Any, send_lock: asyncio.Lock) -> None:
+    servers = [{"name": name} for name in sorted(local_mcp_servers.load_servers())]
+    await _send_json(websocket, send_lock, {"kind": "mcp_servers", "servers": servers})
+
+
+async def _handle_mcp_http(payload: dict[str, Any], websocket: Any, send_lock: asyncio.Lock) -> None:
     request_id = str(payload.get("id") or "")
-    tool_name = str(payload.get("name") or "")
-    raw_args = payload.get("args")
-    args = raw_args if isinstance(raw_args, dict) else {}
+    server_name = str(payload.get("server") or "")
+    servers = local_mcp_servers.load_servers()
+    server = servers.get(server_name)
+    if not server:
+        await _send_json(websocket, send_lock, {
+            "kind": "mcp_http_response_error",
+            "id": request_id,
+            "error": f"unknown local MCP server: {server_name}",
+        })
+        return
+
+    raw_body = str(payload.get("body") or "")
+    try:
+        body = base64.b64decode(raw_body) if raw_body else b""
+    except ValueError:
+        body = b""
+
+    headers = payload.get("headers") if isinstance(payload.get("headers"), dict) else {}
+    request_headers = _filter_headers({str(key): str(value) for key, value in headers.items()})
+    merged_headers = {**request_headers, **server.get("headers", {})}
+    url = _target_url(server["url"], str(payload.get("path") or ""), str(payload.get("query") or ""))
 
     try:
-        result = mcp_tools.call_tool(tool_name, args)
-        return {"id": request_id, "ok": True, "result": result}
+        async with httpx.AsyncClient(timeout=httpx.Timeout(None, connect=10)) as client:
+            async with client.stream(
+                str(payload.get("method") or "POST"),
+                url,
+                headers=merged_headers,
+                content=body,
+            ) as response:
+                await _send_json(websocket, send_lock, {
+                    "kind": "mcp_http_response_start",
+                    "id": request_id,
+                    "status": response.status_code,
+                    "headers": _filter_headers(dict(response.headers.items())),
+                })
+                async for chunk in response.aiter_raw():
+                    if not chunk:
+                        continue
+                    await _send_json(websocket, send_lock, {
+                        "kind": "mcp_http_response_chunk",
+                        "id": request_id,
+                        "body": base64.b64encode(chunk).decode("ascii"),
+                    })
+                await _send_json(websocket, send_lock, {"kind": "mcp_http_response_end", "id": request_id})
     except Exception as exc:
-        return {"id": request_id, "ok": False, "error": str(exc)}
+        await _send_json(websocket, send_lock, {
+            "kind": "mcp_http_response_error",
+            "id": request_id,
+            "error": str(exc),
+        })
 
 
 async def _bridge_forever(bridge_url: str, api_key: str) -> None:
@@ -81,6 +164,8 @@ async def _bridge_forever(bridge_url: str, api_key: str) -> None:
             async with connect(bridge_url, additional_headers=headers) as websocket:
                 print(f"[bridge] connected {bridge_url}")
                 attempt = 0
+                send_lock = asyncio.Lock()
+                await _send_local_mcp_servers(websocket, send_lock)
                 async for raw_message in websocket:
                     try:
                         payload = json.loads(raw_message)
@@ -88,8 +173,8 @@ async def _bridge_forever(bridge_url: str, api_key: str) -> None:
                         continue
                     if not isinstance(payload, dict):
                         continue
-                    response = await _handle_request(payload)
-                    await websocket.send(json.dumps(response, ensure_ascii=False))
+                    if payload.get("kind") == "mcp_http_request":
+                        asyncio.create_task(_handle_mcp_http(payload, websocket, send_lock))
         except asyncio.CancelledError:
             raise
         except Exception as exc:

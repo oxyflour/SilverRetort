@@ -3,6 +3,7 @@
 import json
 import mimetypes
 import os
+import re
 import threading
 from pathlib import Path, PurePosixPath
 import uuid
@@ -50,6 +51,8 @@ from models import (
 
 router = APIRouter(prefix="/api")
 engine = create_engine()
+MCP_SERVER_NAME_RE = re.compile(r"^[A-Za-z0-9_-]{1,64}$")
+MCP_LOOPBACK_HOSTS = {"127.0.0.1", "::1", "localhost"}
 
 DEFAULT_TITLE = "新会话"
 
@@ -77,6 +80,63 @@ def _read_desktop_settings() -> dict:
 
 def _write_desktop_settings(settings: dict) -> None:
     _desktop_settings_path().write_text(json.dumps(settings, ensure_ascii=False, indent=2) + "\n", "utf-8")
+
+
+def _mcp_server_response(settings: dict) -> dict:
+    raw_servers = settings.get("mcpServers")
+    if not isinstance(raw_servers, dict):
+        return {"servers": []}
+    servers = []
+    for name, raw_config in sorted(raw_servers.items()):
+        if not MCP_SERVER_NAME_RE.fullmatch(str(name)):
+            continue
+        config = raw_config if isinstance(raw_config, dict) else {}
+        raw_headers = config.get("headers") if isinstance(config.get("headers"), dict) else {}
+        servers.append({
+            "name": str(name),
+            "url": str(config.get("url") or ""),
+            "headers": {str(key): str(value) for key, value in raw_headers.items()},
+            "enabled": config.get("enabled") is not False,
+        })
+    return {"servers": servers}
+
+
+def _validate_mcp_url(url: str) -> str:
+    value = url.strip()
+    parsed = urlparse(value)
+    if parsed.scheme not in {"http", "https"} or not parsed.hostname:
+        raise HTTPException(400, "MCP URL must be http(s)")
+    if parsed.hostname.lower() not in MCP_LOOPBACK_HOSTS:
+        raise HTTPException(400, "MCP URL must point to loopback")
+    return value
+
+
+def _mcp_servers_from_body(body: dict) -> dict:
+    raw_servers = body.get("servers")
+    if not isinstance(raw_servers, list):
+        raise HTTPException(400, "servers must be a list")
+    servers = {}
+    for raw_item in raw_servers:
+        item = raw_item if isinstance(raw_item, dict) else {}
+        name = str(item.get("name") or "").strip()
+        if name == "silverretort-ui":
+            raise HTTPException(400, "silverretort-ui is reserved")
+        if not MCP_SERVER_NAME_RE.fullmatch(name):
+            raise HTTPException(400, f"invalid MCP server name: {name}")
+        if name in servers:
+            raise HTTPException(400, f"duplicate MCP server name: {name}")
+        raw_headers = item.get("headers") if isinstance(item.get("headers"), dict) else {}
+        headers = {
+            str(key).strip(): str(value)
+            for key, value in raw_headers.items()
+            if str(key).strip()
+        }
+        servers[name] = {
+            "url": _validate_mcp_url(str(item.get("url") or "")),
+            "headers": headers,
+            "enabled": item.get("enabled") is not False,
+        }
+    return servers
 
 
 def _hermes_connection_response() -> dict:
@@ -146,6 +206,22 @@ def set_hermes_connection(body: dict = Body(...)) -> dict:
     response["restartRequired"] = True
     return response
 
+
+@router.get("/hermes/mcp-servers")
+def hermes_mcp_servers() -> dict:
+    return _mcp_server_response(_read_desktop_settings())
+
+
+@router.put("/hermes/mcp-servers")
+def set_hermes_mcp_servers(body: dict = Body(...)) -> dict:
+    settings = _read_desktop_settings()
+    servers = _mcp_servers_from_body(body)
+    if servers:
+        settings["mcpServers"] = servers
+    else:
+        settings.pop("mcpServers", None)
+    _write_desktop_settings(settings)
+    return _mcp_server_response(settings)
 
 
 @router.post("/app/restart")
