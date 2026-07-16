@@ -39,6 +39,9 @@ importers:
       silverretort-chat-ui:
         specifier: workspace:*
         version: link:../../packages/chat-ui
+      silverretort-circuit-ui:
+        specifier: workspace:*
+        version: link:../../packages/circuit-ui
       silverretort-protocol:
         specifier: workspace:*
         version: link:../../packages/protocol
@@ -157,6 +160,31 @@ importers:
       vitest:
         specifier: ^4.1.10
         version: 4.1.10(@types/node@24.13.2)(jsdom@29.1.1)(vite@8.1.4(@types/node@24.13.2)(jiti@2.7.0))
+
+  packages/circuit-ui:
+    dependencies:
+      ajv:
+        specifier: ^8.20.0
+        version: 8.20.0
+      react:
+        specifier: ^19
+        version: 19.2.4
+      react-dom:
+        specifier: ^19
+        version: 19.2.4(react@19.2.4)
+      silverretort-chat-ui:
+        specifier: workspace:*
+        version: link:../chat-ui
+    devDependencies:
+      '@types/react':
+        specifier: ^19
+        version: 19.2.17
+      ts-json-schema-generator:
+        specifier: ^2.9.0
+        version: 2.9.0
+      typescript:
+        specifier: ^5
+        version: 5.9.3
 
   packages/protocol:
     dependencies:

@@ -1,0 +1,176 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "type": "object",
+  "properties": {
+    "blocks": {
+      "type": "array",
+      "items": {
+        "$ref": "#/definitions/Block"
+      }
+    },
+    "links": {
+      "type": "array",
+      "items": {
+        "$ref": "#/definitions/Link"
+      }
+    }
+  },
+  "required": [
+    "blocks",
+    "links"
+  ],
+  "additionalProperties": false,
+  "definitions": {
+    "Block": {
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "label": {
+          "type": "string"
+        },
+        "pins": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/BlockPin"
+          }
+        },
+        "position": {
+          "$ref": "#/definitions/Point"
+        },
+        "rotation": {
+          "$ref": "#/definitions/Rotation"
+        },
+        "type": {
+          "$ref": "#/definitions/CircuitBlockType"
+        },
+        "value": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "id"
+      ],
+      "additionalProperties": false
+    },
+    "BlockPin": {
+      "type": "object",
+      "properties": {
+        "name": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": false
+    },
+    "Point": {
+      "type": "object",
+      "properties": {
+        "x": {
+          "type": "number"
+        },
+        "y": {
+          "type": "number"
+        }
+      },
+      "required": [
+        "x",
+        "y"
+      ],
+      "additionalProperties": false
+    },
+    "Rotation": {
+      "type": "number",
+      "enum": [
+        0,
+        90,
+        180,
+        270
+      ]
+    },
+    "CircuitBlockType": {
+      "type": "string",
+      "enum": [
+        "capacitor",
+        "ground",
+        "inductor",
+        "port",
+        "resistor",
+        "snp"
+      ]
+    },
+    "Link": {
+      "type": "object",
+      "properties": {
+        "from": {
+          "$ref": "#/definitions/LinkPin"
+        },
+        "points": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/Point"
+          }
+        },
+        "to": {
+          "$ref": "#/definitions/LinkPin"
+        }
+      },
+      "required": [
+        "from",
+        "to"
+      ],
+      "additionalProperties": false
+    },
+    "LinkPin": {
+      "anyOf": [
+        {
+          "$ref": "#/definitions/BlockLinkPin"
+        },
+        {
+          "$ref": "#/definitions/PointLinkPin"
+        }
+      ]
+    },
+    "BlockLinkPin": {
+      "type": "object",
+      "properties": {
+        "kind": {
+          "type": "string",
+          "const": "pin"
+        },
+        "node": {
+          "type": "string"
+        },
+        "pin": {
+          "type": "number"
+        }
+      },
+      "required": [
+        "node",
+        "pin"
+      ],
+      "additionalProperties": false
+    },
+    "PointLinkPin": {
+      "type": "object",
+      "properties": {
+        "x": {
+          "type": "number"
+        },
+        "y": {
+          "type": "number"
+        },
+        "kind": {
+          "type": "string",
+          "const": "point"
+        }
+      },
+      "required": [
+        "kind",
+        "x",
+        "y"
+      ],
+      "additionalProperties": false
+    }
+  }
+}
