@@ -15,6 +15,7 @@
     "react-dom": "19.2.4",
     "silverretort-artifact-ui-demo": "workspace:*",
     "silverretort-chat-ui": "workspace:*",
+    "silverretort-circuit-ui": "workspace:*",
     "silverretort-protocol": "workspace:*",
     "silverretort-setting-ui": "workspace:*"
   },
