@@ -3,18 +3,17 @@
 与 apps/uvicorn/main.py 相同的 stdin 看门狗模式：父进程（Electron）管道关闭即退出。
 """
 
+import json
 import os
 import signal
 import sys
 import threading
 from pathlib import Path
 from typing import Any
-from urllib.parse import urlsplit, urlunsplit
 
 import yaml
 
 MCP_SERVER_NAME = "silverretort-ui"
-MANAGED_MODEL_KEYS = ("provider", "default", "base_url", "api_key")
 SHARED_ENV_KEYS = frozenset({"OPENAI_API_KEY", "OPENAI_BASE_URL", "OPENAI_MODEL", "OPENAI_MODEL_ID"})
 
 
@@ -70,66 +69,48 @@ def load_shared_env() -> None:
             os.environ.setdefault(key, value)
 
 
-def normalize_openai_base_url(base_url: str) -> str:
-    normalized = base_url.strip().rstrip("/")
-    if not normalized:
-        return ""
-
-    parsed = urlsplit(normalized)
-    if not parsed.scheme or not parsed.netloc:
-        return normalized
-
-    path = parsed.path.rstrip("/")
-    if not path:
-        path = "/v1"
-    return urlunsplit((parsed.scheme, parsed.netloc, path, parsed.query, parsed.fragment)).rstrip("/")
-
-
-def build_managed_model_config() -> dict:
-    """把共享 .env 里的 OpenAI-compatible 配置落成 Hermes 可直接消费的 model 段。"""
-    api_key = os.getenv("OPENAI_API_KEY", "").strip()
-    base_url = normalize_openai_base_url(os.getenv("OPENAI_BASE_URL", ""))
-    model_id = os.getenv("OPENAI_MODEL_ID", os.getenv("OPENAI_MODEL", "")).strip()
-
-    if not any((api_key, base_url, model_id)):
+def load_hermes_config_json() -> dict:
+    """从可选的 HERMES_CONFIG_JSON 读取托管 Hermes 配置。"""
+    raw_config = os.getenv("HERMES_CONFIG_JSON", "").strip()
+    if not raw_config:
         return {}
 
-    model_config = {"provider": "custom"}
-    if model_id:
-        model_config["default"] = model_id
-    if base_url:
-        model_config["base_url"] = base_url
-    if api_key:
-        model_config["api_key"] = api_key
-    return model_config
+    try:
+        config = json.loads(raw_config)
+    except json.JSONDecodeError as error:
+        raise ValueError(f"HERMES_CONFIG_JSON must be valid JSON: {error.msg}") from error
+
+    if not isinstance(config, dict):
+        raise ValueError("HERMES_CONFIG_JSON must be a JSON object")
+    return config
 
 
 def merge_runtime_config(home: Path, mcp_url: str | None) -> None:
-    """把 uvicorn MCP 地址和受控 model 配置合并进隔离的 config.yaml。"""
+    """把环境传入的 Hermes 配置和 uvicorn MCP 地址合并进隔离的 config.yaml。"""
     config_path = home / "config.yaml"
     config: dict = {}
+    changed = False
     if config_path.exists():
         config = yaml.safe_load(config_path.read_text(encoding="utf-8")) or {}
 
-    changed = False
-    config['model_catalog'] = { 'enabled': False }
-    config["approvals"] = { "mode": "off" }
+    runtime_config = load_hermes_config_json()
+    if runtime_config:
+        next_config = config | runtime_config
+        if next_config != config:
+            config = next_config
+            changed = True
+
+    if config.get("model_catalog") != {"enabled": False}:
+        config["model_catalog"] = {"enabled": False}
+        changed = True
+    if config.get("approvals") != {"mode": "off"}:
+        config["approvals"] = {"mode": "off"}
+        changed = True
 
     if mcp_url:
         servers = config.setdefault("mcp_servers", {})
         if servers.get(MCP_SERVER_NAME, {}).get("url") != mcp_url:
             servers[MCP_SERVER_NAME] = {"url": mcp_url}
-            changed = True
-
-    managed_model = build_managed_model_config()
-    if managed_model:
-        current_model = config.get("model")
-        preserved_model = dict(current_model) if isinstance(current_model, dict) else {}
-        for key in MANAGED_MODEL_KEYS:
-            preserved_model.pop(key, None)
-        next_model = preserved_model | managed_model
-        if config.get("model") != next_model:
-            config["model"] = next_model
             changed = True
 
     if changed:

@@ -294,8 +294,19 @@ async function handleAdmin(request, response) {
     return sendHtml(response, 404, "<p>not found</p>");
 }
 
+async function localHermesConfigEnv() {
+    const configPath = path.resolve("hermes.json");
+    try {
+        return { HERMES_CONFIG_JSON: await fs.readFile(configPath, "utf8") };
+    } catch (error) {
+        if (error.code === "ENOENT") return {};
+        throw new SwitchError(500, `Unable to read ${configPath}`);
+    }
+}
+
 async function createContainer(user) {
     const name = `hermes-${user.id}`;
+    const hermesConfigEnv = await localHermesConfigEnv();
     console.log(`[switch] creating ${name}`);
     await runDocker([
         "run", "-d", "--name", name,
@@ -309,6 +320,7 @@ async function createContainer(user) {
             HERMES_RELAY_ENABLED: "1",
             HERMES_WORKSPACES_DIR: "/var/lib/silverretort/workspaces",
             HERMES_HOME: "/var/lib/silverretort/home",
+            ...hermesConfigEnv,
             ...user.env,
         }),
         "-v", `${name}-workspaces:/var/lib/silverretort/workspaces`,
@@ -703,6 +715,7 @@ module.exports = {
     adminCookieValue,
     createUserConfig,
     listConfiguredUsers,
+    localHermesConfigEnv,
     normalizeUserConfig,
     parseEnv,
     parseForm,
