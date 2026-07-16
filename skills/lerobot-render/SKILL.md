@@ -56,13 +56,13 @@ The launcher starts a hidden Kit process, then runs the ROS bridge in the suppli
 - Preserve the renderer buffer encoding (`rgb8` or `rgba8`), dimensions, row step, and capture timestamp.
 - Override topics with `-TfTopic` and `-ImageTopicPrefix`.
 
-The ROS bridge and renderer communicate only over loopback TCP. Do not expose the renderer port publicly.
+The ROS bridge and renderer communicate only over loopback TCP. Do not expose the renderer port publicly. The renderer accepts multiple TCP clients and interleaved clients corrupt each other's frames: before recording, verify `netstat -ano | findstr 39080` shows exactly one established client, and kill orphaned `ros_image_bridge.py` processes from earlier sessions. Run the bridge and every TF publisher under a dedicated `ROS_DOMAIN_ID`; other `/tf` publishers with the same leaf frame names (such as the desktop app's own `serve.py`) silently overwrite poses and make objects flicker or freeze.
 
 ## Pose mapping
 
 Resolve TF child-frame leaf names against USD prim names. Reject ambiguous names instead of moving the wrong prim. Author pose overrides into the stage session layer so the source USD is never modified. Convert world transforms to parent-local transforms before authoring nested links.
 
-Preserve authored non-pose transforms when applying TF overrides, especially `xformOp:scale`. Never replace a scaled primitive with a rotation/translation-only matrix; doing so changes rendered geometry size even when physics remains correct. Visually inspect representative frames for semantic scale, framing, and object visibility instead of relying only on non-black pixel checks.
+Preserve authored non-pose transforms when applying TF overrides, especially `xformOp:scale`. Never replace a scaled primitive with a rotation/translation-only matrix; doing so changes rendered geometry size even when physics remains correct. Only the posed prim's own scale is preserved: an `xformOp:scale` on an ancestor Xform is cancelled by the world-to-parent-local conversion, so scaled articulated assets must have the scale baked into their geometry (points, joint anchors, translate ops, mass by s^3) in a copied USD instead of an ancestor scale op. Visually inspect representative frames for semantic scale, framing, and object visibility instead of relying only on non-black pixel checks.
 
 ## Verification
 

@@ -81,12 +81,61 @@ uv run python scripts/moz01/pickup_pipeline.py generate `
 
 The dataset root must be new. Generate one evaluation episode per process because reused PhysX contact state is not independent.
 
+## MOZ01 knob-turn data (gas stove)
+
+Scene: `artifacts/moz01/USD/moz_gas_stove_scene.usda`. It references
+`gas_stove/gas_stove_knob_articulated_380.usd`, which has the real 380 mm
+stove length baked into the geometry. Never re-add an `xformOp:scale` above an
+articulated asset: lerobot-render TF pose overrides drop ancestor scale and
+render the object at full size while physics stays scaled. Bake scale into a
+copy of the asset instead (points, joint localPos, translate, mass x s^3).
+
+The gripper opens only 2.4 cm and the knob head is 3.8 cm, so the expert
+friction-dials: closed fingertips press ~3 mm into the knob face at 1.2 cm
+radius and drag a 60 deg arc; the knob drive is authored as dry friction
+(stiffness 0) so it holds its final angle. Success requires at least 0.8 rad
+held over the last 10 frames. Deeper presses wedge on the rotating head and
+destabilize the arm.
+
+Record an episode (renderer must already be running, see below):
+
+```powershell
+powershell.exe -NoProfile -ExecutionPolicy Bypass -Command "
+  `$env:ROS_DOMAIN_ID = '42'
+  & 'scripts\moz01\run_turn_knob.ps1' `
+    -Scene 'C:\Projects\SilverRetort\artifacts\moz01\USD\moz_gas_stove_scene.usda' `
+    -DatasetRoot 'C:\path\to\new-dataset-root' `
+    -RepoId 'local/moz01-knob-turn' -Episodes 1"
+```
+
+`run_turn_knob.ps1` assembles the environment (lerobot-record-simulation venv
+for lerobot/torch, ROS `setup.bat` for rclpy, this skill's `.ros-overlay` for
+ovphysx) and runs `scripts/moz01/turn_knob_pipeline.py`. The dataset root must
+be new.
+
+Recording environment rules (violations corrupt images silently while physics
+metrics stay perfect):
+
+1. Start `lerobot-render` first with the same scene, a sensors file such as
+   `artifacts/moz01/USD/knob_sensors.json`, and the same `ROS_DOMAIN_ID`.
+2. Always isolate with a dedicated `ROS_DOMAIN_ID` (e.g. 42): the desktop app
+   runs its own `serve.py` publishing `/tf` with identical frame names on
+   domain 0, and stale poses make the robot flicker or freeze in the render.
+3. Before recording, verify `netstat -ano | findstr 39080` shows exactly one
+   established client pair. Orphaned `ros_image_bridge.py` processes survive
+   for days and reconnect to new renderers; kill them.
+4. The pipeline refuses to finalize when rendered images are static (TF never
+   reached the renderer). Expect ~2% of frames with front/closeup images
+   swapped from an upstream RTX cross-viewport race; treat more as a failure.
+
 ## Separation of responsibilities
 
 - Use `lerobot-record-simulation` for generic random-to-goal datasets.
 - Use a renderer skill to publish camera images.
 - Use a rollout skill to evaluate policies.
-- Keep MOZ01 expert pickup control in `scripts/moz01`; do not place it in ignored `artifacts/` paths.
+- Keep MOZ01 expert control in `scripts/moz01` (`pickup_pipeline.py`,
+  `turn_knob_pipeline.py` with launchers `run_ros.ps1`/`run_turn_knob.ps1`);
+  do not place it in ignored `artifacts/` paths.
 
 ## Validate
 
