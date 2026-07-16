@@ -78,7 +78,7 @@ function resolveHermesMode(
     }
 
     if (!localHermesEnabled(config)) {
-        return { mode: "disabled" };
+        return { mode: "needs-switch-config", url: defaultSwitchHermesUrl() };
     }
 
     const runtime = resolveHermesRuntime(config);
