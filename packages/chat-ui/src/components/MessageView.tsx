@@ -176,7 +176,6 @@ function ToolCard({
 function MessageViewComponent({
   message,
   context,
-  hasFollowingMessages,
 }: MessageViewProps) {
   const client = useChatStore((state) => state.client);
   const openArtifact = useChatStore((state) => state.openArtifact);
@@ -282,14 +281,6 @@ function MessageViewComponent({
   const submitRestart = async () => {
     const trimmed = draft.trim();
     if (!trimmed || saving || running) {
-      return;
-    }
-    if (
-      hasFollowingMessages &&
-      !window.confirm(
-        "Later messages and generated content will be removed. Save and restart?",
-      )
-    ) {
       return;
     }
 

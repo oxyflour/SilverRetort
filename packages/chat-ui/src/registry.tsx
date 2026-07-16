@@ -7,18 +7,47 @@ export interface ArtifactRendererProps {
 
 export type ArtifactRenderer = ComponentType<ArtifactRendererProps>;
 
-const renderers = new Map<string, ArtifactRenderer>();
+export interface ArtifactRendererDefinition {
+  type: string;
+  renderer: ArtifactRenderer;
+  description?: string;
+  payloadSchema?: unknown;
+  examples?: unknown[];
+}
 
-/** 注册 artifact 渲染器；apps 层用它接入图表/3D 等自定义组件 */
-export function registerArtifactRenderer(type: string, renderer: ArtifactRenderer) {
-  renderers.set(type, renderer);
+export type ArtifactRendererReport = Omit<ArtifactRendererDefinition, "renderer">;
+
+const renderers = new Map<string, ArtifactRendererDefinition>();
+
+export function registerArtifactRenderer(
+  typeOrDefinition: string | ArtifactRendererDefinition,
+  renderer?: ArtifactRenderer,
+) {
+  const definition =
+    typeof typeOrDefinition === "string"
+      ? { type: typeOrDefinition, renderer }
+      : typeOrDefinition;
+  if (!definition.renderer) {
+    throw new Error(`Artifact renderer is required for ${definition.type}`);
+  }
+  renderers.set(definition.type, definition as ArtifactRendererDefinition);
 }
 
 export function getArtifactRenderer(type: string): ArtifactRenderer | undefined {
-  return renderers.get(type);
+  return renderers.get(type)?.renderer;
 }
 
-/** 当前已注册的渲染器类型，经后端透出给 agent（ui_list_render_types） */
 export function listRenderTypes(): string[] {
-  return [...renderers.keys()];
+  return listRenderDefinitions().map((definition) => definition.type);
+}
+
+export function listRenderDefinitions(): ArtifactRendererReport[] {
+  return [...renderers.values()].map(
+    ({ type, description, payloadSchema, examples }) => ({
+      type,
+      description,
+      payloadSchema,
+      examples,
+    }),
+  );
 }

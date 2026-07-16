@@ -11,7 +11,6 @@ export interface MessageViewContext {
 export interface MessageViewProps {
   message: Message;
   context: MessageViewContext;
-  hasFollowingMessages: boolean;
 }
 
 export type MessagePartGroup =

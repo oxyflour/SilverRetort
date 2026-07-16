@@ -8,23 +8,63 @@ import events
 import workspace_service
 from models import Artifact
 
-BUILTIN_RENDER_TYPES = ["iframe", "image", "markdown"]
-_render_types: list[str] = list(BUILTIN_RENDER_TYPES)
+RenderDefinition = dict[str, Any]
+
+BUILTIN_RENDER_DEFINITIONS: list[RenderDefinition] = [
+    {
+        "type": "iframe",
+        "description": "Static HTML artifact served from a workspace-relative entry file.",
+        "payloadSchema": {
+            "type": "object",
+            "additionalProperties": False,
+            "required": ["path"],
+            "properties": {"path": {"type": "string"}},
+        },
+    },
+    {
+        "type": "image",
+        "description": "Image artifact by URL, data URI, or local path.",
+    },
+    {
+        "type": "markdown",
+        "description": "Markdown document artifact.",
+        "payloadSchema": {
+            "type": "object",
+            "additionalProperties": False,
+            "properties": {"text": {"type": "string"}},
+        },
+    },
+]
+_render_definitions: list[RenderDefinition] = list(BUILTIN_RENDER_DEFINITIONS)
 
 
 def set_render_types(types: list[str]) -> None:
-    global _render_types
-    _render_types = types or list(BUILTIN_RENDER_TYPES)
+    set_render_definitions([{"type": type} for type in types])
+
+
+def set_render_definitions(renderers: list[RenderDefinition]) -> None:
+    global _render_definitions
+    valid_renderers = [
+        renderer
+        for renderer in renderers
+        if isinstance(renderer, dict) and isinstance(renderer.get("type"), str) and renderer["type"]
+    ]
+    _render_definitions = valid_renderers or list(BUILTIN_RENDER_DEFINITIONS)
 
 
 def supported_render_types() -> list[str]:
-    return list(_render_types)
+    return [str(renderer["type"]) for renderer in _render_definitions]
+
+
+def supported_render_definitions() -> list[RenderDefinition]:
+    return list(_render_definitions)
 
 
 def validate_render_type(type: str) -> str | None:
-    if type in _render_types:
+    render_types = supported_render_types()
+    if type in render_types:
         return None
-    supported = ", ".join(_render_types) or "(none)"
+    supported = ", ".join(render_types) or "(none)"
     return f"error: unsupported artifact type: {type}; supported types: {supported}"
 
 
@@ -112,9 +152,9 @@ def ui_update_artifact(artifact_id: str, payload: dict[str, Any]) -> str:
     return "ok"
 
 
-def ui_list_render_types() -> list[str]:
-    """List artifact renderer types currently registered by the frontend."""
-    return supported_render_types()
+def ui_list_render_types() -> list[RenderDefinition]:
+    """List artifact renderers currently registered by the frontend."""
+    return supported_render_definitions()
 
 
 TOOL_FUNCTIONS: dict[str, Callable[..., Any]] = {

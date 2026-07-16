@@ -99,14 +99,11 @@ export function ChatPane() {
             {currentSessionId ? "发送一条消息开始对话" : "新建一个会话开始"}
           </div>
         ) : (
-          renderedMessages.map((message, index) => (
+          renderedMessages.map((message) => (
             <MessageView
               key={message.id}
               message={message}
               context={messageContext}
-              hasFollowingMessages={
-                firstRenderedIndex + index < totalMessages - 1
-              }
             />
           ))
         )}

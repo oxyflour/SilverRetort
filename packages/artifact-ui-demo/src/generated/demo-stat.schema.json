@@ -1,0 +1,72 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "type": "object",
+  "properties": {
+    "label": {
+      "type": "string",
+      "description": "Short label shown above the primary value."
+    },
+    "value": {
+      "type": [
+        "string",
+        "number"
+      ],
+      "description": "Primary metric value."
+    },
+    "unit": {
+      "type": "string",
+      "description": "Unit displayed next to the primary value."
+    },
+    "description": {
+      "type": "string",
+      "description": "Supporting sentence below the primary value."
+    },
+    "trend": {
+      "type": "object",
+      "properties": {
+        "label": {
+          "type": "string"
+        },
+        "tone": {
+          "$ref": "#/definitions/TrendTone"
+        }
+      },
+      "additionalProperties": false,
+      "description": "Compact trend badge shown in the top-right corner."
+    },
+    "items": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "label": {
+            "type": "string"
+          },
+          "value": {
+            "type": [
+              "string",
+              "number"
+            ]
+          }
+        },
+        "required": [
+          "label",
+          "value"
+        ],
+        "additionalProperties": false
+      },
+      "description": "Secondary stats shown below the description."
+    }
+  },
+  "additionalProperties": false,
+  "definitions": {
+    "TrendTone": {
+      "type": "string",
+      "enum": [
+        "up",
+        "down",
+        "neutral"
+      ]
+    }
+  }
+}
