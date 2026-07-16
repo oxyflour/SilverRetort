@@ -214,6 +214,8 @@ describe("session model state", () => {
       modelId: model.id,
       defaultProvider: "custom",
       defaultModel: "default-model",
+      baseUrl: "",
+      hasApiKey: false,
     };
     const spy = vi
       .spyOn(useChatStore.getState().client, "setSessionModel")

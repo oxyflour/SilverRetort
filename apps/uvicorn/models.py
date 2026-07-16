@@ -146,6 +146,27 @@ class HermesModelsResponse(ApiModel):
     default_model: str = ""
 
 
+class HermesUsageWindow(ApiModel):
+    label: str
+    used_percent: float | None = None
+    reset_at: str | None = None
+    detail: str | None = None
+
+
+class HermesUsageResponse(ApiModel):
+    available: bool = False
+    percent: float | None = None
+    label: str = ""
+    title: str = ""
+    provider: str = ""
+    model: str = ""
+    source: str = ""
+    fetched_at: str = ""
+    windows: list[HermesUsageWindow] = Field(default_factory=list)
+    details: list[str] = Field(default_factory=list)
+    unavailable_reason: str = ""
+
+
 class SessionModel(ApiModel):
     session_key: str = ""
     source: Literal["default", "session"] = "default"

@@ -47,6 +47,7 @@ from models import (
     WorkspaceCapability,
     HermesModel,
     HermesModelsResponse,
+    HermesUsageResponse,
 )
 
 router = APIRouter(prefix="/api")
@@ -224,6 +225,7 @@ def set_hermes_mcp_servers(body: dict = Body(...)) -> dict:
     return _mcp_server_response(settings)
 
 
+
 @router.post("/app/restart")
 def restart_app() -> dict:
     def exit_soon() -> None:
@@ -265,6 +267,19 @@ async def hermes_models() -> HermesModelsResponse:
         return _models_response(await method())
     except Exception as exc:
         raise HTTPException(503, f"Hermes models unavailable: {exc}") from exc
+
+
+@router.get("/hermes/usage")
+async def hermes_usage(sessionId: str | None = None) -> HermesUsageResponse:
+    method = _require_hermes_method("get_usage")
+    try:
+        return HermesUsageResponse.model_validate(await method(sessionId))
+    except httpx.HTTPStatusError as exc:
+        if exc.response.status_code == 404:
+            return HermesUsageResponse(unavailable_reason="Hermes usage endpoint unavailable")
+        raise HTTPException(503, f"Hermes usage unavailable: {exc}") from exc
+    except Exception as exc:
+        raise HTTPException(503, f"Hermes usage unavailable: {exc}") from exc
 
 
 @router.get("/hermes/default-model")

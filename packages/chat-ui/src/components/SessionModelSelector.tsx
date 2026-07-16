@@ -1,6 +1,7 @@
 "use client";
 
 import { useChatStore } from "../store";
+import { ModelUsageRing } from "./ModelUsageRing";
 
 export function SessionModelSelector() {
   const currentSessionId = useChatStore((state) => state.currentSessionId);
@@ -28,7 +29,7 @@ export function SessionModelSelector() {
 
   return (
     <label
-      className="flex min-w-0 items-center rounded-full px-2 py-1 text-xs text-neutral-500 transition-colors hover:bg-neutral-200 dark:text-neutral-400 dark:hover:bg-neutral-700"
+      className="relative flex min-w-0 items-center gap-1 rounded-full px-2 py-1 text-xs text-neutral-500 transition-colors hover:bg-neutral-200 dark:text-neutral-400 dark:hover:bg-neutral-700"
       title={
         available
           ? `Model for this session · Provider: ${selectedProvider}`
@@ -69,6 +70,7 @@ export function SessionModelSelector() {
           </option>
         ))}
       </select>
+      <ModelUsageRing />
     </label>
   );
 }

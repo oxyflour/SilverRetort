@@ -243,6 +243,29 @@ export const HermesModelsResponseSchema = z.object({
 });
 export type HermesModelsResponse = z.infer<typeof HermesModelsResponseSchema>;
 
+export const HermesUsageWindowSchema = z.object({
+  label: z.string(),
+  usedPercent: z.number().nullable().default(null),
+  resetAt: z.string().nullable().default(null),
+  detail: z.string().nullable().default(null),
+});
+export type HermesUsageWindow = z.infer<typeof HermesUsageWindowSchema>;
+
+export const HermesUsageResponseSchema = z.object({
+  available: z.boolean().default(false),
+  percent: z.number().nullable().default(null),
+  label: z.string().default(""),
+  title: z.string().default(""),
+  provider: z.string().default(""),
+  model: z.string().default(""),
+  source: z.string().default(""),
+  fetchedAt: z.string().default(""),
+  windows: z.array(HermesUsageWindowSchema).default([]),
+  details: z.array(z.string()).default([]),
+  unavailableReason: z.string().default(""),
+});
+export type HermesUsageResponse = z.infer<typeof HermesUsageResponseSchema>;
+
 export const SessionModelSchema = z.object({
   sessionKey: z.string().default(""),
   source: z.enum(["default", "session"]).default("default"),
