@@ -76,7 +76,7 @@ test("packaged mode uses the bundled Hermes executable when available", (t) => {
     assert.equal(runtime.cwd, executableDir);
 });
 
-test("packaged mode with bundled Hermes stays disabled by default", (t) => {
+test("packaged mode with bundled Hermes requests switch configuration by default", (t) => {
     const config = makeConfig(t, { isPackaged: true });
     const executableDir = path.join(config.serviceRoot, "hermes", "silverretort-hermes");
     mkdirSync(executableDir, { recursive: true });
@@ -86,7 +86,10 @@ test("packaged mode with bundled Hermes stays disabled by default", (t) => {
         "utf8",
     );
     const mode = resolveHermesMode(config, 23001, 23002, () => "packaged-key");
-    assert.deepEqual(mode, { mode: "disabled" });
+    assert.deepEqual(mode, {
+        mode: "needs-switch-config",
+        url: defaultSwitchHermesUrl(),
+    });
 });
 
 test("packaged mode starts bundled Hermes when explicitly enabled", (t) => {
@@ -111,8 +114,8 @@ test("packaged mode starts bundled Hermes when explicitly enabled", (t) => {
     assert.equal(mode.env.HERMES_RELAY_ENABLED, "1");
 });
 
-test("packaged mode without Hermes runtime requests switch configuration when local Hermes is enabled", (t) => {
-    const config = makeConfig(t, { isPackaged: true, buildChildEnv: () => ({ ENABLE_LOCAL_HERMES: "1" }) });
+test("packaged mode without Hermes runtime requests switch configuration", (t) => {
+    const config = makeConfig(t, { isPackaged: true });
     assert.deepEqual(resolveHermesMode(config, 23001, 23002), {
         mode: "needs-switch-config",
         url: defaultSwitchHermesUrl(),
