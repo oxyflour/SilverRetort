@@ -4,7 +4,7 @@ import { useEffect, useState } from "react";
 import { PanelLeftClose, PanelLeftOpen } from "lucide-react";
 import { Panel, PanelGroup, PanelResizeHandle } from "react-resizable-panels";
 import { subscribeEvents } from "silverretort-protocol";
-import { listRenderTypes } from "../registry";
+import { listRenderDefinitions } from "../registry";
 import { useChatStore } from "../store";
 import { ArtifactPanel } from "./ArtifactPanel";
 import { ChatPane } from "./ChatPane";
@@ -45,7 +45,7 @@ export function ChatApp() {
         void fetch("/api/render-types", {
           method: "POST",
           headers: { "content-type": "application/json" },
-          body: JSON.stringify({ types: listRenderTypes() }),
+          body: JSON.stringify({ renderers: listRenderDefinitions() }),
         });
       },
     });

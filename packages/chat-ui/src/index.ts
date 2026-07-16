@@ -5,8 +5,11 @@ export { useChatStore } from "./store";
 export {
   registerArtifactRenderer,
   getArtifactRenderer,
+  listRenderDefinitions,
   listRenderTypes,
   type ArtifactRenderer,
+  type ArtifactRendererDefinition,
+  type ArtifactRendererReport,
   type ArtifactRendererProps,
 } from "./registry";
 export { registerBuiltinRenderers } from "./renderers/builtins";

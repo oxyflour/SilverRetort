@@ -53,13 +53,7 @@ beforeEach(() => {
 
 describe("MessageView", () => {
   it("renders markdown and completed message state", () => {
-    render(
-      <MessageView
-        message={message}
-        context={context}
-        hasFollowingMessages={false}
-      />,
-    );
+    render(<MessageView message={message} context={context} />);
 
     expect(screen.getByRole("heading", { name: "Result" })).toBeInTheDocument();
     expect(screen.getByText("first")).toBeInTheDocument();
@@ -69,13 +63,7 @@ describe("MessageView", () => {
 
   it("keeps tool calls and their details collapsed until requested", async () => {
     const user = userEvent.setup();
-    render(
-      <MessageView
-        message={message}
-        context={context}
-        hasFollowingMessages={false}
-      />,
-    );
+    render(<MessageView message={message} context={context} />);
 
     expect(screen.getByText("调用了 lookup")).toBeInTheDocument();
     expect(screen.queryByText("lookup")).not.toBeInTheDocument();
@@ -133,7 +121,6 @@ describe("MessageView", () => {
       <MessageView
         message={compactMessage}
         context={{ ...context, sessionMessages: [compactMessage] }}
-        hasFollowingMessages={false}
       />,
     );
 
@@ -196,7 +183,6 @@ describe("MessageView", () => {
       <MessageView
         message={todoMessage}
         context={{ ...context, sessionMessages: [todoMessage] }}
-        hasFollowingMessages={false}
       />,
     );
 

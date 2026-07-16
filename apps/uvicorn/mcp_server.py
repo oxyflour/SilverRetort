@@ -12,3 +12,7 @@ for tool in mcp_tools.TOOL_FUNCTIONS.values():
 
 def set_render_types(types: list[str]) -> None:
     mcp_tools.set_render_types(types)
+
+
+def set_render_definitions(renderers: list[dict]) -> None:
+    mcp_tools.set_render_definitions(renderers)
