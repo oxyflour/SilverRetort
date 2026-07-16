@@ -6,6 +6,7 @@ const test = require("node:test");
 const {
     joinUrl,
     loadDesktopConfig,
+    normalizeSettingsEnv,
     parseDesktopEnv,
     readJsonObject,
     toWebSocketUrl,
@@ -33,7 +34,10 @@ test("loadDesktopConfig resolves paths, settings, and child environment", (t) =>
     mkdirSync(sourceDir, { recursive: true });
     mkdirSync(dataDir, { recursive: true });
     writeFileSync(path.join(root, "desktop", ".env"), "FROM_FILE=yes\nSHARED=file\n");
-    writeFileSync(path.join(dataDir, "settings.json"), JSON.stringify({ switchUrl: "https://example.test" }));
+    writeFileSync(path.join(dataDir, "settings.json"), JSON.stringify({
+        switchUrl: "https://example.test",
+        env: { SETTINGS_ONLY: "yes", SHARED: "settings", " ENABLE_LOCAL_HERMES ": 1 },
+    }));
 
     const config = loadDesktopConfig({
         app: { isPackaged: false, getPath: () => path.join(root, "user-data") },
@@ -44,12 +48,24 @@ test("loadDesktopConfig resolves paths, settings, and child environment", (t) =>
     assert.equal(config.desktopRoot, path.join(root, "desktop"));
     assert.equal(config.serviceRoot, root);
     assert.equal(config.dataDir, dataDir);
-    assert.deepEqual(config.settings, { switchUrl: "https://example.test" });
+    assert.deepEqual(config.settings, {
+        switchUrl: "https://example.test",
+        env: { SETTINGS_ONLY: "yes", SHARED: "settings", " ENABLE_LOCAL_HERMES ": 1 },
+    });
     assert.deepEqual(config.buildChildEnv({ SHARED: "override" }), {
         SILVERRETORT_DATA_DIR: dataDir,
         SHARED: "override",
         PROCESS_ONLY: "yes",
         FROM_FILE: "yes",
+        SETTINGS_ONLY: "yes",
+        ENABLE_LOCAL_HERMES: "1",
+    });
+});
+
+test("normalizeSettingsEnv trims keys and stringifies values", () => {
+    assert.deepEqual(normalizeSettingsEnv({ env: { " ENABLE_LOCAL_HERMES ": 1, EMPTY: "", " ": "skip" } }), {
+        ENABLE_LOCAL_HERMES: "1",
+        EMPTY: "",
     });
 });
 

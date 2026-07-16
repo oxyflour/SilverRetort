@@ -43,6 +43,12 @@ function resolveHermesRuntime(config) {
     return resolvePackagedHermesRuntime(config);
 }
 
+function localHermesEnabled(config) {
+    if (!config.isPackaged) return true;
+    const env = config.buildChildEnv ? config.buildChildEnv() : { ...config.processEnv, ...config.desktopEnv };
+    return Boolean(`${env.ENABLE_LOCAL_HERMES || ""}`.trim());
+}
+
 function resolveHermesMode(
     config,
     pythonPort,
@@ -69,6 +75,10 @@ function resolveHermesMode(
             apiKey: hermesApiKey,
             healthUrl: joinUrl(switchUrl, "health"),
         };
+    }
+
+    if (!localHermesEnabled(config)) {
+        return { mode: "disabled" };
     }
 
     const runtime = resolveHermesRuntime(config);
@@ -116,6 +126,7 @@ module.exports = {
     randomApiKey,
     resolveHermesRuntime,
     resolvePackagedHermesRuntime,
+    localHermesEnabled,
     resolveHermesMode,
     startHermes,
 };

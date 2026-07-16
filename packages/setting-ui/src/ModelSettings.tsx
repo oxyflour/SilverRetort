@@ -24,6 +24,7 @@ interface HermesConnection {
   mode: "local" | "remote";
   switchUrl: string;
   hasHermesApiKey: boolean;
+  localHermesEnabled: boolean;
   restartRequired?: boolean;
 }
 
@@ -101,7 +102,7 @@ export function ModelSettings() {
       setSwitchUrl(connectionSettings.switchUrl || "");
       setHermesApiKey("");
 
-      if (connectionSettings.mode === "remote") {
+      if (connectionSettings.mode !== "local" || !connectionSettings.localHermesEnabled) {
         setModels([]);
         setPrimary(emptyModel);
         setVision(emptyModel);
@@ -284,7 +285,7 @@ export function ModelSettings() {
             />
           )}
 
-          {connectionMode === "local" && (
+          {connectionMode === "local" && connection?.localHermesEnabled && (
             <>
               <ModelCard
                 icon={Cpu}
@@ -419,18 +420,20 @@ function ConnectionCard({
       <div>
         <p className="text-sm font-medium">Hermes 连接</p>
         <p className="mt-1 text-xs leading-5 text-neutral-500 dark:text-neutral-400">
-          本地 Hermes 可直接管理模型；也可以切换到远程 switchUrl。
+          {connection.localHermesEnabled ? "本地 Hermes 可直接管理模型；也可以切换到远程 switchUrl。" : "当前默认使用远程 switchUrl；设置 ENABLE_LOCAL_HERMES 后才显示本地模型。"}
         </p>
       </div>
 
-      <div className="mt-4 grid grid-cols-2 gap-2 rounded-lg bg-neutral-50 p-1 text-sm dark:bg-neutral-800/70">
-        <button
-          type="button"
-          onClick={() => onModeChange("local")}
-          className={`rounded-md px-3 py-2 ${mode === "local" ? "bg-white shadow-sm dark:bg-neutral-900" : "text-neutral-500"}`}
-        >
-          本地模型
-        </button>
+      <div className={`mt-4 grid gap-2 rounded-lg bg-neutral-50 p-1 text-sm dark:bg-neutral-800/70 ${connection.localHermesEnabled ? "grid-cols-2" : "grid-cols-1"}`}>
+        {connection.localHermesEnabled && (
+          <button
+            type="button"
+            onClick={() => onModeChange("local")}
+            className={`rounded-md px-3 py-2 ${mode === "local" ? "bg-white shadow-sm dark:bg-neutral-900" : "text-neutral-500"}`}
+          >
+            本地模型
+          </button>
+        )}
         <button
           type="button"
           onClick={() => onModeChange("remote")}
