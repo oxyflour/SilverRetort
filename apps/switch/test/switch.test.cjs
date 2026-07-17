@@ -11,6 +11,7 @@ const {
     parseRoute,
     parseStatusRoute,
     shouldRecycleContainer,
+    shouldStopIdleHermes,
 } = require("../switch.cjs");
 
 test("parseRoute accepts encoded Windows-style account names", () => {
@@ -100,11 +101,16 @@ test("adminCookieValue is stable", () => {
 });
 
 
-test("idle cleanup keeps running Hermes containers", () => {
-    const oldFinishedAt = new Date(Date.UTC(2026, 0, 1)).toISOString();
-    assert.equal(shouldRecycleContainer({
-        State: { Running: true, FinishedAt: oldFinishedAt },
-    }, Date.UTC(2026, 0, 2, 2)), false);
+test("idle cleanup keeps Hermes containers with active tasks running", () => {
+    const now = Date.UTC(2026, 0, 2, 2);
+    const lastActiveAt = Date.UTC(2026, 0, 1);
+    assert.equal(shouldStopIdleHermes({ State: { Running: true } }, true, lastActiveAt, now), false);
+});
+
+test("idle cleanup stops running Hermes containers only after tasks are idle", () => {
+    const now = Date.UTC(2026, 0, 2, 2);
+    assert.equal(shouldStopIdleHermes({ State: { Running: true } }, false, Date.UTC(2026, 0, 1), now), true);
+    assert.equal(shouldStopIdleHermes({ State: { Running: true } }, false, Date.UTC(2026, 0, 2, 1, 30), now), false);
 });
 
 test("idle cleanup recycles containers whose Hermes stopped long ago", () => {
