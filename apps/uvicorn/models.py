@@ -97,7 +97,8 @@ class Artifact(ApiModel):
 
 
 class IframeArtifactPayload(ApiModel):
-    path: str
+    path: str | None = None
+    url: str | None = None
 
 
 class CreateSessionRequest(ApiModel):

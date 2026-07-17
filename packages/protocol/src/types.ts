@@ -14,9 +14,22 @@ export type Attachment = z.infer<typeof AttachmentSchema>;
 export const WorkspaceFileSchema = AttachmentSchema;
 export type WorkspaceFile = Attachment;
 
-export const IframeArtifactPayloadSchema = z.object({
-  path: z.string().min(1),
-});
+const HttpUrlSchema = z
+  .string()
+  .url()
+  .refine((value) => {
+    try {
+      const protocol = new URL(value).protocol;
+      return protocol === "http:" || protocol === "https:";
+    } catch {
+      return false;
+    }
+  }, "URL must use http or https");
+
+export const IframeArtifactPayloadSchema = z.union([
+  z.object({ path: z.string().min(1) }).strict(),
+  z.object({ url: HttpUrlSchema }).strict(),
+]);
 export type IframeArtifactPayload = z.infer<typeof IframeArtifactPayloadSchema>;
 
 export const WorkspaceSchema = z.object({

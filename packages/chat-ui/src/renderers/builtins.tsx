@@ -7,7 +7,7 @@ import { IframeRenderer as InteractiveIframeRenderer } from "./iframe";
 function IframeRenderer({ artifact }: ArtifactRendererProps) {
   const parsed = IframeArtifactPayloadSchema.safeParse(artifact.payload);
   if (!parsed.success) {
-    return <div className="flex h-full items-center justify-center p-4 text-sm text-red-500">Invalid iframe artifact path</div>;
+    return <div className="flex h-full items-center justify-center p-4 text-sm text-red-500">Invalid iframe artifact payload</div>;
   }
 
   return (

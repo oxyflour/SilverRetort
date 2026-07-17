@@ -565,12 +565,15 @@ async def _workspace_file_response(
         headers["Cross-Origin-Resource-Policy"] = "cross-origin"
         headers["Content-Security-Policy"] = (
             "default-src 'self' data: blob:; "
-            "script-src 'self' 'unsafe-inline'; "
-            "style-src 'self' 'unsafe-inline'; "
-            "img-src 'self' data: blob:; "
-            "font-src 'self' data:; "
-            "connect-src 'self'; form-action 'none'; object-src 'none'; "
-            "base-uri 'none'; frame-src 'none'"
+            "script-src 'self' 'unsafe-inline' http: https: blob:; "
+            "style-src 'self' 'unsafe-inline' http: https:; "
+            "img-src 'self' data: blob: http: https:; "
+            "font-src 'self' data: http: https:; "
+            "media-src 'self' data: blob: http: https:; "
+            "connect-src 'self' http: https: ws: wss:; "
+            "worker-src 'self' blob:; "
+            "form-action 'none'; object-src 'none'; "
+            "base-uri 'none'; frame-src http: https:"
         )
     if download_name:
         headers["Content-Disposition"] = f"attachment; filename*=UTF-8''{quote(Path(download_name).name)}"

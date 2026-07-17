@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef } from "react";
 import {
   ApiClient,
   ArtifactContextMessageSchema,
+  IframeArtifactPayloadSchema,
 } from "silverretort-protocol";
 import { ArtifactRendererProps } from "../registry";
 
@@ -28,8 +29,21 @@ export function IframeRenderer({ artifact }: ArtifactRendererProps) {
   const iframeRef = useRef<HTMLIFrameElement>(null);
   const saveQueueRef = useRef<Promise<void>>(Promise.resolve());
   const client = useMemo(() => new ApiClient(), []);
+  const parsedPayload = useMemo(
+    () => IframeArtifactPayloadSchema.safeParse(artifact.payload),
+    [artifact.payload],
+  );
+  const payload = parsedPayload.success ? parsedPayload.data : null;
+  const src =
+    payload && "url" in payload
+      ? payload.url
+      : `/api/artifacts/${encodeURIComponent(artifact.id)}/content/`;
+  const isExternal = Boolean(payload && "url" in payload);
 
   useEffect(() => {
+    if (!payload || "url" in payload) {
+      return;
+    }
     const iframe = iframeRef.current;
     if (!iframe) {
       return;
@@ -94,15 +108,27 @@ export function IframeRenderer({ artifact }: ArtifactRendererProps) {
       iframe.removeEventListener("load", connect);
       activePort?.close();
     };
-  }, [artifact.id, client]);
+  }, [artifact.id, client, payload]);
+
+  if (!payload) {
+    return (
+      <div className="flex h-full items-center justify-center p-4 text-sm text-red-500">
+        Invalid iframe artifact payload
+      </div>
+    );
+  }
 
   return (
     <iframe
       ref={iframeRef}
       title={artifact.title}
       className="h-full w-full border-0 bg-white"
-      sandbox="allow-scripts"
-      src={`/api/artifacts/${encodeURIComponent(artifact.id)}/content/`}
+      sandbox={
+        isExternal
+          ? "allow-scripts allow-same-origin allow-forms allow-popups allow-popups-to-escape-sandbox"
+          : "allow-scripts"
+      }
+      src={src}
     />
   );
 }

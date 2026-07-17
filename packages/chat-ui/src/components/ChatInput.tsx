@@ -152,7 +152,7 @@ export function ChatInput() {
           </div>
         )}
         <div
-          className={`relative flex items-center gap-2 rounded-[1.25rem] border border-transparent bg-neutral-100 px-3 py-2 transition-colors dark:bg-neutral-800 ${
+          className={`relative flex items-end gap-2 rounded-[1.25rem] border border-transparent bg-neutral-100 px-3 py-2 transition-colors dark:bg-neutral-800 ${
             draggingFiles
               ? "border-dashed border-blue-400 bg-blue-50 dark:border-blue-500 dark:bg-blue-950/30"
               : ""
@@ -193,40 +193,48 @@ export function ChatInput() {
           >
             <AppIcon icon={Paperclip} className="h-4 w-4" />
           </button>
-          <input
-            type="text"
-            value={text}
-            onChange={(e) => {
-              const next = e.target.value;
-              setText(next);
-              if (next === "/") void refreshHermesControls();
-            }}
-            onKeyDown={(e) => {
-              if (e.key === "Tab" && slashSuggestions[0]) {
-                e.preventDefault();
-                insertSlashCommand(slashSuggestions[0].command);
-                return;
+          <div className="grid min-w-0 flex-1">
+            <textarea
+              rows={1}
+              value={text}
+              onChange={(e) => {
+                const next = e.target.value;
+                setText(next);
+                if (next === "/") void refreshHermesControls();
+              }}
+              onKeyDown={(e) => {
+                if (e.key === "Tab" && slashSuggestions[0]) {
+                  e.preventDefault();
+                  insertSlashCommand(slashSuggestions[0].command);
+                  return;
+                }
+                if (e.key === "Enter" && !e.shiftKey && !e.nativeEvent.isComposing) {
+                  e.preventDefault();
+                  submit();
+                }
+              }}
+              onPaste={(e) => {
+                const files = Array.from(e.clipboardData.items).flatMap((item) => {
+                  const file = item.kind === "file" ? item.getAsFile() : null;
+                  return file ? [file] : [];
+                });
+                addFiles(files);
+              }}
+              placeholder={
+                currentSessionId
+                  ? "\u8f93\u5165\u6d88\u606f\uff0cEnter \u53d1\u9001"
+                  : "\u5148\u65b0\u5efa\u4e00\u4e2a\u4f1a\u8bdd"
               }
-              if (e.key === "Enter" && !e.nativeEvent.isComposing) {
-                e.preventDefault();
-                submit();
-              }
-            }}
-            onPaste={(e) => {
-              const files = Array.from(e.clipboardData.items).flatMap((item) => {
-                const file = item.kind === "file" ? item.getAsFile() : null;
-                return file ? [file] : [];
-              });
-              addFiles(files);
-            }}
-            placeholder={
-              currentSessionId
-                ? "\u8f93\u5165\u6d88\u606f\uff0cEnter \u53d1\u9001"
-                : "\u5148\u65b0\u5efa\u4e00\u4e2a\u4f1a\u8bdd"
-            }
-            disabled={!currentSessionId}
-            className="min-w-0 flex-1 bg-transparent text-sm text-neutral-900 outline-none placeholder:text-neutral-400 disabled:opacity-40 dark:text-neutral-100 dark:placeholder:text-neutral-500"
-          />
+              disabled={!currentSessionId}
+              className="col-start-1 row-start-1 h-full min-h-8 max-h-[4.25rem] resize-none overflow-y-auto bg-transparent py-1 text-sm leading-5 text-neutral-900 outline-none placeholder:text-neutral-400 disabled:opacity-40 dark:text-neutral-100 dark:placeholder:text-neutral-500"
+            />
+            <div
+              aria-hidden="true"
+              className="invisible col-start-1 row-start-1 min-h-8 max-h-[4.25rem] overflow-hidden whitespace-pre-wrap break-words py-1 text-sm leading-5"
+            >
+              {text ? `${text} ` : " "}
+            </div>
+          </div>
           <div className="flex shrink-0 items-center gap-2">
             <SessionModelSelector />
             <button

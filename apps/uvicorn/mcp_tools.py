@@ -2,6 +2,7 @@
 
 import uuid
 from typing import Any, Callable
+from urllib.parse import urlparse
 
 import db
 import events
@@ -13,12 +14,24 @@ RenderDefinition = dict[str, Any]
 BUILTIN_RENDER_DEFINITIONS: list[RenderDefinition] = [
     {
         "type": "iframe",
-        "description": "Static HTML artifact served from a workspace-relative entry file.",
+        "description": "Iframe artifact served from a workspace-relative HTML entry file or an external http(s) URL.",
         "payloadSchema": {
-            "type": "object",
-            "additionalProperties": False,
-            "required": ["path"],
-            "properties": {"path": {"type": "string"}},
+            "oneOf": [
+                {
+                    "type": "object",
+                    "additionalProperties": False,
+                    "required": ["path"],
+                    "properties": {"path": {"type": "string"}},
+                },
+                {
+                    "type": "object",
+                    "additionalProperties": False,
+                    "required": ["url"],
+                    "properties": {
+                        "url": {"type": "string", "format": "uri", "pattern": "^https?://"}
+                    },
+                },
+            ],
         },
     },
     {
@@ -69,8 +82,15 @@ def validate_render_type(type: str) -> str | None:
 
 
 def validate_iframe_payload(session_id: str, payload: Any) -> str | None:
-    if not isinstance(payload, dict) or set(payload) != {"path"} or not isinstance(payload.get("path"), str):
-        return "error: iframe payload must be exactly {path: <workspace-relative path>}"
+    if not isinstance(payload, dict):
+        return "error: iframe payload must be {path: <workspace-relative path>} or {url: <http(s) URL>}"
+    if set(payload) == {"url"} and isinstance(payload.get("url"), str):
+        parsed = urlparse(payload["url"])
+        if parsed.scheme in {"http", "https"} and parsed.netloc:
+            return None
+        return "error: iframe payload url must be an absolute http(s) URL"
+    if set(payload) != {"path"} or not isinstance(payload.get("path"), str):
+        return "error: iframe payload must be {path: <workspace-relative path>} or {url: <http(s) URL>}"
     session = db.get_session(session_id)
     if session is None:
         return f"error: session not found: {session_id}"
@@ -88,10 +108,12 @@ def ui_show_artifact(
 ) -> str:
     """Show an artifact in the user's right panel and return its artifact_id.
 
-    For iframe artifacts, payload.path must point to a workspace-relative HTML
-    entry file. Put referenced resources in the same directory as that HTML file
-    or in child directories, then reference them with relative URLs such as
-    ./style.css or ./assets/app.js. Parent-directory assets are not served.
+    For iframe artifacts, payload must be either {path: <workspace-relative HTML
+    entry file>} or {url: <absolute http(s) URL>}. For path artifacts, put
+    referenced local resources in the same directory as that HTML file or in
+    child directories, then reference them with relative URLs such as ./style.css
+    or ./assets/app.js. Parent-directory assets are not served. Path artifacts
+    may also load external http(s) resources and embed external http(s) frames.
 
     To return a user interaction from an iframe to the agent, include
     <script src="/artifact-bridge-v1.js"></script> in the HTML and call
@@ -130,9 +152,10 @@ def ui_show_artifact(
 def ui_update_artifact(artifact_id: str, payload: dict[str, Any]) -> str:
     """Replace an existing artifact payload.
 
-    An iframe payload remains exactly {path: <workspace-relative HTML path>}.
-    Interactive iframe code should use /artifact-bridge-v1.js to save user
-    context; do not put that context into this payload.
+    An iframe payload must be either {path: <workspace-relative HTML path>} or
+    {url: <absolute http(s) URL>}. Interactive iframe code should use
+    /artifact-bridge-v1.js to save user context; do not put that context into
+    this payload.
     """
     artifact = db.get_artifact(artifact_id)
     if artifact is None:
