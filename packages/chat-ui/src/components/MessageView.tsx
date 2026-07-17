@@ -27,6 +27,7 @@ import {
   toRestartErrorMessage,
 } from "./messageViewSupport";
 import { ToolCallGroup } from "./ToolCallGroup";
+import { ToolCallPayloadView } from "./ToolCallPayloadView";
 import { isTodoTool } from "./toolCallGroupSupport";
 
 const markdownRemarkPlugins = [remarkGfm];
@@ -74,8 +75,6 @@ function ToolCard({
   const client = useChatStore((state) => state.client);
   const openArtifact = useChatStore((state) => state.openArtifact);
   const displayedToolCall = fullToolCall ?? toolCall;
-  const detailText = displayedToolCall.detail?.trim() || "No details";
-  const resultText = displayedToolCall.result?.trim() || "No result";
   const shownArtifactId =
     getShownArtifactId(toolCall) ??
     inferArtifactIdFromMessageWindow(
@@ -155,17 +154,21 @@ function ToolCard({
             <div className="mb-1 font-mono text-[11px] uppercase tracking-wide text-neutral-500">
               detail
             </div>
-            <pre className="max-h-32 overflow-auto whitespace-pre-wrap break-words rounded bg-white/70 px-2 py-1 dark:bg-neutral-900/60">
-              {detailText}
-            </pre>
+            <ToolCallPayloadView
+              value={displayedToolCall.detail}
+              emptyText="No details"
+              maxHeightClassName="max-h-32"
+            />
           </div>
           <div>
             <div className="mb-1 font-mono text-[11px] uppercase tracking-wide text-neutral-500">
               result
             </div>
-            <pre className="max-h-64 overflow-auto whitespace-pre-wrap break-words rounded bg-white/70 px-2 py-1 dark:bg-neutral-900/60">
-              {loadingDetails ? "Loading full details…" : resultText}
-            </pre>
+            <ToolCallPayloadView
+              value={loadingDetails ? "Loading full details…" : displayedToolCall.result}
+              emptyText="No result"
+              maxHeightClassName="max-h-64"
+            />
           </div>
         </div>
       )}

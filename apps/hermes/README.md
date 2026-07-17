@@ -39,14 +39,16 @@ identified by `workspaceId + relativePath`; SilverRetort no longer maintains a
 separate file database or file IDs. Existing legacy `DATA_DIR/files` content is
 discarded during migration and is not copied into workspaces.
 
-Iframe artifacts reference a static-site entry inside the workspace, for
-example `{"path":"artifacts/demo/index.html"}`. Inline HTML and external iframe
-URLs are not supported. Relative CSS, JavaScript, image, and font assets are
-served from the entry file's directory. Put those resources in the same
-directory as the entry HTML or in child directories, and reference them with
-relative URLs such as `./style.css` or `./assets/app.js`; files in parent
-directories are not valid artifact assets. Local-process mode lets uvicorn read
-the shared directory directly; Docker and remote modes stream through relay.
+Iframe artifacts reference either a static-site entry inside the workspace, for
+example `{"path":"artifacts/demo/index.html"}`, or an external HTTP(S) URL, for
+example `{"url":"https://example.com"}`. Inline HTML is not supported. For
+workspace entries, relative CSS, JavaScript, image, and font assets are served
+from the entry file's directory. Put those resources in the same directory as
+the entry HTML or in child directories, and reference them with relative URLs
+such as `./style.css` or `./assets/app.js`; files in parent directories are not
+valid artifact assets. Workspace HTML may also load external HTTP(S) resources
+and embed external HTTP(S) frames. Local-process mode lets uvicorn read the
+shared directory directly; Docker and remote modes stream through relay.
 
 Interactive iframe artifacts can save JSON context for the user's next chat
 turn. Load the host bridge and call it when meaningful state changes:
