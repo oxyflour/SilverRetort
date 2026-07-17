@@ -632,15 +632,31 @@ function sendHtml(response, status, html) {
     response.end(response.req?.method === "HEAD" ? undefined : body);
 }
 
+function parseDockerTimestamp(value) {
+    const timestamp = Date.parse(`${value || ""}`);
+    return Number.isFinite(timestamp) && timestamp > 0 ? timestamp : null;
+}
+
+function containerLastRanAt(container) {
+    if (container?.State?.Running) return Date.now();
+    return parseDockerTimestamp(container?.State?.FinishedAt)
+        ?? parseDockerTimestamp(container?.Created);
+}
+
+function shouldRecycleContainer(container, now = Date.now()) {
+    if (!container || container.State?.Running) return false;
+    const lastRanAt = containerLastRanAt(container);
+    return lastRanAt !== null && now - lastRanAt > settings.idleStopMs;
+}
+
 async function stopIdleContainers(now = Date.now()) {
-    for (const [userId, last] of lastTraffic) {
-        if (now - last <= settings.idleStopMs) continue;
+    const users = await listConfiguredUsers();
+    for (const userId of users) {
         const name = `hermes-${userId}`;
         const container = await inspectContainer(name);
-        if (container?.State?.Running) {
-            console.log(`[switch] stopping idle ${name}`);
-            await runDocker(["stop", name], true);
-        }
+        if (!shouldRecycleContainer(container, now)) continue;
+        console.log(`[switch] removing inactive ${name}`);
+        await runDocker(["rm", name], true);
         lastTraffic.delete(userId);
     }
 }
@@ -722,6 +738,7 @@ module.exports = {
     parseRoute,
     parseStatusRoute,
     responseHeaders,
+    shouldRecycleContainer,
     stopIdleContainers,
     touchUser,
     startServer,

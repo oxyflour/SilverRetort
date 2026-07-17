@@ -48,8 +48,7 @@ key for copying. Open `/status/{userId}` in a browser to view a simple HTML
 status page for the user container. The switch creates missing containers from the configured image,
 enables the Hermes relay, dynamically publishes the configured container port,
 and persists workspace and Hermes home in named Docker volumes. Existing stopped
-containers are started; unhealthy running containers are restarted. Containers
-with no traffic for more than 60 minutes are stopped by the idle sweeper.
+containers are started; unhealthy running containers are restarted. Stopped containers whose Hermes process has not run recently are removed by the idle sweeper; currently running Hermes containers are left alone even when no clients are connected.
 
 Configuration:
 

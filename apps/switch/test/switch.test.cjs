@@ -10,6 +10,7 @@ const {
     parseForm,
     parseRoute,
     parseStatusRoute,
+    shouldRecycleContainer,
 } = require("../switch.cjs");
 
 test("parseRoute accepts encoded Windows-style account names", () => {
@@ -96,4 +97,22 @@ test("parseForm reads admin form data", () => {
 test("adminCookieValue is stable", () => {
     assert.equal(adminCookieValue(), adminCookieValue());
     assert.ok(adminCookieValue().length > 20);
+});
+
+
+test("idle cleanup keeps running Hermes containers", () => {
+    const oldFinishedAt = new Date(Date.UTC(2026, 0, 1)).toISOString();
+    assert.equal(shouldRecycleContainer({
+        State: { Running: true, FinishedAt: oldFinishedAt },
+    }, Date.UTC(2026, 0, 2, 2)), false);
+});
+
+test("idle cleanup recycles containers whose Hermes stopped long ago", () => {
+    const now = Date.UTC(2026, 0, 2, 2);
+    assert.equal(shouldRecycleContainer({
+        State: { Running: false, FinishedAt: new Date(Date.UTC(2026, 0, 1)).toISOString() },
+    }, now), true);
+    assert.equal(shouldRecycleContainer({
+        State: { Running: false, FinishedAt: new Date(Date.UTC(2026, 0, 2, 1, 30)).toISOString() },
+    }, now), false);
 });
