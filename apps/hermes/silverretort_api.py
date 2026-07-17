@@ -252,6 +252,13 @@ def clear_session_model(session_key: str) -> None:
         pass
 
 
+def runtime_status_response() -> dict[str, Any]:
+    runner = _runner()
+    running_agents = getattr(runner, "_running_agents", None)
+    active_task_count = len(running_agents) if isinstance(running_agents, dict) else 0
+    return {"busy": active_task_count > 0, "activeTaskCount": active_task_count}
+
+
 def _require_auth(request: Request, api_key: str) -> None:
     if not authorized_request(request, api_key):
         raise HTTPException(401, "unauthorized")
@@ -320,6 +327,11 @@ def _set_session_model_response(
 
 
 def register_silverretort_routes(app: Any, api_key: str) -> None:
+    @app.get("/silverretort/runtime")
+    async def silverretort_runtime(request: Request) -> dict[str, Any]:
+        _require_auth(request, api_key)
+        return runtime_status_response()
+
     @app.get("/silverretort/slash/commands")
     async def silverretort_slash_commands(request: Request) -> dict[str, Any]:
         _require_auth(request, api_key)
