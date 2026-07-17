@@ -17,6 +17,7 @@ const HOP_HEADERS = new Set([
 ]);
 const recoveries = new Map();
 const lastTraffic = new Map();
+const lastHermesActive = new Map();
 
 class SwitchError extends Error {
     constructor(status, message) {
@@ -109,21 +110,45 @@ function publishedPort(container, name, containerPort = settings.containerPort) 
     return [...ports][0];
 }
 
-function checkHealth(port) {
+function requestHermes(port, requestPath, headers = {}, parseJson = false) {
     return new Promise((resolve) => {
         const request = http.get({
             host: settings.dockerHost,
             port,
-            path: "/health",
-            headers: { connection: "close" },
+            path: requestPath,
+            headers: { ...headers, connection: "close" },
             timeout: settings.healthTimeout,
         }, (response) => {
-            response.resume();
-            response.once("end", () => resolve(response.statusCode >= 200 && response.statusCode < 300));
+            const chunks = [];
+            response.on("data", (chunk) => chunks.push(chunk));
+            response.once("end", () => {
+                const ok = response.statusCode >= 200 && response.statusCode < 300;
+                if (!ok) return resolve(null);
+                if (!parseJson) return resolve(true);
+                try {
+                    resolve(JSON.parse(Buffer.concat(chunks).toString("utf8")));
+                } catch {
+                    resolve(null);
+                }
+            });
         });
         request.once("timeout", () => request.destroy());
-        request.once("error", () => resolve(false));
+        request.once("error", () => resolve(null));
     });
+}
+
+async function checkHealth(port) {
+    return Boolean(await requestHermes(port, "/health"));
+}
+
+async function checkHermesBusy(port, apiKey) {
+    const status = await requestHermes(
+        port,
+        "/silverretort/runtime",
+        { authorization: `Bearer ${apiKey}` },
+        true,
+    );
+    return status === null ? null : Boolean(status.busy || Number(status.activeTaskCount) > 0);
 }
 
 
@@ -632,15 +657,59 @@ function sendHtml(response, status, html) {
     response.end(response.req?.method === "HEAD" ? undefined : body);
 }
 
+function parseDockerTimestamp(value) {
+    const timestamp = Date.parse(`${value || ""}`);
+    return Number.isFinite(timestamp) && timestamp > 0 ? timestamp : null;
+}
+
+function containerLastRanAt(container) {
+    return parseDockerTimestamp(container?.State?.FinishedAt)
+        ?? parseDockerTimestamp(container?.State?.StartedAt)
+        ?? parseDockerTimestamp(container?.Created);
+}
+
+function shouldStopIdleHermes(container, busy, lastActiveAt, now = Date.now()) {
+    if (!container?.State?.Running || busy || lastActiveAt === null) return false;
+    return now - lastActiveAt > settings.idleStopMs;
+}
+
+function shouldRecycleContainer(container, now = Date.now()) {
+    if (!container || container.State?.Running) return false;
+    const lastRanAt = containerLastRanAt(container);
+    return lastRanAt !== null && now - lastRanAt > settings.idleStopMs;
+}
+
 async function stopIdleContainers(now = Date.now()) {
-    for (const [userId, last] of lastTraffic) {
-        if (now - last <= settings.idleStopMs) continue;
+    const users = await listConfiguredUsers();
+    for (const userId of users) {
+        const user = await resolveUser({ id: userId });
         const name = `hermes-${userId}`;
         const container = await inspectContainer(name);
-        if (container?.State?.Running) {
+        if (!container) continue;
+        if (container.State?.Running) {
+            let busy = null;
+            try {
+                busy = await checkHermesBusy(publishedPort(container, name, user.containerPort), user.apiKey);
+            } catch (error) {
+                if (!(error instanceof SwitchError)) throw error;
+            }
+            if (busy === true) {
+                lastHermesActive.set(userId, now);
+                continue;
+            }
+            if (busy === null) continue;
+            const lastActiveAt = lastHermesActive.get(userId) ?? containerLastRanAt(container);
+            if (!shouldStopIdleHermes(container, false, lastActiveAt, now)) continue;
             console.log(`[switch] stopping idle ${name}`);
             await runDocker(["stop", name], true);
+            lastHermesActive.delete(userId);
+            lastTraffic.delete(userId);
+            continue;
         }
+        if (!shouldRecycleContainer(container, now)) continue;
+        console.log(`[switch] removing inactive ${name}`);
+        await runDocker(["rm", name], true);
+        lastHermesActive.delete(userId);
         lastTraffic.delete(userId);
     }
 }
@@ -722,6 +791,8 @@ module.exports = {
     parseRoute,
     parseStatusRoute,
     responseHeaders,
+    shouldRecycleContainer,
+    shouldStopIdleHermes,
     stopIdleContainers,
     touchUser,
     startServer,
