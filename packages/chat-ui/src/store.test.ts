@@ -43,6 +43,64 @@ afterEach(() => {
 });
 
 describe("chat event routing", () => {
+  it("opens the current session artifact panel when a markdown artifact arrives", () => {
+    useChatStore.getState().applyEvent({
+      type: "artifact",
+      sessionId,
+      runId: "run-a",
+      messageId,
+      artifact: {
+        id: "artifact-a",
+        sessionId,
+        type: "markdown",
+        title: "Markdown artifact",
+        payload: { text: "# Render me" },
+        createdAt: "2026-07-18T00:00:00Z",
+      },
+    });
+
+    expect(useChatStore.getState().artifacts["artifact-a"]).toMatchObject({
+      type: "markdown",
+      payload: { text: "# Render me" },
+    });
+    expect(useChatStore.getState().artifactWorkspaces[sessionId]).toEqual({
+      open: true,
+      activeArtifactId: "artifact-a",
+      tabIds: ["artifact-a"],
+    });
+    expect(
+      useChatStore.getState().buckets[sessionId]?.messages[0]?.artifactIds,
+    ).toEqual(["artifact-a"]);
+  });
+
+  it("opens markdown artifacts created by MCP UI tools without a message id", () => {
+    useChatStore.getState().applyEvent({
+      type: "artifact",
+      sessionId,
+      artifact: {
+        id: "artifact-b",
+        sessionId,
+        type: "markdown",
+        title: "Tool markdown artifact",
+        payload: { text: "tool-created markdown" },
+        createdAt: "2026-07-18T00:00:00Z",
+      },
+    });
+
+    expect(useChatStore.getState().artifacts["artifact-b"]).toMatchObject({
+      type: "markdown",
+      payload: { text: "tool-created markdown" },
+    });
+    expect(useChatStore.getState().artifactWorkspaces[sessionId]).toEqual({
+      open: true,
+      activeArtifactId: "artifact-b",
+      tabIds: ["artifact-b"],
+    });
+    expect(
+      useChatStore.getState().buckets[sessionId]?.messages[0]?.artifactIds,
+    ).toEqual([]);
+  });
+
   it("coalesces a burst of text deltas into one store notification", () => {
     let notifications = 0;
     const unsubscribe = useChatStore.subscribe(() => {

@@ -53,6 +53,46 @@ BUILTIN_RENDER_DEFINITIONS: list[RenderDefinition] = [
     {
         "type": "image",
         "description": "Image artifact by URL, data URI, or local path.",
+        "payloadSchema": {
+            "oneOf": [
+                {
+                    "type": "object",
+                    "additionalProperties": False,
+                    "required": ["url"],
+                    "properties": {"url": {"type": "string"}},
+                },
+                {
+                    "type": "object",
+                    "additionalProperties": False,
+                    "required": ["src"],
+                    "properties": {"src": {"type": "string"}},
+                },
+                {
+                    "type": "object",
+                    "additionalProperties": False,
+                    "required": ["dataUri"],
+                    "properties": {"dataUri": {"type": "string"}},
+                },
+                {
+                    "type": "object",
+                    "additionalProperties": False,
+                    "required": ["path"],
+                    "properties": {"path": {"type": "string"}},
+                },
+                {
+                    "type": "object",
+                    "additionalProperties": False,
+                    "required": ["filePath"],
+                    "properties": {"filePath": {"type": "string"}},
+                },
+                {
+                    "type": "object",
+                    "additionalProperties": False,
+                    "required": ["localPath"],
+                    "properties": {"localPath": {"type": "string"}},
+                },
+            ],
+        },
     },
     {
         "type": "markdown",
@@ -70,7 +110,14 @@ _render_definitions: list[RenderDefinition] = list(BUILTIN_RENDER_DEFINITIONS)
 def _merge_with_builtin_renderers(renderers: list[RenderDefinition]) -> list[RenderDefinition]:
     merged = {renderer["type"]: renderer for renderer in BUILTIN_RENDER_DEFINITIONS}
     for renderer in renderers:
-        merged[renderer["type"]] = renderer
+        renderer_type = renderer["type"]
+        existing = merged.get(renderer_type, {})
+        next_renderer = {**existing, **renderer}
+        if "payloadSchema" not in renderer and "payloadSchema" in existing:
+            next_renderer["payloadSchema"] = existing["payloadSchema"]
+        if "description" not in renderer and "description" in existing:
+            next_renderer["description"] = existing["description"]
+        merged[renderer_type] = next_renderer
     return list(merged.values())
 
 
