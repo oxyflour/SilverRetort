@@ -2,12 +2,18 @@
 
 import mimetypes
 import os
+import time
 from pathlib import Path, PurePosixPath
 from typing import AsyncIterator
 from urllib.parse import quote
+from urllib.parse import urlsplit, urlunsplit
 
 import httpx
 from fastapi import UploadFile
+
+WORKSPACE_PROXY_ERROR = "workspace port proxy requires newer remote Hermes relay"
+WORKSPACE_PROXY_CACHE_SECONDS = 5
+_workspace_proxy_cache: tuple[float, bool] | None = None
 
 
 def _base_url() -> str:
@@ -80,9 +86,108 @@ def remote_file_url(workspace_id: str, relative_path: str) -> str:
     return f"{_base_url()}/workspace-api/workspaces/{quote(workspace_id)}/files/{encoded}"
 
 
+def _workspace_proxy_path(workspace_id: str, port: int, path: str = "") -> str:
+    suffix = "/".join(quote(part, safe="") for part in path.strip("/").split("/") if part)
+    base = f"/workspace-proxy/workspace/{quote(workspace_id)}/port/{port}"
+    return f"{base}/{suffix}" if suffix else base
+
+
+def remote_workspace_proxy_url(workspace_id: str, port: int, path: str = "", query: str = "") -> str:
+    url = f"{_base_url()}{_workspace_proxy_path(workspace_id, port, path)}"
+    return f"{url}?{query}" if query else url
+
+
+def remote_workspace_proxy_ws_url(workspace_id: str, port: int, path: str = "", query: str = "") -> str:
+    parsed = urlsplit(remote_workspace_proxy_url(workspace_id, port, path, query))
+    scheme = "wss" if parsed.scheme == "https" else "ws"
+    return urlunsplit((scheme, parsed.netloc, parsed.path, parsed.query, parsed.fragment))
+
+
+def local_workspace_proxy_url(workspace_id: str, port: int, path: str = "") -> str:
+    listen_port = int(os.getenv("LISTEN_PORT", "23001"))
+    return f"http://127.0.0.1:{listen_port}/api{_workspace_proxy_path(workspace_id, port, path)}"
+
+
+def _has_workspace_proxy(payload: dict) -> bool:
+    proxy = payload.get("workspaceProxy")
+    if not isinstance(proxy, dict):
+        return False
+    try:
+        version = int(proxy.get("version") or 0)
+    except (TypeError, ValueError):
+        return False
+    return (
+        proxy.get("supported") is True
+        and version >= 1
+        and proxy.get("http") is True
+        and proxy.get("websocket") is True
+    )
+
+
+def _cached_workspace_proxy_supported() -> bool | None:
+    if _workspace_proxy_cache is None:
+        return None
+    expires_at, supported = _workspace_proxy_cache
+    return supported if time.monotonic() < expires_at else None
+
+
+def _set_workspace_proxy_cache(supported: bool) -> bool:
+    global _workspace_proxy_cache
+    _workspace_proxy_cache = (time.monotonic() + WORKSPACE_PROXY_CACHE_SECONDS, supported)
+    return supported
+
+
+async def workspace_proxy_supported() -> bool:
+    cached = _cached_workspace_proxy_supported()
+    if cached is not None:
+        return cached
+    if not _base_url():
+        return _set_workspace_proxy_cache(False)
+    try:
+        async with httpx.AsyncClient(timeout=10) as client:
+            response = await client.get(f"{_base_url()}/workspace-api/capability", headers=_headers())
+            response.raise_for_status()
+            return _set_workspace_proxy_cache(_has_workspace_proxy(response.json()))
+    except (httpx.HTTPError, ValueError):
+        return _set_workspace_proxy_cache(False)
+
+
+def workspace_proxy_supported_sync() -> bool:
+    cached = _cached_workspace_proxy_supported()
+    if cached is not None:
+        return cached
+    if not _base_url():
+        return _set_workspace_proxy_cache(False)
+    try:
+        with httpx.Client(timeout=10) as client:
+            response = client.get(f"{_base_url()}/workspace-api/capability", headers=_headers())
+            response.raise_for_status()
+            return _set_workspace_proxy_cache(_has_workspace_proxy(response.json()))
+    except (httpx.HTTPError, ValueError):
+        return _set_workspace_proxy_cache(False)
+
+
+async def require_workspace_proxy() -> None:
+    if not await workspace_proxy_supported():
+        raise RuntimeError(WORKSPACE_PROXY_ERROR)
+
+
+def require_workspace_proxy_sync() -> str | None:
+    return None if workspace_proxy_supported_sync() else WORKSPACE_PROXY_ERROR
+
+
 async def capability() -> dict:
     if _local_root() is not None:
-        return {"supported": True, "version": 1, "writable": True, "cwdEnforced": False}
+        result = {"supported": True, "version": 1, "writable": True, "cwdEnforced": False}
+        if await workspace_proxy_supported():
+            result["workspaceProxy"] = {
+                "supported": True,
+                "version": 1,
+                "http": True,
+                "websocket": True,
+                "pathPrefixRequired": True,
+            }
+        return result
     if not _base_url():
         return {"supported": False, "version": 0, "writable": False, "cwdEnforced": False}
     try:

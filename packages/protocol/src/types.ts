@@ -29,6 +29,12 @@ const HttpUrlSchema = z
 export const IframeArtifactPayloadSchema = z.union([
   z.object({ path: z.string().min(1) }).strict(),
   z.object({ url: HttpUrlSchema }).strict(),
+  z.object({
+    workspacePort: z.object({
+      port: z.number().int().min(1).max(65535),
+      path: z.string().optional(),
+    }).strict(),
+  }).strict(),
 ]);
 export type IframeArtifactPayload = z.infer<typeof IframeArtifactPayloadSchema>;
 

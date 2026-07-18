@@ -126,7 +126,7 @@ export function IframeRenderer({ artifact }: ArtifactRendererProps) {
       sandbox={
         isExternal
           ? "allow-scripts allow-same-origin allow-forms allow-popups allow-popups-to-escape-sandbox"
-          : "allow-scripts"
+          : "allow-scripts allow-same-origin"
       }
       src={src}
     />

@@ -1,19 +1,22 @@
 """REST API + 常驻事件通道。路径与 packages/protocol 的 ApiClient 一一对应。"""
 
+import asyncio
 import json
 import mimetypes
 import os
 import re
 import threading
+from contextlib import suppress
 from pathlib import Path, PurePosixPath
 import uuid
 from urllib.parse import quote, unquote, urlparse
 from urllib.request import url2pathname
 
 import httpx
-from fastapi import APIRouter, Body, HTTPException, Request, UploadFile
-from fastapi.responses import FileResponse, StreamingResponse
+from fastapi import APIRouter, Body, HTTPException, Request, UploadFile, WebSocket
+from fastapi.responses import FileResponse, RedirectResponse, Response, StreamingResponse
 from sse_starlette.sse import EventSourceResponse
+from websockets.asyncio.client import connect
 
 import db
 import artifact_contexts
@@ -54,6 +57,19 @@ router = APIRouter(prefix="/api")
 engine = create_engine()
 MCP_SERVER_NAME_RE = re.compile(r"^[A-Za-z0-9_-]{1,64}$")
 MCP_LOOPBACK_HOSTS = {"127.0.0.1", "::1", "localhost"}
+HTTP_METHODS = ["DELETE", "GET", "HEAD", "OPTIONS", "PATCH", "POST", "PUT"]
+HOP_BY_HOP_HEADERS = {
+    "connection",
+    "content-length",
+    "host",
+    "keep-alive",
+    "proxy-authenticate",
+    "proxy-authorization",
+    "te",
+    "trailer",
+    "transfer-encoding",
+    "upgrade",
+}
 
 DEFAULT_TITLE = "新会话"
 
@@ -560,9 +576,7 @@ async def _workspace_file_response(
         raise HTTPException(404, "file not found") from exc
     headers = {"X-Content-Type-Options": "nosniff"}
     if no_cache:
-        headers["Cache-Control"] = "no-cache"
-        headers["Access-Control-Allow-Origin"] = "*"
-        headers["Cross-Origin-Resource-Policy"] = "cross-origin"
+        headers.update(_artifact_content_headers())
         headers["Content-Security-Policy"] = (
             "default-src 'self' data: blob:; "
             "script-src 'self' 'unsafe-inline' http: https: blob:; "
@@ -601,6 +615,164 @@ async def _workspace_file_response(
     return StreamingResponse(stream(), media_type=metadata["mimeType"], headers=headers)
 
 
+def _artifact_content_headers() -> dict[str, str]:
+    return {
+        "Cache-Control": "no-cache",
+        "Access-Control-Allow-Origin": "*",
+        "Access-Control-Allow-Methods": "GET, OPTIONS",
+        "Access-Control-Allow-Headers": "*",
+        "Access-Control-Allow-Private-Network": "true",
+        "Cross-Origin-Resource-Policy": "cross-origin",
+    }
+
+
+def _filter_proxy_headers(headers) -> dict[str, str]:
+    return {
+        key: value
+        for key, value in dict(headers.items()).items()
+        if key.lower() not in HOP_BY_HOP_HEADERS and key.lower() != "authorization"
+    }
+
+
+def _remote_auth_headers(headers=None) -> dict[str, str]:
+    result = _filter_proxy_headers(headers or {})
+    api_key = os.getenv("HERMES_API_KEY", "").strip()
+    if api_key:
+        result["authorization"] = f"Bearer {api_key}"
+    return result
+
+
+def _validate_workspace_proxy_request(workspace_id: str, port: int) -> None:
+    if db.get_workspace(workspace_id) is None:
+        raise HTTPException(404, "workspace not found")
+    if port < 1 or port > 65535:
+        raise HTTPException(400, "invalid port")
+
+
+async def _stream_remote_proxy_response(client: httpx.AsyncClient, response: httpx.Response):
+    try:
+        async for chunk in response.aiter_raw():
+            yield chunk
+    finally:
+        await response.aclose()
+        await client.aclose()
+
+
+async def _proxy_workspace_port_http(workspace_id: str, port: int, request: Request, path: str = ""):
+    _validate_workspace_proxy_request(workspace_id, port)
+    try:
+        await workspace_service.require_workspace_proxy()
+    except RuntimeError as exc:
+        raise HTTPException(503, str(exc)) from exc
+    client = httpx.AsyncClient(timeout=httpx.Timeout(None, connect=10))
+    upstream = client.build_request(
+        request.method,
+        workspace_service.remote_workspace_proxy_url(workspace_id, port, path, request.url.query),
+        headers=_remote_auth_headers(request.headers),
+        content=await request.body(),
+    )
+    try:
+        response = await client.send(upstream, stream=True)
+    except Exception:
+        await client.aclose()
+        raise
+    return StreamingResponse(
+        _stream_remote_proxy_response(client, response),
+        status_code=response.status_code,
+        headers=_filter_proxy_headers(response.headers),
+    )
+
+
+async def _browser_to_remote(websocket: WebSocket, remote) -> None:
+    while True:
+        message = await websocket.receive()
+        if message["type"] == "websocket.disconnect":
+            await remote.close()
+            return
+        if message.get("bytes") is not None:
+            await remote.send(message["bytes"])
+        elif message.get("text") is not None:
+            await remote.send(message["text"])
+
+
+async def _remote_to_browser(websocket: WebSocket, remote) -> None:
+    async for message in remote:
+        if isinstance(message, bytes):
+            await websocket.send_bytes(message)
+        else:
+            await websocket.send_text(message)
+
+
+async def _proxy_workspace_port_websocket(websocket: WebSocket, workspace_id: str, port: int, path: str = ""):
+    try:
+        _validate_workspace_proxy_request(workspace_id, port)
+        await workspace_service.require_workspace_proxy()
+    except (HTTPException, RuntimeError) as exc:
+        reason = str(exc.detail) if isinstance(exc, HTTPException) else str(exc)
+        await websocket.close(code=1013, reason=reason)
+        return
+
+    await websocket.accept()
+    try:
+        async with connect(
+            workspace_service.remote_workspace_proxy_ws_url(workspace_id, port, path, websocket.url.query),
+            additional_headers=_remote_auth_headers(),
+        ) as remote:
+            tasks = {
+                asyncio.create_task(_browser_to_remote(websocket, remote)),
+                asyncio.create_task(_remote_to_browser(websocket, remote)),
+            }
+            done, pending = await asyncio.wait(tasks, return_when=asyncio.FIRST_COMPLETED)
+            for task in pending:
+                task.cancel()
+            for task in done:
+                task.result()
+            with suppress(Exception):
+                await remote.close()
+    except Exception:
+        return
+    finally:
+        with suppress(RuntimeError):
+            await websocket.close()
+
+
+router.api_route(
+    "/workspace-proxy/workspace/{workspace_id}/port/{port}",
+    methods=HTTP_METHODS,
+)(_proxy_workspace_port_http)
+router.api_route(
+    "/workspace-proxy/workspace/{workspace_id}/port/{port}/{path:path}",
+    methods=HTTP_METHODS,
+)(_proxy_workspace_port_http)
+router.websocket("/workspace-proxy/workspace/{workspace_id}/port/{port}")(_proxy_workspace_port_websocket)
+router.websocket("/workspace-proxy/workspace/{workspace_id}/port/{port}/{path:path}")(_proxy_workspace_port_websocket)
+
+
+@router.options("/artifacts/{artifact_id}/content")
+@router.options("/artifacts/{artifact_id}/content/")
+@router.options("/artifacts/{artifact_id}/content/{asset_path:path}")
+async def options_artifact_content(artifact_id: str, asset_path: str | None = None):
+    return Response(status_code=204, headers=_artifact_content_headers())
+
+
+def _workspace_port_payload_target(payload: dict, asset_path: str | None = None) -> tuple[int, str]:
+    config = payload.get("workspacePort")
+    if not isinstance(config, dict):
+        raise HTTPException(400, "iframe artifact requires payload.workspacePort")
+    port = config.get("port")
+    if isinstance(port, bool) or not isinstance(port, int) or port < 1 or port > 65535:
+        raise HTTPException(400, "iframe workspacePort.port must be an integer from 1 to 65535")
+    raw_path = config.get("path")
+    if raw_path is not None and not isinstance(raw_path, str):
+        raise HTTPException(400, "iframe workspacePort.path must be a string")
+    entry = (raw_path or "").strip("/")
+    if not asset_path:
+        return port, entry
+    if entry.endswith("/"):
+        return port, (PurePosixPath(entry) / asset_path).as_posix()
+    return port, (PurePosixPath(entry).parent / asset_path).as_posix() if entry else asset_path
+
+
 @router.get("/artifacts/{artifact_id}/content")
 @router.get("/artifacts/{artifact_id}/content/")
 @router.get("/artifacts/{artifact_id}/content/{asset_path:path}")
@@ -611,11 +783,20 @@ async def get_artifact_content(artifact_id: str, asset_path: str | None = None):
     if artifact.type != "iframe":
         raise HTTPException(400, "artifact is not an iframe")
     payload = artifact.payload
-    if not isinstance(payload, dict) or not isinstance(payload.get("path"), str):
-        raise HTTPException(400, "iframe artifact requires payload.path")
+    if not isinstance(payload, dict):
+        raise HTTPException(400, "iframe artifact requires payload")
     session = db.get_session(artifact.session_id)
     if session is None:
         raise HTTPException(404, "artifact session not found")
+    if "workspacePort" in payload:
+        try:
+            await workspace_service.require_workspace_proxy()
+        except RuntimeError as exc:
+            raise HTTPException(503, str(exc)) from exc
+        port, path = _workspace_port_payload_target(payload, asset_path)
+        return RedirectResponse(workspace_service.local_workspace_proxy_url(session.workspace_id, port, path), status_code=307)
+    if not isinstance(payload.get("path"), str):
+        raise HTTPException(400, "iframe artifact requires payload.path")
     try:
         relative_path = workspace_service.resolve_artifact_asset(payload["path"], asset_path)
     except ValueError as exc:

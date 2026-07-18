@@ -7,6 +7,7 @@ from fastapi import FastAPI
 import uvicorn
 
 import bridge_client
+from artifact_bridge import artifact_bridge_response
 import db
 import mcp_server
 from routes import router
@@ -40,6 +41,11 @@ app.mount("/mcp", mcp_server.mcp.streamable_http_app())
 @app.get("/health")
 def health() -> dict[str, str]:
     return {"status": "ok"}
+
+
+@app.get("/artifact-bridge-v1.js")
+def artifact_bridge():
+    return artifact_bridge_response()
 
 
 def main() -> None:
