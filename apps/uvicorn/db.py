@@ -1,7 +1,4 @@
-"""SQLite 持久化：sessions / messages / files / artifacts。
-
-桌面单用户场景，stdlib sqlite3 + 全局锁足够；所有 JSON 列存 camelCase wire 格式。
-"""
+"""SQLite persistence for sessions, messages, artifacts, and workspaces."""
 
 import json
 import os
@@ -65,6 +62,7 @@ CREATE TABLE IF NOT EXISTS sessions (
 CREATE TABLE IF NOT EXISTS workspaces (
     id TEXT PRIMARY KEY,
     name TEXT NOT NULL,
+    connection_id TEXT NOT NULL DEFAULT 'local',
     status TEXT NOT NULL DEFAULT 'active',
     created_at TEXT NOT NULL,
     updated_at TEXT NOT NULL
@@ -122,9 +120,17 @@ def _columns(conn: sqlite3.Connection, table: str) -> set[str]:
 def _migrate(conn: sqlite3.Connection) -> None:
     now = now_iso()
     default_id = "default"
+    if "connection_id" not in _columns(conn, "workspaces"):
+        conn.execute("ALTER TABLE workspaces ADD COLUMN connection_id TEXT NOT NULL DEFAULT 'local'")
+        import switch_profiles
+        conn.execute(
+            "UPDATE workspaces SET connection_id = ? WHERE connection_id = 'local'",
+            (switch_profiles.default_profile_id(),),
+        )
+    import switch_profiles
     conn.execute(
-        "INSERT OR IGNORE INTO workspaces (id, name, status, created_at, updated_at) VALUES (?, ?, 'active', ?, ?)",
-        (default_id, "默认工作区", now, now),
+        "INSERT OR IGNORE INTO workspaces (id, name, connection_id, status, created_at, updated_at) VALUES (?, ?, ?, 'active', ?, ?)",
+        (default_id, "Default workspace", switch_profiles.default_profile_id(), now, now),
     )
     if "workspace_id" not in _columns(conn, "sessions"):
         conn.execute("ALTER TABLE sessions ADD COLUMN workspace_id TEXT")
@@ -200,6 +206,7 @@ def _delete_artifacts_by_ids(conn: sqlite3.Connection, artifact_ids: list[str]) 
 def _row_to_workspace(row: sqlite3.Row) -> Workspace:
     return Workspace(
         id=row["id"], name=row["name"], status=row["status"],
+        connection_id=row["connection_id"],
         created_at=row["created_at"], updated_at=row["updated_at"],
     )
 
@@ -213,11 +220,11 @@ def get_workspace(workspace_id: str) -> Workspace | None:
     return _row_to_workspace(rows[0]) if rows else None
 
 
-def create_workspace(workspace_id: str, name: str, status: str = "active") -> Workspace:
+def create_workspace(workspace_id: str, name: str, status: str = "active", connection_id: str = "local") -> Workspace:
     now = now_iso()
     _execute(
-        "INSERT INTO workspaces (id, name, status, created_at, updated_at) VALUES (?, ?, ?, ?, ?)",
-        (workspace_id, name, status, now, now),
+        "INSERT INTO workspaces (id, name, connection_id, status, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)",
+        (workspace_id, name, connection_id, status, now, now),
     )
     return get_workspace(workspace_id)  # type: ignore[return-value]
 

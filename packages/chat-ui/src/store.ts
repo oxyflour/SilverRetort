@@ -11,6 +11,7 @@ import {
   SessionModel,
   Session,
   SlashCommand,
+  SwitchProfile,
   ToolCall,
   Workspace,
   WorkspaceCapability,
@@ -32,6 +33,7 @@ export interface ArtifactWorkspaceState {
 interface ChatState {
   client: ApiClient;
   workspaces: Workspace[];
+  switchProfiles: SwitchProfile[];
   workspaceCapability: WorkspaceCapability | null;
   currentWorkspaceId: string | null;
   collapsedWorkspaceIds: string[];
@@ -52,7 +54,7 @@ interface ChatState {
   refreshSessions: () => Promise<void>;
   refreshHermesControls: () => Promise<void>;
   refreshHermesUsage: (id?: string | null) => Promise<void>;
-  createWorkspace: (name: string) => Promise<void>;
+  createWorkspace: (name: string, connectionId?: string) => Promise<void>;
   renameWorkspace: (id: string, name: string) => Promise<void>;
   deleteWorkspace: (id: string) => Promise<void>;
   selectWorkspace: (id: string) => void;
@@ -399,6 +401,7 @@ export const useChatStore = create<ChatState>((set, get) => {
   return {
     client: new ApiClient(),
     workspaces: [],
+    switchProfiles: [],
     workspaceCapability: null,
     currentWorkspaceId: null,
     collapsedWorkspaceIds: [],
@@ -422,8 +425,9 @@ export const useChatStore = create<ChatState>((set, get) => {
         get().client.workspaceCapability(),
         get().client.listSessions(),
       ]);
+      const switchProfiles = await get().client.listSwitchProfiles().catch(() => []);
       const currentWorkspaceId = get().currentWorkspaceId ?? workspaces[0]?.id ?? null;
-      set({ workspaces, workspaceCapability: capability, sessions, currentWorkspaceId });
+      set({ workspaces, switchProfiles, workspaceCapability: capability, sessions, currentWorkspaceId });
       void get().refreshHermesControls();
       if (!get().currentSessionId && sessions.length > 0) {
         const first = sessions.find((session) => session.workspaceId === currentWorkspaceId) ?? sessions[0];
@@ -434,8 +438,8 @@ export const useChatStore = create<ChatState>((set, get) => {
     refreshHermesControls: async () => {
       try {
         const [commands, modelPayload, usage] = await Promise.all([
-          get().client.listSlashCommands(),
-          get().client.listHermesModels(),
+          get().client.listSlashCommands(get().currentSessionId, get().currentWorkspaceId),
+          get().client.listHermesModels(get().currentSessionId, get().currentWorkspaceId),
           get().client.getHermesUsage(get().currentSessionId).catch(() => null),
         ]);
         set({
@@ -468,8 +472,11 @@ export const useChatStore = create<ChatState>((set, get) => {
       }
     },
 
-    createWorkspace: async (name) => {
-      const workspace = await get().client.createWorkspace(name);
+    createWorkspace: async (name, connectionId) => {
+      const resolvedConnectionId =
+        connectionId ??
+        get().workspaces.find((workspace) => workspace.id === get().currentWorkspaceId)?.connectionId;
+      const workspace = await get().client.createWorkspace(name, resolvedConnectionId);
       set((state) => ({
         workspaces: [workspace, ...state.workspaces],
         currentWorkspaceId: workspace.id,

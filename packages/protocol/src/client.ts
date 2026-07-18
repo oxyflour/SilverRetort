@@ -28,6 +28,8 @@ import {
   SessionModel,
   SessionModelSchema,
   SetModelRequest,
+  SwitchProfile,
+  SwitchProfileSchema,
   SlashCommand,
   SlashCommandSchema,
 } from "./types";
@@ -66,12 +68,44 @@ export class ApiClient {
     return this.request(WorkspaceCapabilitySchema, "/api/workspaces/capability");
   }
 
-  listSlashCommands(): Promise<SlashCommand[]> {
-    return this.request(z.array(SlashCommandSchema), "/api/hermes/slash-commands");
+  listSwitchProfiles(): Promise<SwitchProfile[]> {
+    return this.request(z.array(SwitchProfileSchema), "/api/switch-profiles");
   }
 
-  listHermesModels(): Promise<HermesModelsResponse> {
-    return this.request(HermesModelsResponseSchema, "/api/hermes/models");
+  createSwitchProfile(body: {
+    name: string;
+    switchUrl: string;
+    hermesApiKey: string;
+  }): Promise<SwitchProfile> {
+    return this.request(SwitchProfileSchema, "/api/switch-profiles", {
+      method: "POST",
+      body: JSON.stringify(body),
+    });
+  }
+
+  updateSwitchProfile(
+    id: string,
+    body: { name: string; switchUrl: string; hermesApiKey?: string | null },
+  ): Promise<SwitchProfile> {
+    return this.request(SwitchProfileSchema, `/api/switch-profiles/${id}`, {
+      method: "PATCH",
+      body: JSON.stringify(body),
+    });
+  }
+
+  async deleteSwitchProfile(id: string): Promise<void> {
+    const res = await fetch(`${this.baseUrl}/api/switch-profiles/${id}`, {
+      method: "DELETE",
+    });
+    if (!res.ok) throw new Error(`DELETE switch profile failed: HTTP ${res.status}`);
+  }
+
+  listSlashCommands(sessionId?: string | null, workspaceId?: string | null): Promise<SlashCommand[]> {
+    return this.request(z.array(SlashCommandSchema), `/api/hermes/slash-commands${contextQuery(sessionId, workspaceId)}`);
+  }
+
+  listHermesModels(sessionId?: string | null, workspaceId?: string | null): Promise<HermesModelsResponse> {
+    return this.request(HermesModelsResponseSchema, `/api/hermes/models${contextQuery(sessionId, workspaceId)}`);
   }
 
   getHermesUsage(sessionId?: string | null): Promise<HermesUsageResponse> {
@@ -90,10 +124,10 @@ export class ApiClient {
     });
   }
 
-  createWorkspace(name: string): Promise<Workspace> {
+  createWorkspace(name: string, connectionId?: string): Promise<Workspace> {
     return this.request(WorkspaceSchema, "/api/workspaces", {
       method: "POST",
-      body: JSON.stringify({ name }),
+      body: JSON.stringify({ name, ...(connectionId ? { connectionId } : {}) }),
     });
   }
 
@@ -263,4 +297,12 @@ export class ApiClient {
 
 function encodePath(path: string): string {
   return path.split("/").map((part) => encodeURIComponent(part)).join("/");
+}
+
+function contextQuery(sessionId?: string | null, workspaceId?: string | null): string {
+  const params = new URLSearchParams();
+  if (sessionId) params.set("sessionId", sessionId);
+  if (workspaceId) params.set("workspaceId", workspaceId);
+  const query = params.toString();
+  return query ? `?${query}` : "";
 }

@@ -4,6 +4,7 @@ import { useState, type ReactNode } from "react";
 import {
   ChevronDown,
   ChevronRight,
+  Cloud,
   FolderPlus,
   MessageSquarePlus,
   PencilLine,
@@ -19,26 +20,63 @@ export function SessionSidebar() {
   const [draft, setDraft] = useState("");
   const [creating, setCreating] = useState(false);
   const [createName, setCreateName] = useState("New workspace");
+  const [createConnectionId, setCreateConnectionId] = useState<string | undefined>(undefined);
+  const [connectionMenuOpen, setConnectionMenuOpen] = useState(false);
   const [deletingId, setDeletingId] = useState<string | null>(null);
   const [expandedSessionCounts, setExpandedSessionCounts] = useState<Record<string, number>>({});
   const available = Boolean(
     store.workspaceCapability?.supported && store.workspaceCapability.writable,
   );
+  const currentWorkspace = store.workspaces.find(
+    (workspace) => workspace.id === store.currentWorkspaceId,
+  );
+  const defaultConnectionId = currentWorkspace?.connectionId;
 
   return (
     <div className="flex h-full flex-col border-r border-neutral-200 bg-neutral-50 dark:border-neutral-800 dark:bg-neutral-900">
       <div className="space-y-2 p-2">
-        <button
-          disabled={!available}
-          onClick={() => {
-            setCreateName("New workspace");
-            setCreating(true);
-          }}
-          className="flex w-full items-center justify-center gap-2 rounded-md border border-neutral-300 px-3 py-1.5 text-sm hover:bg-neutral-200 disabled:cursor-not-allowed disabled:opacity-40 dark:border-neutral-700 dark:hover:bg-neutral-800"
-        >
-          <AppIcon icon={FolderPlus} className="h-4 w-4" />
-          New workspace
-        </button>
+        <div className="relative flex">
+          <button
+            disabled={!available}
+            onClick={() => {
+              setCreateName("New workspace");
+              setCreateConnectionId(defaultConnectionId);
+              setCreating(true);
+            }}
+            className="flex min-w-0 flex-1 items-center justify-center gap-2 rounded-l-md border border-neutral-300 px-3 py-1.5 text-sm hover:bg-neutral-200 disabled:cursor-not-allowed disabled:opacity-40 dark:border-neutral-700 dark:hover:bg-neutral-800"
+          >
+            <AppIcon icon={FolderPlus} className="h-4 w-4" />
+            New workspace
+          </button>
+          <button
+            disabled={!available}
+            title="Choose connection"
+            onClick={() => setConnectionMenuOpen((open) => !open)}
+            className="grid w-9 place-items-center rounded-r-md border border-l-0 border-neutral-300 text-neutral-500 hover:bg-neutral-200 disabled:cursor-not-allowed disabled:opacity-40 dark:border-neutral-700 dark:hover:bg-neutral-800"
+          >
+            <AppIcon icon={ChevronDown} className="h-4 w-4" />
+          </button>
+          {connectionMenuOpen && (
+            <div className="absolute left-0 right-0 top-full z-20 mt-1 overflow-hidden rounded-md border border-neutral-200 bg-white py-1 shadow-lg dark:border-neutral-700 dark:bg-neutral-900">
+              {store.switchProfiles.map((profile) => (
+                <button
+                  key={profile.id}
+                  className="flex w-full items-center gap-2 px-3 py-2 text-left text-sm hover:bg-neutral-100 dark:hover:bg-neutral-800"
+                  title={profile.switchUrl || profile.name}
+                  onClick={() => {
+                    setConnectionMenuOpen(false);
+                    setCreateName("New workspace");
+                    setCreateConnectionId(profile.id);
+                    setCreating(true);
+                  }}
+                >
+                  {profile.mode === "remote" && <AppIcon icon={Cloud} className="h-4 w-4 text-neutral-500" />}
+                  <span className="min-w-0 flex-1 truncate">{profile.name}</span>
+                </button>
+              ))}
+            </div>
+          )}
+        </div>
         {!available && store.workspaceCapability && (
           <p className="px-1 text-xs text-amber-600">
             Workspace support is unavailable in the current Hermes build.
@@ -97,11 +135,19 @@ export function SessionSidebar() {
                   />
                 ) : (
                   <button
-                    className="min-w-0 flex-1 truncate text-left font-medium"
+                    className="flex min-w-0 flex-1 items-center gap-1.5 text-left font-medium"
                     onClick={() => store.selectWorkspace(workspace.id)}
                     title={workspace.name}
                   >
-                    {workspace.name}
+                    {workspace.switchMode === "remote" && (
+                      <span title={workspace.switchUrl}>
+                        <AppIcon
+                          icon={Cloud}
+                          className="h-3.5 w-3.5 shrink-0 text-neutral-500"
+                        />
+                      </span>
+                    )}
+                    <span className="min-w-0 truncate">{workspace.name}</span>
                   </button>
                 )}
                 <span className="ml-1 flex shrink-0 items-center gap-1 opacity-0 transition-opacity pointer-events-none group-hover:opacity-100 group-hover:pointer-events-auto">
@@ -169,19 +215,25 @@ export function SessionSidebar() {
             onKeyDown={(event) => {
               if (event.key === "Enter" && createName.trim()) {
                 void store
-                  .createWorkspace(createName.trim())
+                  .createWorkspace(createName.trim(), createConnectionId)
                   .then(() => setCreating(false));
               }
               if (event.key === "Escape") setCreating(false);
             }}
             className="w-full rounded border border-neutral-300 bg-white px-2 py-1.5 text-sm dark:border-neutral-600 dark:bg-neutral-800"
           />
+          <p className="text-xs text-neutral-500">
+            Connection:{" "}
+            {store.switchProfiles.find((profile) => profile.id === createConnectionId)?.name ??
+              currentWorkspace?.connectionId ??
+              "Local"}
+          </p>
           <DialogActions
             onCancel={() => setCreating(false)}
             onConfirm={() => {
               if (createName.trim()) {
                 void store
-                  .createWorkspace(createName.trim())
+                  .createWorkspace(createName.trim(), createConnectionId)
                   .then(() => setCreating(false));
               }
             }}

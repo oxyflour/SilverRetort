@@ -67,6 +67,13 @@ BUILTIN_RENDER_DEFINITIONS: list[RenderDefinition] = [
 _render_definitions: list[RenderDefinition] = list(BUILTIN_RENDER_DEFINITIONS)
 
 
+def _merge_with_builtin_renderers(renderers: list[RenderDefinition]) -> list[RenderDefinition]:
+    merged = {renderer["type"]: renderer for renderer in BUILTIN_RENDER_DEFINITIONS}
+    for renderer in renderers:
+        merged[renderer["type"]] = renderer
+    return list(merged.values())
+
+
 def set_render_types(types: list[str]) -> None:
     set_render_definitions([{"type": type} for type in types])
 
@@ -78,7 +85,7 @@ def set_render_definitions(renderers: list[RenderDefinition]) -> None:
         for renderer in renderers
         if isinstance(renderer, dict) and isinstance(renderer.get("type"), str) and renderer["type"]
     ]
-    _render_definitions = valid_renderers or list(BUILTIN_RENDER_DEFINITIONS)
+    _render_definitions = _merge_with_builtin_renderers(valid_renderers)
 
 
 def supported_render_types() -> list[str]:
@@ -115,11 +122,12 @@ def validate_iframe_payload(session_id: str, payload: Any) -> str | None:
         path = config.get("path")
         if path is not None and not isinstance(path, str):
             return "error: iframe workspacePort.path must be a string"
-        proxy_error = workspace_service.require_workspace_proxy_sync()
+        session = db.get_session(session_id)
+        if session is None:
+            return f"error: session not found: {session_id}"
+        proxy_error = workspace_service.require_workspace_proxy_sync(session.workspace_id)
         if proxy_error is not None:
             return f"error: {proxy_error}"
-        if db.get_session(session_id) is None:
-            return f"error: session not found: {session_id}"
         return None
     if set(payload) != {"path"} or not isinstance(payload.get("path"), str):
         return "error: iframe payload must be {path: <workspace-relative path>}, {url: <http(s) URL>}, or {workspacePort: {port, path?}}"

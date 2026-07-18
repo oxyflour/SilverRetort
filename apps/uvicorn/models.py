@@ -23,6 +23,10 @@ class Workspace(ApiModel):
     id: str
     name: str
     status: Literal["active", "creating", "deleting", "error"] = "active"
+    connection_id: str = "local"
+    switch_mode: Literal["local", "remote"] = "local"
+    switch_url: str = ""
+    has_hermes_api_key: bool = False
     created_at: str
     updated_at: str
 
@@ -112,10 +116,31 @@ class UpdateSessionRequest(ApiModel):
 
 class CreateWorkspaceRequest(ApiModel):
     name: str
+    connection_id: str | None = None
 
 
 class UpdateWorkspaceRequest(ApiModel):
     name: str
+
+
+class SwitchProfile(ApiModel):
+    id: str
+    name: str
+    mode: Literal["local", "remote"]
+    switch_url: str = ""
+    has_hermes_api_key: bool = False
+
+
+class CreateSwitchProfileRequest(ApiModel):
+    name: str
+    switch_url: str
+    hermes_api_key: str
+
+
+class UpdateSwitchProfileRequest(ApiModel):
+    name: str
+    switch_url: str
+    hermes_api_key: str | None = None
 
 
 class WorkspaceCapability(ApiModel):

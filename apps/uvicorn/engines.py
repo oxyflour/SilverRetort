@@ -11,6 +11,8 @@ import uuid
 from pathlib import Path
 from typing import Any, AsyncGenerator, Protocol
 
+import db
+import switch_profiles
 from models import Message
 
 
@@ -183,6 +185,16 @@ class MockEngine:
             yield {"kind": "text", "delta": "\n\n已生成一个示例 artifact，见右侧面板。"}
 
 
+_engine_cache: dict[tuple[str, str, str], Engine] = {}
+
+
+def _mock_engine() -> Engine:
+    key = ("mock", "", "")
+    if key not in _engine_cache:
+        _engine_cache[key] = MockEngine()
+    return _engine_cache[key]
+
+
 def create_engine() -> Engine:
     """按环境选择引擎：配置了 HERMES_URL 用 hermes，否则 mock 兜底。"""
     hermes_url = os.getenv("HERMES_URL")
@@ -195,3 +207,22 @@ def create_engine() -> Engine:
             model=os.getenv("HERMES_MODEL", "hermes-agent"),
         )
     return MockEngine()
+
+
+def create_engine_for_workspace(workspace_id: str | None) -> Engine:
+    workspace = db.get_workspace(workspace_id) if workspace_id else None
+    connection = switch_profiles.connection_for_profile(
+        workspace.connection_id if workspace is not None else None
+    )
+    if connection.mode == "mock" or not connection.switch_url:
+        return _mock_engine()
+    key = (connection.mode, connection.switch_url, connection.api_key)
+    if key not in _engine_cache:
+        from hermes_client import HermesEngine
+
+        _engine_cache[key] = HermesEngine(
+            base_url=connection.switch_url,
+            api_key=connection.api_key,
+            model=os.getenv("HERMES_MODEL", "hermes-agent"),
+        )
+    return _engine_cache[key]
