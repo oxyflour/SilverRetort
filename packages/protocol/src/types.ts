@@ -69,6 +69,30 @@ export const SessionSchema = z.object({
 });
 export type Session = z.infer<typeof SessionSchema>;
 
+export const MessageSearchHitSchema = z.object({
+  sessionId: z.string(),
+  messageId: z.string(),
+  role: z.enum(["user", "assistant"]),
+  createdAt: z.string(),
+  snippet: z.string(),
+});
+export type MessageSearchHit = z.infer<typeof MessageSearchHitSchema>;
+
+export const SessionMessageSearchResultSchema = z.object({
+  sessionId: z.string(),
+  totalHits: z.number().int().nonnegative(),
+  hits: z.array(MessageSearchHitSchema).default([]),
+});
+export type SessionMessageSearchResult = z.infer<
+  typeof SessionMessageSearchResultSchema
+>;
+
+export const MessageSearchResponseSchema = z.object({
+  query: z.string(),
+  results: z.array(SessionMessageSearchResultSchema).default([]),
+});
+export type MessageSearchResponse = z.infer<typeof MessageSearchResponseSchema>;
+
 const NullableStringSchema = z.string().nullish();
 
 export const ToolCallSchema = z.object({

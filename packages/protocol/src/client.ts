@@ -8,6 +8,8 @@ import {
   Attachment,
   AttachmentSchema,
   Message,
+  MessageSearchResponse,
+  MessageSearchResponseSchema,
   MessageSchema,
   RestartMessageRequest,
   SendChatRequest,
@@ -179,6 +181,13 @@ export class ApiClient {
     return this.request(
       z.array(MessageSchema),
       `/api/sessions/${sessionId}/messages?compact=true`,
+    );
+  }
+
+  searchMessages(query: string): Promise<MessageSearchResponse> {
+    return this.request(
+      MessageSearchResponseSchema,
+      `/api/messages/search?q=${encodeURIComponent(query)}`,
     );
   }
 
