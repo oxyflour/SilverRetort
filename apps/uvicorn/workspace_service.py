@@ -104,7 +104,9 @@ def remote_file_url(workspace_id: str, relative_path: str) -> str:
 def _workspace_proxy_path(workspace_id: str, port: int, path: str = "") -> str:
     suffix = "/".join(quote(part, safe="") for part in path.strip("/").split("/") if part)
     base = f"/workspace-proxy/workspace/{quote(workspace_id)}/port/{port}"
-    return f"{base}/{suffix}" if suffix else base
+    if not suffix:
+        return f"{base}/"
+    return f"{base}/{suffix}/" if path.endswith("/") else f"{base}/{suffix}"
 
 
 def remote_workspace_proxy_url(workspace_id: str, port: int, path: str = "", query: str = "") -> str:
@@ -118,9 +120,10 @@ def remote_workspace_proxy_ws_url(workspace_id: str, port: int, path: str = "", 
     return urlunsplit((scheme, parsed.netloc, parsed.path, parsed.query, parsed.fragment))
 
 
-def local_workspace_proxy_url(workspace_id: str, port: int, path: str = "") -> str:
+def local_workspace_proxy_url(workspace_id: str, port: int, path: str = "", query: str = "") -> str:
     listen_port = int(os.getenv("LISTEN_PORT", "23001"))
-    return f"http://127.0.0.1:{listen_port}/api{_workspace_proxy_path(workspace_id, port, path)}"
+    url = f"http://127.0.0.1:{listen_port}/api{_workspace_proxy_path(workspace_id, port, path)}"
+    return f"{url}?{query}" if query else url
 
 
 def _has_workspace_proxy(payload: dict) -> bool:
