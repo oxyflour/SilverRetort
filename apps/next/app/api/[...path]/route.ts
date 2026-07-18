@@ -42,6 +42,7 @@ async function proxy(
     duplex: hasBody ? "half" : undefined,
     signal: req.signal,
     cache: "no-store",
+    redirect: "manual",
   });
 
   const responseHeaders = new Headers();
@@ -55,4 +56,12 @@ async function proxy(
   return new Response(res.body, { status: res.status, headers: responseHeaders });
 }
 
-export { proxy as GET, proxy as POST, proxy as PATCH, proxy as PUT, proxy as DELETE };
+export {
+  proxy as DELETE,
+  proxy as GET,
+  proxy as HEAD,
+  proxy as OPTIONS,
+  proxy as PATCH,
+  proxy as POST,
+  proxy as PUT,
+};

@@ -870,18 +870,32 @@ def _workspace_port_payload_target(payload: dict, asset_path: str | None = None)
     raw_path = config.get("path")
     if raw_path is not None and not isinstance(raw_path, str):
         raise HTTPException(400, "iframe workspacePort.path must be a string")
-    entry = (raw_path or "").strip("/")
+    raw_entry = raw_path or ""
+    entry = raw_entry.strip("/")
     if not asset_path:
-        return port, entry
-    if entry.endswith("/"):
+        return port, f"{entry}/" if entry and raw_entry.endswith("/") else entry
+    if raw_entry.endswith("/"):
         return port, (PurePosixPath(entry) / asset_path).as_posix()
     return port, (PurePosixPath(entry).parent / asset_path).as_posix() if entry else asset_path
 
 
-@router.get("/artifacts/{artifact_id}/content")
-@router.get("/artifacts/{artifact_id}/content/")
-@router.get("/artifacts/{artifact_id}/content/{asset_path:path}")
-async def get_artifact_content(artifact_id: str, asset_path: str | None = None):
+@router.api_route(
+    "/artifacts/{artifact_id}/content",
+    methods=["DELETE", "GET", "HEAD", "PATCH", "POST", "PUT"],
+)
+@router.api_route(
+    "/artifacts/{artifact_id}/content/",
+    methods=["DELETE", "GET", "HEAD", "PATCH", "POST", "PUT"],
+)
+@router.api_route(
+    "/artifacts/{artifact_id}/content/{asset_path:path}",
+    methods=["DELETE", "GET", "HEAD", "PATCH", "POST", "PUT"],
+)
+async def get_artifact_content(
+    artifact_id: str,
+    request: Request,
+    asset_path: str | None = None,
+):
     artifact = db.get_artifact(artifact_id)
     if artifact is None:
         raise HTTPException(404, "artifact not found")
@@ -899,7 +913,17 @@ async def get_artifact_content(artifact_id: str, asset_path: str | None = None):
         except RuntimeError as exc:
             raise HTTPException(503, str(exc)) from exc
         port, path = _workspace_port_payload_target(payload, asset_path)
-        return RedirectResponse(workspace_service.local_workspace_proxy_url(session.workspace_id, port, path), status_code=307)
+        return RedirectResponse(
+            workspace_service.local_workspace_proxy_url(
+                session.workspace_id,
+                port,
+                path,
+                request.url.query,
+            ),
+            status_code=307,
+        )
+    if request.method not in {"GET", "HEAD"}:
+        raise HTTPException(405, "iframe file artifacts only support GET and HEAD")
     if not isinstance(payload.get("path"), str):
         raise HTTPException(400, "iframe artifact requires payload.path")
     try:
