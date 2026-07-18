@@ -79,14 +79,14 @@ export function ChatApp() {
         {sidebarOpen && (
           <>
             <Panel
-              className="dark:bg-neutral-900"
+              className="dark:bg-neutral-900 bg-neutral-50"
               id="sidebar"
               order={1}
               defaultSize={18}
               minSize={12}
               maxSize={32}
             >
-              <div className="h-full pt-10">
+              <div className="h-full">
                 <SessionSidebar />
               </div>
             </Panel>

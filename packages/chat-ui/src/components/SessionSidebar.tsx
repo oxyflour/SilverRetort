@@ -8,7 +8,9 @@ import {
   FolderPlus,
   MessageSquarePlus,
   PencilLine,
+  Search,
   Trash2,
+  X,
 } from "lucide-react";
 import { UserSettingsPanel } from "silverretort-setting-ui";
 import { useChatStore } from "../store";
@@ -24,6 +26,7 @@ export function SessionSidebar() {
   const [connectionMenuOpen, setConnectionMenuOpen] = useState(false);
   const [deletingId, setDeletingId] = useState<string | null>(null);
   const [expandedSessionCounts, setExpandedSessionCounts] = useState<Record<string, number>>({});
+  const [searchQuery, setSearchQuery] = useState("");
   const available = Boolean(
     store.workspaceCapability?.supported && store.workspaceCapability.writable,
   );
@@ -31,10 +34,69 @@ export function SessionSidebar() {
     (workspace) => workspace.id === store.currentWorkspaceId,
   );
   const defaultConnectionId = currentWorkspace?.connectionId;
+  const normalizedSearchQuery = searchQuery.trim().toLowerCase();
+  const searching = normalizedSearchQuery.length > 0;
+  const workspaceViews = store.workspaces
+    .map((workspace) => {
+      const sessions = store.sessions.filter(
+        (session) => session.workspaceId === workspace.id,
+      );
+      const workspaceMatches = workspace.name
+        .toLowerCase()
+        .includes(normalizedSearchQuery);
+      const matchingSessions = searching
+        ? sessions.filter((session) =>
+            session.title.toLowerCase().includes(normalizedSearchQuery),
+          )
+        : sessions;
+      const visibleSessionCount = expandedSessionCounts[workspace.id] ?? 5;
+      const visibleSessions = searching
+        ? workspaceMatches
+          ? sessions
+          : matchingSessions
+        : sessions.slice(0, visibleSessionCount);
+      const hiddenSessionCount = searching
+        ? 0
+        : sessions.length - visibleSessions.length;
+
+      return {
+        workspace,
+        sessions,
+        collapsed: store.collapsedWorkspaceIds.includes(workspace.id),
+        visibleSessionCount,
+        visibleSessions,
+        hiddenSessionCount,
+        running: sessions.some((session) => store.buckets[session.id]?.runId != null),
+        matched: !searching || workspaceMatches || visibleSessions.length > 0,
+      };
+    })
+    .filter((view) => view.matched);
 
   return (
     <div className="flex h-full flex-col border-r border-neutral-200 bg-neutral-50 dark:border-neutral-800 dark:bg-neutral-900">
       <div className="space-y-2 p-2">
+        <div className="relative ml-10">
+          <AppIcon
+            icon={Search}
+            className="pointer-events-none absolute left-2.5 top-1/2 h-4 w-4 -translate-y-1/2 text-neutral-400"
+          />
+          <input
+            value={searchQuery}
+            onChange={(event) => setSearchQuery(event.target.value)}
+            placeholder="Search sessions"
+            className="h-9 w-full rounded-md border border-neutral-300 bg-white px-8 text-sm outline-none transition-colors placeholder:text-neutral-400 focus:border-neutral-400 dark:border-neutral-700 dark:bg-neutral-900 dark:focus:border-neutral-500"
+          />
+          {searchQuery && (
+            <button
+              title="Clear search"
+              aria-label="Clear search"
+              onClick={() => setSearchQuery("")}
+              className="absolute right-1.5 top-1/2 grid h-6 w-6 -translate-y-1/2 place-items-center rounded text-neutral-500 hover:bg-neutral-100 hover:text-neutral-900 dark:hover:bg-neutral-800 dark:hover:text-neutral-100"
+            >
+              <AppIcon icon={X} className="h-4 w-4" />
+            </button>
+          )}
+        </div>
         <div className="relative flex">
           <button
             disabled={!available}
@@ -84,17 +146,21 @@ export function SessionSidebar() {
         )}
       </div>
       <div className="flex-1 overflow-y-auto px-2 pb-2">
-        {store.workspaces.map((workspace) => {
-          const sessions = store.sessions.filter(
-            (session) => session.workspaceId === workspace.id,
-          );
-          const collapsed = store.collapsedWorkspaceIds.includes(workspace.id);
-          const visibleSessionCount = expandedSessionCounts[workspace.id] ?? 5;
-          const visibleSessions = sessions.slice(0, visibleSessionCount);
-          const hiddenSessionCount = sessions.length - visibleSessions.length;
-          const running = sessions.some(
-            (session) => store.buckets[session.id]?.runId != null,
-          );
+        {searching && workspaceViews.length === 0 && (
+          <div className="px-2 py-6 text-center text-sm text-neutral-500 dark:text-neutral-400">
+            No sessions found
+          </div>
+        )}
+        {workspaceViews.map((view) => {
+          const {
+            workspace,
+            collapsed,
+            visibleSessionCount,
+            visibleSessions,
+            hiddenSessionCount,
+            running,
+          } = view;
+          const displayCollapsed = searching ? false : collapsed;
           return (
             <section key={workspace.id} className="mb-2">
               <div
@@ -106,11 +172,19 @@ export function SessionSidebar() {
               >
                 <button
                   className="rounded p-1 text-neutral-500 hover:text-neutral-900 dark:hover:text-neutral-100"
-                  onClick={() => store.toggleWorkspace(workspace.id)}
-                  title={collapsed ? "Expand workspace" : "Collapse workspace"}
+                  onClick={() => {
+                    if (!searching) store.toggleWorkspace(workspace.id);
+                  }}
+                  title={
+                    searching
+                      ? "Workspace expanded in search"
+                      : displayCollapsed
+                        ? "Expand workspace"
+                        : "Collapse workspace"
+                  }
                 >
                   <AppIcon
-                    icon={collapsed ? ChevronRight : ChevronDown}
+                    icon={displayCollapsed ? ChevronRight : ChevronDown}
                     className="h-4 w-4"
                   />
                 </button>
@@ -180,7 +254,7 @@ export function SessionSidebar() {
                   </button>
                 </span>
               </div>
-              {!collapsed &&
+              {!displayCollapsed &&
                 visibleSessions.map((session) => (
                   <SessionRow
                     key={session.id}
@@ -188,7 +262,7 @@ export function SessionSidebar() {
                     title={session.title}
                   />
                 ))}
-              {!collapsed && hiddenSessionCount > 0 && (
+              {!displayCollapsed && hiddenSessionCount > 0 && (
                 <button
                   className="ml-4 mt-1 w-[calc(100%-1rem)] rounded-md px-2 py-1.5 text-left text-sm text-neutral-500 hover:bg-neutral-100 hover:text-neutral-900 dark:text-neutral-400 dark:hover:bg-neutral-800 dark:hover:text-neutral-100"
                   onClick={() =>
