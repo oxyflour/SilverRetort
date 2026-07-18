@@ -39,6 +39,25 @@ class Session(ApiModel):
     updated_at: str
 
 
+class MessageSearchHit(ApiModel):
+    session_id: str
+    message_id: str
+    role: Literal["user", "assistant"]
+    created_at: str
+    snippet: str
+
+
+class SessionMessageSearchResult(ApiModel):
+    session_id: str
+    total_hits: int
+    hits: list[MessageSearchHit] = Field(default_factory=list)
+
+
+class MessageSearchResponse(ApiModel):
+    query: str
+    results: list[SessionMessageSearchResult] = Field(default_factory=list)
+
+
 class ToolCall(ApiModel):
     id: str
     name: str

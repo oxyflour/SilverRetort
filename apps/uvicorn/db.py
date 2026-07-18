@@ -16,7 +16,9 @@ from models import (
     ArtifactInputPart,
     Attachment,
     Message,
+    MessageSearchHit,
     Session,
+    SessionMessageSearchResult,
     TextPart,
     Workspace,
 )
@@ -72,6 +74,7 @@ CREATE TABLE IF NOT EXISTS messages (
     session_id TEXT NOT NULL,
     role TEXT NOT NULL,
     parts TEXT NOT NULL DEFAULT '[]',
+    text_content TEXT NOT NULL DEFAULT '',
     attachments TEXT NOT NULL DEFAULT '[]',
     artifact_ids TEXT NOT NULL DEFAULT '[]',
     status TEXT NOT NULL DEFAULT 'complete',
@@ -117,6 +120,29 @@ def _columns(conn: sqlite3.Connection, table: str) -> set[str]:
     return {str(row["name"]) for row in conn.execute(f"PRAGMA table_info({table})")}
 
 
+def _text_from_parts_payload(parts: object) -> str:
+    if not isinstance(parts, list):
+        return ""
+    texts: list[str] = []
+    for part in parts:
+        if isinstance(part, dict):
+            if part.get("type") == "text" and isinstance(part.get("text"), str):
+                texts.append(part["text"])
+            continue
+        if getattr(part, "type", None) == "text":
+            text = getattr(part, "text", "")
+            if isinstance(text, str):
+                texts.append(text)
+    return "\n".join(texts)
+
+
+def _text_from_parts_json(parts_json: str) -> str:
+    try:
+        return _text_from_parts_payload(json.loads(parts_json))
+    except (TypeError, json.JSONDecodeError):
+        return ""
+
+
 def _migrate(conn: sqlite3.Connection) -> None:
     now = now_iso()
     default_id = "default"
@@ -136,6 +162,15 @@ def _migrate(conn: sqlite3.Connection) -> None:
         conn.execute("ALTER TABLE sessions ADD COLUMN workspace_id TEXT")
     conn.execute("UPDATE sessions SET workspace_id = ? WHERE workspace_id IS NULL OR workspace_id = ''", (default_id,))
     conn.execute("CREATE INDEX IF NOT EXISTS idx_sessions_workspace ON sessions(workspace_id, updated_at)")
+    if "text_content" not in _columns(conn, "messages"):
+        conn.execute("ALTER TABLE messages ADD COLUMN text_content TEXT NOT NULL DEFAULT ''")
+    for row in conn.execute("SELECT id, parts FROM messages WHERE text_content = '' AND parts != '[]'").fetchall():
+        text_content = _text_from_parts_json(row["parts"])
+        if text_content:
+            conn.execute(
+                "UPDATE messages SET text_content = ? WHERE id = ?",
+                (text_content, row["id"]),
+            )
     conn.execute("DROP TABLE IF EXISTS files")
     for row in conn.execute("SELECT id, attachments FROM messages WHERE attachments != '[]'").fetchall():
         attachments = json.loads(row["attachments"])
@@ -183,7 +218,25 @@ def _dump_string_list(values: list[str]) -> str:
 
 
 def _message_text(message: Message) -> str:
-    return "".join(part.text for part in message.parts if getattr(part, "type", None) == "text")
+    return _text_from_parts_payload(message.parts)
+
+
+def _search_snippet(text: str, query: str, limit: int = 160) -> str:
+    normalized_text = " ".join(text.split())
+    if len(normalized_text) <= limit:
+        return normalized_text
+    index = normalized_text.lower().find(query.lower())
+    if index < 0:
+        return normalized_text[: limit - 1].rstrip() + "..."
+    context = max(20, (limit - len(query)) // 2)
+    start = max(0, index - context)
+    end = min(len(normalized_text), index + len(query) + context)
+    snippet = normalized_text[start:end].strip()
+    if start > 0:
+        snippet = "..." + snippet
+    if end < len(normalized_text):
+        snippet += "..."
+    return snippet
 
 
 def _delete_messages_by_ids(conn: sqlite3.Connection, message_ids: list[str]) -> None:
@@ -322,13 +375,14 @@ def get_message(session_id: str, message_id: str) -> Message | None:
 
 def insert_message(message: Message) -> None:
     _execute(
-        "INSERT INTO messages (id, session_id, role, parts, attachments, artifact_ids, status, created_at)"
-        " VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+        "INSERT INTO messages (id, session_id, role, parts, text_content, attachments, artifact_ids, status, created_at)"
+        " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
         (
             message.id,
             message.session_id,
             message.role,
             _dump_parts(message),
+            _message_text(message),
             _dump_attachments(message),
             _dump_string_list(message.artifact_ids),
             message.status,
@@ -362,13 +416,14 @@ def insert_message_with_pending_artifact_contexts(
             )
             conn.execute(
                 "INSERT INTO messages "
-                "(id, session_id, role, parts, attachments, artifact_ids, status, created_at) "
-                "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+                "(id, session_id, role, parts, text_content, attachments, artifact_ids, status, created_at) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
                 (
                     message.id,
                     message.session_id,
                     message.role,
                     _dump_parts(message),
+                    _message_text(message),
                     _dump_attachments(message),
                     _dump_string_list(message.artifact_ids),
                     message.status,
@@ -394,9 +449,10 @@ def insert_message_with_pending_artifact_contexts(
 
 def update_message(message: Message) -> None:
     _execute(
-        "UPDATE messages SET parts = ?, artifact_ids = ?, status = ? WHERE id = ?",
+        "UPDATE messages SET parts = ?, text_content = ?, artifact_ids = ?, status = ? WHERE id = ?",
         (
             _dump_parts(message),
+            _message_text(message),
             _dump_string_list(message.artifact_ids),
             message.status,
             message.id,
@@ -449,9 +505,10 @@ def restart_message(session_id: str, message_id: str, text: str) -> RestartMessa
             )
 
             conn.execute(
-                "UPDATE messages SET parts = ?, artifact_ids = ?, status = ? WHERE id = ?",
+                "UPDATE messages SET parts = ?, text_content = ?, artifact_ids = ?, status = ? WHERE id = ?",
                 (
                     _dump_parts(target_message),
+                    _message_text(target_message),
                     _dump_string_list(target_message.artifact_ids),
                     target_message.status,
                     target_message.id,
@@ -470,6 +527,49 @@ def restart_message(session_id: str, message_id: str, text: str) -> RestartMessa
         old_text=old_text,
         was_first_user_message=target_index == first_user_index,
     )
+
+
+def search_messages(
+    query: str,
+    max_sessions: int = 50,
+    max_hits_per_session: int = 3,
+) -> list[SessionMessageSearchResult]:
+    normalized_query = query.strip()
+    if not normalized_query:
+        return []
+    rows = _query(
+        "SELECT messages.id AS message_id, messages.session_id, messages.role, "
+        "messages.text_content, messages.created_at "
+        "FROM messages "
+        "JOIN sessions ON sessions.id = messages.session_id "
+        "WHERE messages.role IN ('user', 'assistant') AND messages.text_content != '' "
+        "ORDER BY sessions.updated_at DESC, messages.created_at DESC, messages.rowid DESC"
+    )
+    query_lower = normalized_query.lower()
+    results: dict[str, SessionMessageSearchResult] = {}
+    for row in rows:
+        text_content = str(row["text_content"] or "")
+        if query_lower not in text_content.lower():
+            continue
+        session_id = str(row["session_id"])
+        result = results.get(session_id)
+        if result is None:
+            if len(results) >= max_sessions:
+                continue
+            result = SessionMessageSearchResult(session_id=session_id, total_hits=0)
+            results[session_id] = result
+        result.total_hits += 1
+        if len(result.hits) < max_hits_per_session:
+            result.hits.append(
+                MessageSearchHit(
+                    session_id=session_id,
+                    message_id=str(row["message_id"]),
+                    role=row["role"],
+                    created_at=row["created_at"],
+                    snippet=_search_snippet(text_content, normalized_query),
+                )
+            )
+    return list(results.values())
 
 
 # ---- artifacts ----

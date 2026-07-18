@@ -36,6 +36,7 @@ from models import (
     CreateSwitchProfileRequest,
     CreateSessionRequest,
     Message,
+    MessageSearchResponse,
     ModelSetting,
     RestartMessageRequest,
     SendChatRequest,
@@ -332,6 +333,16 @@ def restart_app() -> dict:
 @router.get("/sessions")
 def list_sessions() -> list[Session]:
     return db.list_sessions()
+
+
+@router.get("/messages/search")
+def search_messages(q: str = "") -> MessageSearchResponse:
+    query = q.strip()
+    if not query:
+        raise HTTPException(400, "query is required")
+    if len(query) > 200:
+        raise HTTPException(400, "query is too long")
+    return MessageSearchResponse(query=query, results=db.search_messages(query))
 
 
 @router.get("/workspaces/capability")
