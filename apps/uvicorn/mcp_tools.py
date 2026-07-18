@@ -14,7 +14,7 @@ RenderDefinition = dict[str, Any]
 BUILTIN_RENDER_DEFINITIONS: list[RenderDefinition] = [
     {
         "type": "iframe",
-        "description": "Iframe artifact served from a workspace-relative HTML entry file or an external http(s) URL.",
+        "description": "Iframe artifact served from a workspace-relative HTML entry file, an external http(s) URL, or a workspace loopback port preview.",
         "payloadSchema": {
             "oneOf": [
                 {
@@ -29,6 +29,22 @@ BUILTIN_RENDER_DEFINITIONS: list[RenderDefinition] = [
                     "required": ["url"],
                     "properties": {
                         "url": {"type": "string", "format": "uri", "pattern": "^https?://"}
+                    },
+                },
+                {
+                    "type": "object",
+                    "additionalProperties": False,
+                    "required": ["workspacePort"],
+                    "properties": {
+                        "workspacePort": {
+                            "type": "object",
+                            "additionalProperties": False,
+                            "required": ["port"],
+                            "properties": {
+                                "port": {"type": "integer", "minimum": 1, "maximum": 65535},
+                                "path": {"type": "string"},
+                            },
+                        }
                     },
                 },
             ],
@@ -83,14 +99,30 @@ def validate_render_type(type: str) -> str | None:
 
 def validate_iframe_payload(session_id: str, payload: Any) -> str | None:
     if not isinstance(payload, dict):
-        return "error: iframe payload must be {path: <workspace-relative path>} or {url: <http(s) URL>}"
+        return "error: iframe payload must be {path: <workspace-relative path>}, {url: <http(s) URL>}, or {workspacePort: {port, path?}}"
     if set(payload) == {"url"} and isinstance(payload.get("url"), str):
         parsed = urlparse(payload["url"])
         if parsed.scheme in {"http", "https"} and parsed.netloc:
             return None
         return "error: iframe payload url must be an absolute http(s) URL"
+    if set(payload) == {"workspacePort"} and isinstance(payload.get("workspacePort"), dict):
+        config = payload["workspacePort"]
+        if any(key not in {"port", "path"} for key in config):
+            return "error: iframe workspacePort payload only supports port and path"
+        port = config.get("port")
+        if isinstance(port, bool) or not isinstance(port, int) or port < 1 or port > 65535:
+            return "error: iframe workspacePort.port must be an integer from 1 to 65535"
+        path = config.get("path")
+        if path is not None and not isinstance(path, str):
+            return "error: iframe workspacePort.path must be a string"
+        proxy_error = workspace_service.require_workspace_proxy_sync()
+        if proxy_error is not None:
+            return f"error: {proxy_error}"
+        if db.get_session(session_id) is None:
+            return f"error: session not found: {session_id}"
+        return None
     if set(payload) != {"path"} or not isinstance(payload.get("path"), str):
-        return "error: iframe payload must be {path: <workspace-relative path>} or {url: <http(s) URL>}"
+        return "error: iframe payload must be {path: <workspace-relative path>}, {url: <http(s) URL>}, or {workspacePort: {port, path?}}"
     session = db.get_session(session_id)
     if session is None:
         return f"error: session not found: {session_id}"
@@ -108,12 +140,17 @@ def ui_show_artifact(
 ) -> str:
     """Show an artifact in the user's right panel and return its artifact_id.
 
-    For iframe artifacts, payload must be either {path: <workspace-relative HTML
-    entry file>} or {url: <absolute http(s) URL>}. For path artifacts, put
+    For iframe artifacts, payload must be {path: <workspace-relative HTML
+    entry file>}, {url: <absolute http(s) URL>}, or
+    {workspacePort: {port: <1-65535>, path?: <server path>}}. For path artifacts, put
     referenced local resources in the same directory as that HTML file or in
     child directories, then reference them with relative URLs such as ./style.css
     or ./assets/app.js. Parent-directory assets are not served. Path artifacts
     may also load external http(s) resources and embed external http(s) frames.
+    For workspacePort artifacts, start the HTTP server inside the current
+    workspace and bind it to 127.0.0.1 on the given port. Configure the server
+    with the proxy path prefix, or use relative resource URLs; the proxy does
+    not rewrite HTML, CSS, or JavaScript content.
 
     To return a user interaction from an iframe to the agent, include
     <script src="/artifact-bridge-v1.js"></script> in the HTML and call
@@ -152,8 +189,9 @@ def ui_show_artifact(
 def ui_update_artifact(artifact_id: str, payload: dict[str, Any]) -> str:
     """Replace an existing artifact payload.
 
-    An iframe payload must be either {path: <workspace-relative HTML path>} or
-    {url: <absolute http(s) URL>}. Interactive iframe code should use
+    An iframe payload must be {path: <workspace-relative HTML path>},
+    {url: <absolute http(s) URL>}, or {workspacePort: {port, path?}}.
+    Interactive iframe code should use
     /artifact-bridge-v1.js to save user context; do not put that context into
     this payload.
     """

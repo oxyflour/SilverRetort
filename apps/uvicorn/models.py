@@ -99,6 +99,7 @@ class Artifact(ApiModel):
 class IframeArtifactPayload(ApiModel):
     path: str | None = None
     url: str | None = None
+    workspace_port: dict[str, Any] | None = None
 
 
 class CreateSessionRequest(ApiModel):
@@ -122,6 +123,7 @@ class WorkspaceCapability(ApiModel):
     version: int
     writable: bool
     cwd_enforced: bool
+    workspace_proxy: dict[str, Any] | None = None
 
 
 class SlashCommand(ApiModel):

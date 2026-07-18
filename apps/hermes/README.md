@@ -39,6 +39,12 @@ identified by `workspaceId + relativePath`; SilverRetort no longer maintains a
 separate file database or file IDs. Existing legacy `DATA_DIR/files` content is
 discarded during migration and is not copied into workspaces.
 
+Relay capability version 2 advertises workspace port proxy support through
+`workspaceProxy`. Older relay versions omit that field; desktop treats those
+relays as not supporting live workspace port previews and returns
+`workspace port proxy requires newer remote Hermes relay` for the new preview
+path.
+
 Iframe artifacts reference either a static-site entry inside the workspace, for
 example `{"path":"artifacts/demo/index.html"}`, or an external HTTP(S) URL, for
 example `{"url":"https://example.com"}`. Inline HTML is not supported. For
@@ -49,6 +55,12 @@ such as `./style.css` or `./assets/app.js`; files in parent directories are not
 valid artifact assets. Workspace HTML may also load external HTTP(S) resources
 and embed external HTTP(S) frames. Local-process mode lets uvicorn read the
 shared directory directly; Docker and remote modes stream through relay.
+
+Iframe artifacts can also reference an HTTP server running in the current
+workspace with `{"workspacePort":{"port":5173,"path":""}}`. The server must bind
+to `127.0.0.1` in the Hermes container. The first implementation is a path-prefix
+proxy and does not rewrite HTML, CSS, or JavaScript, so dev servers should be
+configured with the proxy base path or emit relative resource URLs.
 
 Interactive iframe artifacts can save JSON context for the user's next chat
 turn. Load the host bridge and call it when meaningful state changes:
