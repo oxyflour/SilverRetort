@@ -67,7 +67,7 @@ export function ChatInput() {
 
   return (
     <div
-      className="border-t border-neutral-200 p-3 dark:border-neutral-800"
+      className="p-3"
       onDragEnter={(event) => {
         if (!currentSessionId || !hasDraggedFiles(event)) return;
         event.preventDefault();
