@@ -68,7 +68,7 @@ export function ChatApp() {
       <button
         title={sidebarOpen ? "Close sidebar" : "Open sidebar"}
         onClick={() => setSidebarOpen((v) => !v)}
-        className="absolute left-2 top-2 z-10 flex h-9 w-9 items-center justify-center rounded-md border border-neutral-300 bg-white text-neutral-600 transition-colors hover:text-neutral-900 dark:border-neutral-600 dark:bg-neutral-900 dark:text-neutral-400 dark:hover:text-neutral-100"
+        className="absolute left-2 top-2 z-10 flex h-9 w-9 items-center justify-center rounded-md text-neutral-600 transition-colors hover:bg-neutral-200 hover:text-neutral-900 dark:text-neutral-400 dark:hover:bg-neutral-800 dark:hover:text-neutral-100"
       >
         <AppIcon
           icon={sidebarOpen ? PanelLeftClose : PanelLeftOpen}

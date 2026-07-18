@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, type ReactNode } from "react";
+import { useState } from "react";
 import {
   ChevronDown,
   ChevronRight,
@@ -15,6 +15,7 @@ import {
 import { UserSettingsPanel } from "silverretort-setting-ui";
 import { useChatStore } from "../store";
 import { AppIcon } from "./icons";
+import { DialogActions, Modal } from "./SidebarDialog";
 
 export function SessionSidebar() {
   const store = useChatStore();
@@ -27,6 +28,7 @@ export function SessionSidebar() {
   const [deletingId, setDeletingId] = useState<string | null>(null);
   const [expandedSessionCounts, setExpandedSessionCounts] = useState<Record<string, number>>({});
   const [searchQuery, setSearchQuery] = useState("");
+  const [searchOpen, setSearchOpen] = useState(false);
   const available = Boolean(
     store.workspaceCapability?.supported && store.workspaceCapability.writable,
   );
@@ -36,66 +38,58 @@ export function SessionSidebar() {
   const defaultConnectionId = currentWorkspace?.connectionId;
   const normalizedSearchQuery = searchQuery.trim().toLowerCase();
   const searching = normalizedSearchQuery.length > 0;
-  const workspaceViews = store.workspaces
-    .map((workspace) => {
-      const sessions = store.sessions.filter(
-        (session) => session.workspaceId === workspace.id,
-      );
-      const workspaceMatches = workspace.name
-        .toLowerCase()
-        .includes(normalizedSearchQuery);
-      const matchingSessions = searching
-        ? sessions.filter((session) =>
-            session.title.toLowerCase().includes(normalizedSearchQuery),
-          )
-        : sessions;
-      const visibleSessionCount = expandedSessionCounts[workspace.id] ?? 5;
-      const visibleSessions = searching
-        ? workspaceMatches
-          ? sessions
-          : matchingSessions
-        : sessions.slice(0, visibleSessionCount);
-      const hiddenSessionCount = searching
-        ? 0
-        : sessions.length - visibleSessions.length;
+  const workspaceViews = store.workspaces.map((workspace) => {
+    const sessions = store.sessions.filter(
+      (session) => session.workspaceId === workspace.id,
+    );
+    const visibleSessionCount = expandedSessionCounts[workspace.id] ?? 5;
 
-      return {
-        workspace,
-        sessions,
-        collapsed: store.collapsedWorkspaceIds.includes(workspace.id),
-        visibleSessionCount,
-        visibleSessions,
-        hiddenSessionCount,
-        running: sessions.some((session) => store.buckets[session.id]?.runId != null),
-        matched: !searching || workspaceMatches || visibleSessions.length > 0,
-      };
-    })
-    .filter((view) => view.matched);
+    return {
+      workspace,
+      sessions,
+      collapsed: store.collapsedWorkspaceIds.includes(workspace.id),
+      visibleSessionCount,
+      visibleSessions: sessions.slice(0, visibleSessionCount),
+      hiddenSessionCount: Math.max(0, sessions.length - visibleSessionCount),
+      running: sessions.some((session) => store.buckets[session.id]?.runId != null),
+    };
+  });
+  const searchWorkspaceViews = searching
+    ? store.workspaces
+        .map((workspace) => {
+          const sessions = store.sessions.filter(
+            (session) => session.workspaceId === workspace.id,
+          );
+          const workspaceMatches = workspace.name
+            .toLowerCase()
+            .includes(normalizedSearchQuery);
+          const visibleSessions = workspaceMatches
+            ? sessions
+            : sessions.filter((session) =>
+                session.title.toLowerCase().includes(normalizedSearchQuery),
+              );
+
+          return {
+            workspace,
+            visibleSessions,
+            matched: workspaceMatches || visibleSessions.length > 0,
+          };
+        })
+        .filter((view) => view.matched)
+    : [];
 
   return (
     <div className="flex h-full flex-col border-r border-neutral-200 bg-neutral-50 dark:border-neutral-800 dark:bg-neutral-900">
       <div className="space-y-2 p-2">
-        <div className="relative ml-10">
-          <AppIcon
-            icon={Search}
-            className="pointer-events-none absolute left-2.5 top-1/2 h-4 w-4 -translate-y-1/2 text-neutral-400"
-          />
-          <input
-            value={searchQuery}
-            onChange={(event) => setSearchQuery(event.target.value)}
-            placeholder="Search sessions"
-            className="h-9 w-full rounded-md border border-neutral-300 bg-white px-8 text-sm outline-none transition-colors placeholder:text-neutral-400 focus:border-neutral-400 dark:border-neutral-700 dark:bg-neutral-900 dark:focus:border-neutral-500"
-          />
-          {searchQuery && (
-            <button
-              title="Clear search"
-              aria-label="Clear search"
-              onClick={() => setSearchQuery("")}
-              className="absolute right-1.5 top-1/2 grid h-6 w-6 -translate-y-1/2 place-items-center rounded text-neutral-500 hover:bg-neutral-100 hover:text-neutral-900 dark:hover:bg-neutral-800 dark:hover:text-neutral-100"
-            >
-              <AppIcon icon={X} className="h-4 w-4" />
-            </button>
-          )}
+        <div className="flex h-9 items-center justify-end pl-10">
+          <button
+            title="Search sessions"
+            aria-label="Search sessions"
+            onClick={() => setSearchOpen(true)}
+            className="grid h-9 w-9 place-items-center rounded-md text-neutral-600 transition-colors hover:bg-neutral-200 hover:text-neutral-900 dark:text-neutral-400 dark:hover:bg-neutral-800 dark:hover:text-neutral-100"
+          >
+            <AppIcon icon={Search} className="h-4 w-4" />
+          </button>
         </div>
         <div className="relative flex">
           <button
@@ -146,11 +140,6 @@ export function SessionSidebar() {
         )}
       </div>
       <div className="flex-1 overflow-y-auto px-2 pb-2">
-        {searching && workspaceViews.length === 0 && (
-          <div className="px-2 py-6 text-center text-sm text-neutral-500 dark:text-neutral-400">
-            No sessions found
-          </div>
-        )}
         {workspaceViews.map((view) => {
           const {
             workspace,
@@ -160,7 +149,6 @@ export function SessionSidebar() {
             hiddenSessionCount,
             running,
           } = view;
-          const displayCollapsed = searching ? false : collapsed;
           return (
             <section key={workspace.id} className="mb-2">
               <div
@@ -172,19 +160,11 @@ export function SessionSidebar() {
               >
                 <button
                   className="rounded p-1 text-neutral-500 hover:text-neutral-900 dark:hover:text-neutral-100"
-                  onClick={() => {
-                    if (!searching) store.toggleWorkspace(workspace.id);
-                  }}
-                  title={
-                    searching
-                      ? "Workspace expanded in search"
-                      : displayCollapsed
-                        ? "Expand workspace"
-                        : "Collapse workspace"
-                  }
+                  onClick={() => store.toggleWorkspace(workspace.id)}
+                  title={collapsed ? "Expand workspace" : "Collapse workspace"}
                 >
                   <AppIcon
-                    icon={displayCollapsed ? ChevronRight : ChevronDown}
+                    icon={collapsed ? ChevronRight : ChevronDown}
                     className="h-4 w-4"
                   />
                 </button>
@@ -254,7 +234,7 @@ export function SessionSidebar() {
                   </button>
                 </span>
               </div>
-              {!displayCollapsed &&
+              {!collapsed &&
                 visibleSessions.map((session) => (
                   <SessionRow
                     key={session.id}
@@ -262,7 +242,7 @@ export function SessionSidebar() {
                     title={session.title}
                   />
                 ))}
-              {!displayCollapsed && hiddenSessionCount > 0 && (
+              {!collapsed && hiddenSessionCount > 0 && (
                 <button
                   className="ml-4 mt-1 w-[calc(100%-1rem)] rounded-md px-2 py-1.5 text-left text-sm text-neutral-500 hover:bg-neutral-100 hover:text-neutral-900 dark:text-neutral-400 dark:hover:bg-neutral-800 dark:hover:text-neutral-100"
                   onClick={() =>
@@ -280,6 +260,91 @@ export function SessionSidebar() {
         })}
       </div>
       <UserSettingsPanel />
+      {searchOpen && (
+        <Modal title="Search sessions" onClose={() => setSearchOpen(false)} wide>
+          <div className="space-y-3">
+            <div className="relative">
+              <AppIcon
+                icon={Search}
+                className="pointer-events-none absolute left-2.5 top-1/2 h-4 w-4 -translate-y-1/2 text-neutral-400"
+              />
+              <input
+                autoFocus
+                value={searchQuery}
+                onChange={(event) => setSearchQuery(event.target.value)}
+                onKeyDown={(event) => {
+                  if (event.key === "Escape") setSearchOpen(false);
+                }}
+                placeholder="Search sessions"
+                className="h-10 w-full rounded-md border border-neutral-300 bg-white px-8 text-sm outline-none transition-colors placeholder:text-neutral-400 focus:border-neutral-400 dark:border-neutral-700 dark:bg-neutral-900 dark:focus:border-neutral-500"
+              />
+              {searchQuery && (
+                <button
+                  title="Clear search"
+                  aria-label="Clear search"
+                  onClick={() => setSearchQuery("")}
+                  className="absolute right-1.5 top-1/2 grid h-7 w-7 -translate-y-1/2 place-items-center rounded text-neutral-500 hover:bg-neutral-100 hover:text-neutral-900 dark:hover:bg-neutral-800 dark:hover:text-neutral-100"
+                >
+                  <AppIcon icon={X} className="h-4 w-4" />
+                </button>
+              )}
+            </div>
+            <div className="max-h-80 min-h-20 overflow-y-auto rounded-md border border-neutral-200 p-2 dark:border-neutral-700">
+              {searching && searchWorkspaceViews.length === 0 && (
+                <div className="px-2 py-6 text-center text-sm text-neutral-500 dark:text-neutral-400">
+                  No sessions found
+                </div>
+              )}
+              {searchWorkspaceViews.map(({ workspace, visibleSessions }) => (
+                <section key={workspace.id} className="mb-2 last:mb-0">
+                  <div className="flex items-center gap-2 px-2 py-1 text-sm font-medium">
+                    {workspace.switchMode === "remote" && (
+                      <span title={workspace.switchUrl}>
+                        <AppIcon
+                          icon={Cloud}
+                          className="h-3.5 w-3.5 shrink-0 text-neutral-500"
+                        />
+                      </span>
+                    )}
+                    <span className="min-w-0 truncate" title={workspace.name}>
+                      {workspace.name}
+                    </span>
+                  </div>
+                  {visibleSessions.map((session) => (
+                    <button
+                      key={session.id}
+                      onClick={() => {
+                        void store.selectSession(session.id);
+                        setSearchOpen(false);
+                      }}
+                      className={`mt-1 flex w-full items-center gap-2 rounded-md px-3 py-2 text-left text-sm ${
+                        session.id === store.currentSessionId
+                          ? "bg-neutral-200 dark:bg-neutral-700"
+                          : "hover:bg-neutral-100 dark:hover:bg-neutral-800"
+                      }`}
+                    >
+                      {store.buckets[session.id]?.runId != null && (
+                        <span className="h-2 w-2 shrink-0 animate-pulse rounded-full bg-emerald-500" />
+                      )}
+                      <span className="min-w-0 flex-1 truncate" title={session.title}>
+                        {session.title}
+                      </span>
+                    </button>
+                  ))}
+                </section>
+              ))}
+            </div>
+            <div className="flex justify-end">
+              <button
+                onClick={() => setSearchOpen(false)}
+                className="rounded px-3 py-1.5 text-sm hover:bg-neutral-100 dark:hover:bg-neutral-800"
+              >
+                Close
+              </button>
+            </div>
+          </div>
+        </Modal>
+      )}
       {creating && (
         <Modal title="Create workspace" onClose={() => setCreating(false)}>
           <input
@@ -404,67 +469,6 @@ function SessionRow({ sessionId, title }: { sessionId: string; title: string }) 
           <AppIcon icon={Trash2} className="h-4 w-4" />
         </button>
       </span>
-    </div>
-  );
-}
-
-function Modal({
-  title,
-  children,
-  onClose,
-}: {
-  title: string;
-  children: ReactNode;
-  onClose: () => void;
-}) {
-  return (
-    <div className="fixed inset-0 z-50 grid place-items-center bg-black/40 p-4" onMouseDown={onClose}>
-      <div
-        role="dialog"
-        aria-modal="true"
-        aria-label={title}
-        onMouseDown={(event) => event.stopPropagation()}
-        className="w-full max-w-sm space-y-4 rounded-lg bg-white p-4 shadow-xl dark:bg-neutral-900"
-      >
-        <h2 className="font-medium">{title}</h2>
-        {children}
-      </div>
-    </div>
-  );
-}
-
-function DialogActions({
-  onCancel,
-  onConfirm,
-  confirmLabel,
-  disabled = false,
-  danger = false,
-}: {
-  onCancel: () => void;
-  onConfirm: () => void;
-  confirmLabel: string;
-  disabled?: boolean;
-  danger?: boolean;
-}) {
-  return (
-    <div className="flex justify-end gap-2">
-      <button
-        onClick={onCancel}
-        className="rounded px-3 py-1.5 text-sm hover:bg-neutral-100 dark:hover:bg-neutral-800"
-      >
-        Cancel
-      </button>
-      <button
-        disabled={disabled}
-        onClick={onConfirm}
-        className={`rounded px-3 py-1.5 text-sm text-white disabled:opacity-40 ${
-          danger
-            ? "bg-red-600 hover:bg-red-700"
-            : "bg-neutral-900 hover:bg-neutral-700 dark:bg-neutral-100 dark:text-neutral-900"
-        }`}
-      >
-        {confirmLabel}
-      </button>
     </div>
   );
 }
