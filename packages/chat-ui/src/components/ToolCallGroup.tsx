@@ -23,6 +23,7 @@ interface ToolCallGroupProps {
   toolCalls: ToolCall[];
   artifacts?: ToolCallGroupArtifact[];
   onOpenArtifact?: (artifactId: string) => void;
+  showTodos?: boolean;
   children: ReactNode;
 }
 
@@ -102,10 +103,11 @@ export function ToolCallGroup({
   toolCalls,
   artifacts = [],
   onOpenArtifact,
+  showTodos = true,
   children,
 }: ToolCallGroupProps) {
   const [expanded, setExpanded] = useState(false);
-  const todos = getToolCallTodos(toolCalls);
+  const todos = showTodos ? getToolCallTodos(toolCalls) : [];
   const summary =
     toolCalls.length === 1
       ? `调用了 ${toolCalls[0]?.name ?? "工具"}`

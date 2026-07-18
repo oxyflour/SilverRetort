@@ -28,7 +28,7 @@ import {
 } from "./messageViewSupport";
 import { ToolCallGroup } from "./ToolCallGroup";
 import { ToolCallPayloadView } from "./ToolCallPayloadView";
-import { isTodoTool } from "./toolCallGroupSupport";
+import { hasTodoMerge, isTodoTool } from "./toolCallGroupSupport";
 
 const markdownRemarkPlugins = [remarkGfm];
 const markdownRehypePlugins = [rehypeHighlight];
@@ -217,40 +217,55 @@ function MessageViewComponent({
   const lastToolGroupIndex = partGroups.findLast(
     (group) => group.type === "tools",
   )?.index;
+  const mergedTodoGroupIndex = (() => {
+    let hasMergedTodo = false;
+    let lastTodoGroupIndex: number | null = null;
+
+    for (const group of partGroups) {
+      if (group.type !== "tools") {
+        continue;
+      }
+      const toolCalls = group.toolCalls.map(
+        (toolCall) => fullToolCalls[toolCall.id] ?? toolCall,
+      );
+      if (!toolCalls.some((toolCall) => isTodoTool(toolCall.name))) {
+        continue;
+      }
+      if (toolCalls.some(hasTodoMerge)) {
+        hasMergedTodo = true;
+      }
+      lastTodoGroupIndex = group.index;
+    }
+
+    return hasMergedTodo ? lastTodoGroupIndex : null;
+  })();
 
   useEffect(() => {
-    const truncatedTodoCalls = message.parts.flatMap((part) =>
-      part.type === "tool" &&
-      isTodoTool(part.toolCall.name) &&
-      (part.toolCall.detailTruncated || part.toolCall.resultTruncated) &&
-      !fullToolCalls[part.toolCall.id]
-        ? [part.toolCall]
-        : [],
-    );
-    if (truncatedTodoCalls.length === 0) {
+    const lastTodoCall = message.parts.findLast(
+      (part): part is Extract<MessagePart, { type: "tool" }> =>
+        part.type === "tool" && isTodoTool(part.toolCall.name),
+    )?.toolCall;
+    if (
+      !lastTodoCall ||
+      fullToolCalls[lastTodoCall.id] ||
+      (!lastTodoCall.detailTruncated && !lastTodoCall.resultTruncated)
+    ) {
       return;
     }
 
     let active = true;
-    void Promise.all(
-      truncatedTodoCalls.map((toolCall) =>
-        client
-          .getToolCall(message.sessionId, message.id, toolCall.id)
-          .catch(() => null),
-      ),
-    ).then((toolCalls) => {
-      if (!active) {
-        return;
-      }
-      setFullToolCalls((current) => ({
-        ...current,
-        ...Object.fromEntries(
-          toolCalls
-            .filter((toolCall): toolCall is ToolCall => toolCall !== null)
-            .map((toolCall) => [toolCall.id, toolCall]),
-        ),
-      }));
-    });
+    void client
+      .getToolCall(message.sessionId, message.id, lastTodoCall.id)
+      .then((toolCall) => {
+        if (!active) {
+          return;
+        }
+        setFullToolCalls((current) => ({
+          ...current,
+          [toolCall.id]: toolCall,
+        }));
+      })
+      .catch(() => undefined);
     return () => {
       active = false;
     };
@@ -495,6 +510,10 @@ function MessageViewComponent({
                   <ToolCallGroup
                     toolCalls={displayedToolCalls}
                     artifacts={toolGroupArtifacts}
+                    showTodos={
+                      mergedTodoGroupIndex === null ||
+                      toolGroup.index === mergedTodoGroupIndex
+                    }
                     onOpenArtifact={(artifactId) =>
                       openArtifact(artifactId, message.sessionId)
                     }

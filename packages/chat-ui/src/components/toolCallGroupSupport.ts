@@ -63,6 +63,24 @@ function normalizeTodos(value: unknown): ToolCallTodo[] {
   });
 }
 
+function hasMergeFlag(value: unknown): boolean {
+  if (!value || typeof value !== "object") {
+    return false;
+  }
+  const merge = (value as Record<string, unknown>).merge;
+  return merge === true || merge === "true";
+}
+
+export function hasTodoMerge(toolCall: ToolCall): boolean {
+  if (!isTodoTool(toolCall.name)) {
+    return false;
+  }
+  return (
+    hasMergeFlag(parseJson(toolCall.detail)) ||
+    hasMergeFlag(parseJson(toolCall.result))
+  );
+}
+
 export function getToolCallTodos(toolCalls: ToolCall[]): ToolCallTodo[] {
   for (let index = toolCalls.length - 1; index >= 0; index -= 1) {
     const toolCall = toolCalls[index]!;
