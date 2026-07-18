@@ -49,6 +49,17 @@ function localHermesEnabled(config) {
     return Boolean(`${env.ENABLE_LOCAL_HERMES || ""}`.trim());
 }
 
+function hasRemoteSwitchProfile(settings, username) {
+    const rawProfiles = settings && typeof settings.switchProfiles === "object" && !Array.isArray(settings.switchProfiles)
+        ? settings.switchProfiles
+        : {};
+    return Object.values(rawProfiles).some((rawProfile) => {
+        if (!rawProfile || typeof rawProfile !== "object") return false;
+        if (rawProfile.mode !== "remote") return false;
+        return Boolean(normalizeBaseUrl(expandSwitchUrl(rawProfile.switchUrl, username)));
+    });
+}
+
 function resolveHermesMode(
     config,
     pythonPort,
@@ -78,11 +89,17 @@ function resolveHermesMode(
     }
 
     if (!localHermesEnabled(config)) {
+        if (hasRemoteSwitchProfile(config.settings, username)) {
+            return { mode: "disabled", url: "" };
+        }
         return { mode: "needs-switch-config", url: defaultSwitchHermesUrl() };
     }
 
     const runtime = resolveHermesRuntime(config);
     if (runtime === null) {
+        if (hasRemoteSwitchProfile(config.settings, username)) {
+            return { mode: "disabled", url: "" };
+        }
         return { mode: "needs-switch-config", url: defaultSwitchHermesUrl() };
     }
     const apiKey = randomApiKeyFn();
@@ -123,6 +140,7 @@ async function startHermes(mode, config, supervisor, spawn = nodeSpawn) {
 module.exports = {
     defaultSwitchHermesUrl,
     expandSwitchUrl,
+    hasRemoteSwitchProfile,
     randomApiKey,
     resolveHermesRuntime,
     resolvePackagedHermesRuntime,

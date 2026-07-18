@@ -42,10 +42,23 @@ export const WorkspaceSchema = z.object({
   id: z.string(),
   name: z.string(),
   status: z.enum(["active", "creating", "deleting", "error"]),
+  connectionId: z.string().default("local"),
+  switchMode: z.enum(["local", "remote"]).default("local"),
+  switchUrl: z.string().default(""),
+  hasHermesApiKey: z.boolean().default(false),
   createdAt: z.string(),
   updatedAt: z.string(),
 });
 export type Workspace = z.infer<typeof WorkspaceSchema>;
+
+export const SwitchProfileSchema = z.object({
+  id: z.string(),
+  name: z.string(),
+  mode: z.enum(["local", "remote"]),
+  switchUrl: z.string().default(""),
+  hasHermesApiKey: z.boolean().default(false),
+});
+export type SwitchProfile = z.infer<typeof SwitchProfileSchema>;
 
 export const SessionSchema = z.object({
   id: z.string(),
@@ -222,7 +235,10 @@ export const UpdateSessionRequestSchema = z.object({
 });
 export type UpdateSessionRequest = z.infer<typeof UpdateSessionRequestSchema>;
 
-export const CreateWorkspaceRequestSchema = z.object({ name: z.string() });
+export const CreateWorkspaceRequestSchema = z.object({
+  name: z.string(),
+  connectionId: z.string().optional(),
+});
 export type CreateWorkspaceRequest = z.infer<typeof CreateWorkspaceRequestSchema>;
 
 export const UpdateWorkspaceRequestSchema = z.object({ name: z.string() });

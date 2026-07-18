@@ -11,22 +11,37 @@ from urllib.parse import urlsplit, urlunsplit
 import httpx
 from fastapi import UploadFile
 
+import db
+import switch_profiles
+
 WORKSPACE_PROXY_ERROR = "workspace port proxy requires newer remote Hermes relay"
 WORKSPACE_PROXY_CACHE_SECONDS = 5
-_workspace_proxy_cache: tuple[float, bool] | None = None
+_workspace_proxy_cache: dict[str, tuple[float, bool]] = {}
 
 
-def _base_url() -> str:
-    return os.getenv("HERMES_URL", "").rstrip("/")
+def _connection(workspace_id: str | None = None) -> switch_profiles.SwitchConnection:
+    workspace = db.get_workspace(workspace_id) if workspace_id else None
+    return switch_profiles.connection_for_profile(
+        workspace.connection_id if workspace is not None else None
+    )
 
 
-def _headers() -> dict[str, str]:
-    key = os.getenv("HERMES_API_KEY", "").strip()
+def _cache_key(workspace_id: str | None = None) -> str:
+    connection = _connection(workspace_id)
+    return f"{connection.mode}:{connection.switch_url}"
+
+
+def _base_url(workspace_id: str | None = None) -> str:
+    return _connection(workspace_id).switch_url.rstrip("/")
+
+
+def _headers(workspace_id: str | None = None) -> dict[str, str]:
+    key = _connection(workspace_id).api_key.strip()
     return {"authorization": f"Bearer {key}"} if key else {}
 
 
-def _local_root() -> Path | None:
-    value = os.getenv("LOCAL_HERMES_WORKSPACES_DIR", "").strip()
+def _local_root(workspace_id: str | None = None) -> Path | None:
+    value = _connection(workspace_id).local_workspaces_dir.strip()
     return Path(value).resolve() if value else None
 
 
@@ -52,7 +67,7 @@ def resolve_artifact_asset(entry_path: str, asset_path: str | None = None) -> st
 
 
 def local_file_path(workspace_id: str, relative_path: str) -> Path | None:
-    root = _local_root()
+    root = _local_root(workspace_id)
     if root is None:
         return None
     if not workspace_id or any(char not in "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_-" for char in workspace_id):
@@ -83,7 +98,7 @@ def _metadata(workspace_id: str, relative_path: str, size: int, mime_type: str |
 
 def remote_file_url(workspace_id: str, relative_path: str) -> str:
     encoded = "/".join(quote(part, safe="") for part in normalize_relative_path(relative_path).split("/"))
-    return f"{_base_url()}/workspace-api/workspaces/{quote(workspace_id)}/files/{encoded}"
+    return f"{_base_url(workspace_id)}/workspace-api/workspaces/{quote(workspace_id)}/files/{encoded}"
 
 
 def _workspace_proxy_path(workspace_id: str, port: int, path: str = "") -> str:
@@ -93,7 +108,7 @@ def _workspace_proxy_path(workspace_id: str, port: int, path: str = "") -> str:
 
 
 def remote_workspace_proxy_url(workspace_id: str, port: int, path: str = "", query: str = "") -> str:
-    url = f"{_base_url()}{_workspace_proxy_path(workspace_id, port, path)}"
+    url = f"{_base_url(workspace_id)}{_workspace_proxy_path(workspace_id, port, path)}"
     return f"{url}?{query}" if query else url
 
 
@@ -124,62 +139,65 @@ def _has_workspace_proxy(payload: dict) -> bool:
     )
 
 
-def _cached_workspace_proxy_supported() -> bool | None:
-    if _workspace_proxy_cache is None:
+def _cached_workspace_proxy_supported(workspace_id: str | None = None) -> bool | None:
+    cached_item = _workspace_proxy_cache.get(_cache_key(workspace_id))
+    if cached_item is None:
         return None
-    expires_at, supported = _workspace_proxy_cache
+    expires_at, supported = cached_item
     return supported if time.monotonic() < expires_at else None
 
 
-def _set_workspace_proxy_cache(supported: bool) -> bool:
-    global _workspace_proxy_cache
-    _workspace_proxy_cache = (time.monotonic() + WORKSPACE_PROXY_CACHE_SECONDS, supported)
+def _set_workspace_proxy_cache(supported: bool, workspace_id: str | None = None) -> bool:
+    _workspace_proxy_cache[_cache_key(workspace_id)] = (
+        time.monotonic() + WORKSPACE_PROXY_CACHE_SECONDS,
+        supported,
+    )
     return supported
 
 
-async def workspace_proxy_supported() -> bool:
-    cached = _cached_workspace_proxy_supported()
+async def workspace_proxy_supported(workspace_id: str | None = None) -> bool:
+    cached = _cached_workspace_proxy_supported(workspace_id)
     if cached is not None:
         return cached
-    if not _base_url():
-        return _set_workspace_proxy_cache(False)
+    if not _base_url(workspace_id):
+        return _set_workspace_proxy_cache(False, workspace_id)
     try:
         async with httpx.AsyncClient(timeout=10) as client:
-            response = await client.get(f"{_base_url()}/workspace-api/capability", headers=_headers())
+            response = await client.get(f"{_base_url(workspace_id)}/workspace-api/capability", headers=_headers(workspace_id))
             response.raise_for_status()
-            return _set_workspace_proxy_cache(_has_workspace_proxy(response.json()))
+            return _set_workspace_proxy_cache(_has_workspace_proxy(response.json()), workspace_id)
     except (httpx.HTTPError, ValueError):
-        return _set_workspace_proxy_cache(False)
+        return _set_workspace_proxy_cache(False, workspace_id)
 
 
-def workspace_proxy_supported_sync() -> bool:
-    cached = _cached_workspace_proxy_supported()
+def workspace_proxy_supported_sync(workspace_id: str | None = None) -> bool:
+    cached = _cached_workspace_proxy_supported(workspace_id)
     if cached is not None:
         return cached
-    if not _base_url():
-        return _set_workspace_proxy_cache(False)
+    if not _base_url(workspace_id):
+        return _set_workspace_proxy_cache(False, workspace_id)
     try:
         with httpx.Client(timeout=10) as client:
-            response = client.get(f"{_base_url()}/workspace-api/capability", headers=_headers())
+            response = client.get(f"{_base_url(workspace_id)}/workspace-api/capability", headers=_headers(workspace_id))
             response.raise_for_status()
-            return _set_workspace_proxy_cache(_has_workspace_proxy(response.json()))
+            return _set_workspace_proxy_cache(_has_workspace_proxy(response.json()), workspace_id)
     except (httpx.HTTPError, ValueError):
-        return _set_workspace_proxy_cache(False)
+        return _set_workspace_proxy_cache(False, workspace_id)
 
 
-async def require_workspace_proxy() -> None:
-    if not await workspace_proxy_supported():
+async def require_workspace_proxy(workspace_id: str | None = None) -> None:
+    if not await workspace_proxy_supported(workspace_id):
         raise RuntimeError(WORKSPACE_PROXY_ERROR)
 
 
-def require_workspace_proxy_sync() -> str | None:
-    return None if workspace_proxy_supported_sync() else WORKSPACE_PROXY_ERROR
+def require_workspace_proxy_sync(workspace_id: str | None = None) -> str | None:
+    return None if workspace_proxy_supported_sync(workspace_id) else WORKSPACE_PROXY_ERROR
 
 
-async def capability() -> dict:
-    if _local_root() is not None:
+async def capability(workspace_id: str | None = None) -> dict:
+    if _local_root(workspace_id) is not None:
         result = {"supported": True, "version": 1, "writable": True, "cwdEnforced": False}
-        if await workspace_proxy_supported():
+        if await workspace_proxy_supported(workspace_id):
             result["workspaceProxy"] = {
                 "supported": True,
                 "version": 1,
@@ -188,11 +206,11 @@ async def capability() -> dict:
                 "pathPrefixRequired": True,
             }
         return result
-    if not _base_url():
+    if not _base_url(workspace_id):
         return {"supported": False, "version": 0, "writable": False, "cwdEnforced": False}
     try:
         async with httpx.AsyncClient(timeout=10) as client:
-            response = await client.get(f"{_base_url()}/workspace-api/capability", headers=_headers())
+            response = await client.get(f"{_base_url(workspace_id)}/workspace-api/capability", headers=_headers(workspace_id))
             response.raise_for_status()
             return response.json()
     except (httpx.HTTPError, ValueError):
@@ -200,17 +218,17 @@ async def capability() -> dict:
 
 
 async def create_remote(workspace_id: str) -> None:
-    local_root = _local_root()
+    local_root = _local_root(workspace_id)
     if local_root is not None:
         (local_root / workspace_id).mkdir(parents=True, exist_ok=True)
         return
     async with httpx.AsyncClient(timeout=15) as client:
-        response = await client.put(f"{_base_url()}/workspace-api/workspaces/{quote(workspace_id)}", headers=_headers())
+        response = await client.put(f"{_base_url(workspace_id)}/workspace-api/workspaces/{quote(workspace_id)}", headers=_headers(workspace_id))
         response.raise_for_status()
 
 
 async def delete_remote(workspace_id: str) -> None:
-    local_root = _local_root()
+    local_root = _local_root(workspace_id)
     if local_root is not None:
         import shutil
         path = local_root / workspace_id
@@ -218,12 +236,12 @@ async def delete_remote(workspace_id: str) -> None:
             shutil.rmtree(path)
         return
     async with httpx.AsyncClient(timeout=30) as client:
-        response = await client.delete(f"{_base_url()}/workspace-api/workspaces/{quote(workspace_id)}", headers=_headers())
+        response = await client.delete(f"{_base_url(workspace_id)}/workspace-api/workspaces/{quote(workspace_id)}", headers=_headers(workspace_id))
         response.raise_for_status()
 
 
 async def upload_file(workspace_id: str, file: UploadFile) -> dict:
-    root = _local_root()
+    root = _local_root(workspace_id)
     filename = Path((file.filename or "upload").replace("\\", "/")).name or "upload"
     if root is not None:
         upload_dir = root / workspace_id / "uploads"
@@ -248,13 +266,13 @@ async def upload_file(workspace_id: str, file: UploadFile) -> dict:
         while chunk := await file.read(1024 * 1024):
             yield chunk
 
-    headers = _headers() | {
+    headers = _headers(workspace_id) | {
         "content-type": file.content_type or "application/octet-stream",
         "x-silverretort-filename": quote(filename, safe=""),
     }
     async with httpx.AsyncClient(timeout=httpx.Timeout(None, connect=10)) as client:
         response = await client.post(
-            f"{_base_url()}/workspace-api/workspaces/{quote(workspace_id)}/files",
+            f"{_base_url(workspace_id)}/workspace-api/workspaces/{quote(workspace_id)}/files",
             headers=headers, content=chunks(),
         )
         response.raise_for_status()
@@ -269,7 +287,7 @@ async def stat_workspace_file(workspace_id: str, relative_path: str) -> dict:
             raise FileNotFoundError(relative_path)
         return _metadata(workspace_id, relative_path, local.stat().st_size)
     async with httpx.AsyncClient(timeout=15) as client:
-        response = await client.head(remote_file_url(workspace_id, relative_path), headers=_headers())
+        response = await client.head(remote_file_url(workspace_id, relative_path), headers=_headers(workspace_id))
         if response.status_code == 404:
             raise FileNotFoundError(relative_path)
         response.raise_for_status()
@@ -286,7 +304,7 @@ def stat_workspace_file_sync(workspace_id: str, relative_path: str) -> dict:
             raise FileNotFoundError(relative_path)
         return _metadata(workspace_id, relative_path, local.stat().st_size)
     with httpx.Client(timeout=15) as client:
-        response = client.head(remote_file_url(workspace_id, relative_path), headers=_headers())
+        response = client.head(remote_file_url(workspace_id, relative_path), headers=_headers(workspace_id))
         if response.status_code == 404:
             raise FileNotFoundError(relative_path)
         response.raise_for_status()
@@ -297,7 +315,7 @@ def stat_workspace_file_sync(workspace_id: str, relative_path: str) -> dict:
 
 
 async def list_workspace_files(workspace_id: str) -> list[dict]:
-    root = _local_root()
+    root = _local_root(workspace_id)
     if root is not None:
         workspace = (root / workspace_id).resolve()
         if not workspace.is_dir():
@@ -308,7 +326,8 @@ async def list_workspace_files(workspace_id: str) -> list[dict]:
         ]
     async with httpx.AsyncClient(timeout=30) as client:
         response = await client.get(
-            f"{_base_url()}/workspace-api/workspaces/{quote(workspace_id)}/files", headers=_headers()
+            f"{_base_url(workspace_id)}/workspace-api/workspaces/{quote(workspace_id)}/files",
+            headers=_headers(workspace_id),
         )
         response.raise_for_status()
         return list(response.json())
@@ -317,6 +336,7 @@ async def list_workspace_files(workspace_id: str) -> list[dict]:
 async def open_remote_file(workspace_id: str, relative_path: str) -> tuple[httpx.AsyncClient, httpx.Response]:
     client = httpx.AsyncClient(timeout=httpx.Timeout(None, connect=10))
     response = await client.send(
-        client.build_request("GET", remote_file_url(workspace_id, relative_path), headers=_headers()), stream=True
+        client.build_request("GET", remote_file_url(workspace_id, relative_path), headers=_headers(workspace_id)),
+        stream=True,
     )
     return client, response

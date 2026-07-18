@@ -32,7 +32,7 @@ SYSTEM_PROMPT = """你在一个桌面聊天应用中回答用户。当前 sessio
 
 SYSTEM_PROMPT += """
 
-Iframe artifacts may also use payload={"workspacePort":{"port":PORT,"path":"optional/path"}}
+Iframe artifacts may also use payload={{"workspacePort":{{"port":PORT,"path":"optional/path"}}}}
 when you start an HTTP preview server inside the current workspace. Bind that
 server to 127.0.0.1. Configure the server base/path prefix for the proxy URL or
 use relative resource URLs; SilverRetort does not rewrite HTML, CSS, or

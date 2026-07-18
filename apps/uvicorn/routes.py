@@ -1,4 +1,4 @@
-"""REST API + 常驻事件通道。路径与 packages/protocol 的 ApiClient 一一对应。"""
+"""REST API and event routes."""
 
 import asyncio
 import json
@@ -23,8 +23,9 @@ import artifact_contexts
 import events
 import mcp_server
 import runs
+import switch_profiles
 import workspace_service
-from engines import create_engine
+from engines import create_engine, create_engine_for_workspace
 from models import (
     ApiModel,
     Artifact,
@@ -32,6 +33,7 @@ from models import (
     ArtifactContextUpdateRequest,
     Attachment,
     CreateWorkspaceRequest,
+    CreateSwitchProfileRequest,
     CreateSessionRequest,
     Message,
     ModelSetting,
@@ -42,9 +44,11 @@ from models import (
     Session,
     SessionModel,
     SlashCommand,
+    SwitchProfile,
     TextPart,
     ToolCall,
     UpdateSessionRequest,
+    UpdateSwitchProfileRequest,
     UpdateWorkspaceRequest,
     Workspace,
     WorkspaceCapability,
@@ -71,7 +75,7 @@ HOP_BY_HOP_HEADERS = {
     "upgrade",
 }
 
-DEFAULT_TITLE = "新会话"
+DEFAULT_TITLE = "New chat"
 
 
 def _data_dir() -> Path:
@@ -157,16 +161,17 @@ def _mcp_servers_from_body(body: dict) -> dict:
 
 
 def _hermes_connection_response() -> dict:
-    settings = _read_desktop_settings()
-    configured_url = str(settings.get("switchUrl") or "")
     runtime_mode = os.getenv("SILVERRETORT_HERMES_MODE")
-    switch_url = configured_url or (str(os.getenv("HERMES_URL") or "") if runtime_mode == "remote" else "")
+    profile = switch_profiles.get_profile(switch_profiles.default_profile_id())
+    switch_url = profile.switch_url if profile and profile.mode == "remote" else ""
+    if not switch_url and runtime_mode == "remote":
+        switch_url = str(os.getenv("HERMES_URL") or "")
     local_hermes_enabled = os.getenv("SILVERRETORT_DESKTOP_MODE") != "packaged" or bool(str(os.getenv("ENABLE_LOCAL_HERMES") or "").strip())
     return {
         "packaged": os.getenv("SILVERRETORT_DESKTOP_MODE") == "packaged",
-        "mode": "remote" if configured_url or runtime_mode in {"remote", "disabled"} else "local",
+        "mode": "remote" if switch_url or runtime_mode in {"remote", "disabled"} else "local",
         "switchUrl": switch_url,
-        "hasHermesApiKey": bool(settings.get("hermesApiKey") or (runtime_mode == "remote" and os.getenv("HERMES_API_KEY"))),
+        "hasHermesApiKey": bool((profile and profile.has_hermes_api_key) or (runtime_mode == "remote" and os.getenv("HERMES_API_KEY"))),
         "localHermesEnabled": local_hermes_enabled,
         "restartRequired": False,
     }
@@ -181,6 +186,35 @@ def _require_hermes_method(name: str):
     if method is None:
         raise HTTPException(503, "Hermes is unavailable")
     return method
+
+
+def _require_engine_method(selected_engine, name: str):
+    method = getattr(selected_engine, name, None)
+    if method is None:
+        raise HTTPException(503, "Hermes is unavailable")
+    return method
+
+
+def _workspace_response(workspace: Workspace) -> Workspace:
+    payload = workspace.model_dump()
+    payload.update(switch_profiles.workspace_summary(workspace.id, workspace.connection_id))
+    return Workspace.model_validate(payload)
+
+
+def _workspace_id_from_context(sessionId: str | None = None, workspaceId: str | None = None) -> str | None:
+    if workspaceId:
+        return workspaceId
+    if sessionId:
+        session = db.get_session(sessionId)
+        if session is None:
+            raise HTTPException(404, "session not found")
+        return session.workspace_id
+    workspaces = db.list_workspaces()
+    return workspaces[0].id if workspaces else None
+
+
+def _engine_from_context(sessionId: str | None = None, workspaceId: str | None = None):
+    return create_engine_for_workspace(_workspace_id_from_context(sessionId, workspaceId))
 
 
 def _models_response(payload: dict) -> HermesModelsResponse:
@@ -201,27 +235,22 @@ def hermes_connection() -> dict:
 @router.put("/hermes/connection")
 def set_hermes_connection(body: dict = Body(...)) -> dict:
     mode = str(body.get("mode") or "").strip().lower()
-    settings = _read_desktop_settings()
     if mode == "remote":
         switch_url = str(body.get("switchUrl") or "").strip().rstrip("/")
         if not switch_url:
             raise HTTPException(400, "switchUrl is required")
-        settings["switchUrl"] = switch_url
-        settings.pop("hermesUrl", None)
         hermes_api_key = str(body.get("hermesApiKey") or "").strip()
-        if hermes_api_key:
-            settings["hermesApiKey"] = hermes_api_key
-        elif not settings.get("hermesApiKey"):
-            raise HTTPException(400, "hermesApiKey is required")
+        try:
+            switch_profiles.set_default_remote_profile(switch_url, hermes_api_key or None)
+        except ValueError as exc:
+            raise HTTPException(400, str(exc)) from exc
+        except Exception as exc:
+            raise HTTPException(503, switch_profiles.secret_error_message(exc)) from exc
     elif mode == "local":
-        settings.pop("switchUrl", None)
-        settings.pop("hermesApiKey", None)
+        switch_profiles.set_default_local_profile()
     else:
         raise HTTPException(400, "mode must be local or remote")
-    _write_desktop_settings(settings)
-    response = _hermes_connection_response()
-    response["restartRequired"] = True
-    return response
+    return _hermes_connection_response()
 
 
 @router.get("/hermes/mcp-servers")
@@ -239,6 +268,53 @@ def set_hermes_mcp_servers(body: dict = Body(...)) -> dict:
         settings.pop("mcpServers", None)
     _write_desktop_settings(settings)
     return _mcp_server_response(settings)
+
+
+@router.get("/switch-profiles")
+def list_switch_profiles() -> list[SwitchProfile]:
+    return [SwitchProfile.model_validate(switch_profiles.profile_response(profile)) for profile in switch_profiles.list_profiles()]
+
+
+@router.post("/switch-profiles")
+def create_switch_profile(body: CreateSwitchProfileRequest) -> SwitchProfile:
+    try:
+        profile = switch_profiles.create_profile(body.name, body.switch_url, body.hermes_api_key)
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from exc
+    except Exception as exc:
+        raise HTTPException(503, switch_profiles.secret_error_message(exc)) from exc
+    return SwitchProfile.model_validate(switch_profiles.profile_response(profile))
+
+
+@router.patch("/switch-profiles/{profile_id}")
+def update_switch_profile(profile_id: str, body: UpdateSwitchProfileRequest) -> SwitchProfile:
+    try:
+        profile = switch_profiles.update_profile(
+            profile_id,
+            body.name,
+            body.switch_url,
+            body.hermes_api_key,
+        )
+    except KeyError as exc:
+        raise HTTPException(404, str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from exc
+    except Exception as exc:
+        raise HTTPException(503, switch_profiles.secret_error_message(exc)) from exc
+    return SwitchProfile.model_validate(switch_profiles.profile_response(profile))
+
+
+@router.delete("/switch-profiles/{profile_id}")
+def delete_switch_profile(profile_id: str) -> dict[str, bool]:
+    if any(workspace.connection_id == profile_id for workspace in db.list_workspaces()):
+        raise HTTPException(409, "switch profile is used by a workspace")
+    try:
+        switch_profiles.delete_profile(profile_id)
+    except KeyError as exc:
+        raise HTTPException(404, str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from exc
+    return {"ok": True}
 
 
 
@@ -259,13 +335,13 @@ def list_sessions() -> list[Session]:
 
 
 @router.get("/workspaces/capability")
-async def workspace_capability() -> WorkspaceCapability:
-    return WorkspaceCapability.model_validate(await workspace_service.capability())
+async def workspace_capability(workspaceId: str | None = None) -> WorkspaceCapability:
+    return WorkspaceCapability.model_validate(await workspace_service.capability(workspaceId))
 
 
 @router.get("/hermes/slash-commands")
-async def hermes_slash_commands() -> list[SlashCommand]:
-    method = _require_hermes_method("list_slash_commands")
+async def hermes_slash_commands(sessionId: str | None = None, workspaceId: str | None = None) -> list[SlashCommand]:
+    method = _require_engine_method(_engine_from_context(sessionId, workspaceId), "list_slash_commands")
     try:
         return [SlashCommand.model_validate(item) for item in await method()]
     except httpx.HTTPStatusError as exc:
@@ -277,8 +353,8 @@ async def hermes_slash_commands() -> list[SlashCommand]:
 
 
 @router.get("/hermes/models")
-async def hermes_models() -> HermesModelsResponse:
-    method = _require_hermes_method("list_models")
+async def hermes_models(sessionId: str | None = None, workspaceId: str | None = None) -> HermesModelsResponse:
+    method = _require_engine_method(_engine_from_context(sessionId, workspaceId), "list_models")
     try:
         return _models_response(await method())
     except Exception as exc:
@@ -287,7 +363,7 @@ async def hermes_models() -> HermesModelsResponse:
 
 @router.get("/hermes/usage")
 async def hermes_usage(sessionId: str | None = None) -> HermesUsageResponse:
-    method = _require_hermes_method("get_usage")
+    method = _require_engine_method(_engine_from_context(sessionId, None), "get_usage")
     try:
         return HermesUsageResponse.model_validate(await method(sessionId))
     except httpx.HTTPStatusError as exc:
@@ -299,8 +375,8 @@ async def hermes_usage(sessionId: str | None = None) -> HermesUsageResponse:
 
 
 @router.get("/hermes/default-model")
-async def hermes_default_model() -> SessionModel:
-    method = _require_hermes_method("get_default_model")
+async def hermes_default_model(sessionId: str | None = None, workspaceId: str | None = None) -> SessionModel:
+    method = _require_engine_method(_engine_from_context(sessionId, workspaceId), "get_default_model")
     try:
         payload = await method()
         provider = str(payload.get("provider") or "")
@@ -320,10 +396,10 @@ async def hermes_default_model() -> SessionModel:
 
 
 @router.put("/hermes/default-model")
-async def set_hermes_default_model(body: SetModelRequest) -> SessionModel:
+async def set_hermes_default_model(body: SetModelRequest, sessionId: str | None = None, workspaceId: str | None = None) -> SessionModel:
     if not body.provider or not body.model:
         raise HTTPException(400, "provider and model are required")
-    method = _require_hermes_method("set_default_model")
+    method = _require_engine_method(_engine_from_context(sessionId, workspaceId), "set_default_model")
     try:
         payload = await method(
             body.provider,
@@ -349,8 +425,8 @@ async def set_hermes_default_model(body: SetModelRequest) -> SessionModel:
 
 
 @router.get("/hermes/vision-model")
-async def hermes_vision_model() -> ModelSetting:
-    method = _require_hermes_method("get_vision_model")
+async def hermes_vision_model(sessionId: str | None = None, workspaceId: str | None = None) -> ModelSetting:
+    method = _require_engine_method(_engine_from_context(sessionId, workspaceId), "get_vision_model")
     try:
         return ModelSetting.model_validate(await method())
     except Exception as exc:
@@ -358,12 +434,12 @@ async def hermes_vision_model() -> ModelSetting:
 
 
 @router.put("/hermes/vision-model")
-async def set_hermes_vision_model(body: SetModelRequest) -> ModelSetting:
+async def set_hermes_vision_model(body: SetModelRequest, sessionId: str | None = None, workspaceId: str | None = None) -> ModelSetting:
     has_provider = bool(body.provider and body.provider.strip())
     has_model = bool(body.model and body.model.strip())
     if has_provider != has_model:
         raise HTTPException(400, "provider and model must both be set or both be empty")
-    method = _require_hermes_method("set_vision_model")
+    method = _require_engine_method(_engine_from_context(sessionId, workspaceId), "set_vision_model")
     try:
         payload = await method(
             body.provider,
@@ -380,16 +456,17 @@ async def set_hermes_vision_model(body: SetModelRequest) -> ModelSetting:
 @router.get("/workspaces")
 async def list_workspaces() -> list[Workspace]:
     workspaces = db.list_workspaces()
-    capability = await workspace_service.capability()
-    if capability.get("supported") and capability.get("writable"):
-        for workspace in workspaces:
-            try:
+    for workspace in workspaces:
+        try:
+            capability = await workspace_service.capability(workspace.id)
+            if capability.get("supported") and capability.get("writable"):
                 await workspace_service.create_remote(workspace.id)
                 db.set_workspace_status(workspace.id, "active")
-            except Exception:
-                db.set_workspace_status(workspace.id, "error")
+        except Exception:
+            db.set_workspace_status(workspace.id, "error")
+    if workspaces:
         workspaces = db.list_workspaces()
-    return workspaces
+    return [_workspace_response(workspace) for workspace in workspaces]
 
 
 @router.post("/workspaces")
@@ -397,16 +474,19 @@ async def create_workspace(body: CreateWorkspaceRequest) -> Workspace:
     name = body.name.strip()
     if not name:
         raise HTTPException(400, "workspace name is required")
+    connection_id = body.connection_id or switch_profiles.default_profile_id()
+    if switch_profiles.get_profile(connection_id) is None:
+        raise HTTPException(400, "switch profile not found")
     workspace_id = uuid.uuid4().hex
+    workspace = db.create_workspace(workspace_id, name, "creating", connection_id)
     try:
         await workspace_service.create_remote(workspace_id)
     except Exception as exc:
+        db.delete_workspace(workspace_id)
         raise HTTPException(503, f"Hermes workspace unavailable: {exc}") from exc
-    try:
-        return db.create_workspace(workspace_id, name)
-    except Exception:
-        await workspace_service.delete_remote(workspace_id)
-        raise
+    db.set_workspace_status(workspace_id, "active")
+    refreshed = db.get_workspace(workspace_id)
+    return _workspace_response(refreshed) if refreshed is not None else workspace
 
 
 @router.patch("/workspaces/{workspace_id}")
@@ -414,7 +494,7 @@ def rename_workspace(workspace_id: str, body: UpdateWorkspaceRequest) -> Workspa
     workspace = db.rename_workspace(workspace_id, body.name.strip())
     if workspace is None:
         raise HTTPException(404, "workspace not found")
-    return workspace
+    return _workspace_response(workspace)
 
 
 @router.delete("/workspaces/{workspace_id}")
@@ -433,8 +513,9 @@ async def delete_workspace(workspace_id: str) -> dict[str, bool]:
     db.delete_workspace(workspace_id)
     if not db.list_workspaces():
         fallback_id = uuid.uuid4().hex
+        db.create_workspace(fallback_id, "Default workspace", "creating", switch_profiles.default_profile_id())
         await workspace_service.create_remote(fallback_id)
-        db.create_workspace(fallback_id, "默认工作区")
+        db.set_workspace_status(fallback_id, "active")
     return {"ok": True}
 
 
@@ -456,9 +537,10 @@ def rename_session(session_id: str, body: UpdateSessionRequest) -> Session:
 
 @router.get("/sessions/{session_id}/model")
 async def get_session_model(session_id: str) -> SessionModel:
-    if db.get_session(session_id) is None:
+    session = db.get_session(session_id)
+    if session is None:
         raise HTTPException(404, "session not found")
-    method = _require_hermes_method("get_session_model")
+    method = _require_engine_method(create_engine_for_workspace(session.workspace_id), "get_session_model")
     try:
         return SessionModel.model_validate(await method(session_id))
     except Exception as exc:
@@ -467,9 +549,10 @@ async def get_session_model(session_id: str) -> SessionModel:
 
 @router.put("/sessions/{session_id}/model")
 async def set_session_model(session_id: str, body: SetModelRequest) -> SessionModel:
-    if db.get_session(session_id) is None:
+    session = db.get_session(session_id)
+    if session is None:
         raise HTTPException(404, "session not found")
-    method = _require_hermes_method("set_session_model")
+    method = _require_engine_method(create_engine_for_workspace(session.workspace_id), "set_session_model")
     try:
         return SessionModel.model_validate(
             await method(session_id, body.provider, body.model, body.model_id)
@@ -495,10 +578,10 @@ def _compact_message(message: Message) -> Message:
             continue
         tool_call = part.tool_call
         if tool_call.detail and len(tool_call.detail) > TOOL_SUMMARY_LIMIT:
-            tool_call.detail = tool_call.detail[:TOOL_SUMMARY_LIMIT] + "…"
+            tool_call.detail = tool_call.detail[:TOOL_SUMMARY_LIMIT] + "..."
             tool_call.detail_truncated = True
         if tool_call.result and len(tool_call.result) > TOOL_SUMMARY_LIMIT:
-            tool_call.result = tool_call.result[:TOOL_SUMMARY_LIMIT] + "…"
+            tool_call.result = tool_call.result[:TOOL_SUMMARY_LIMIT] + "..."
             tool_call.result_truncated = True
     return compact_message
 
@@ -642,6 +725,17 @@ def _remote_auth_headers(headers=None) -> dict[str, str]:
     return result
 
 
+def _remote_auth_headers_for_workspace(workspace_id: str, headers=None) -> dict[str, str]:
+    result = _filter_proxy_headers(headers or {})
+    workspace = db.get_workspace(workspace_id)
+    connection = switch_profiles.connection_for_profile(
+        workspace.connection_id if workspace is not None else None
+    )
+    if connection.api_key:
+        result["authorization"] = f"Bearer {connection.api_key}"
+    return result
+
+
 def _validate_workspace_proxy_request(workspace_id: str, port: int) -> None:
     if db.get_workspace(workspace_id) is None:
         raise HTTPException(404, "workspace not found")
@@ -661,14 +755,14 @@ async def _stream_remote_proxy_response(client: httpx.AsyncClient, response: htt
 async def _proxy_workspace_port_http(workspace_id: str, port: int, request: Request, path: str = ""):
     _validate_workspace_proxy_request(workspace_id, port)
     try:
-        await workspace_service.require_workspace_proxy()
+        await workspace_service.require_workspace_proxy(workspace_id)
     except RuntimeError as exc:
         raise HTTPException(503, str(exc)) from exc
     client = httpx.AsyncClient(timeout=httpx.Timeout(None, connect=10))
     upstream = client.build_request(
         request.method,
         workspace_service.remote_workspace_proxy_url(workspace_id, port, path, request.url.query),
-        headers=_remote_auth_headers(request.headers),
+        headers=_remote_auth_headers_for_workspace(workspace_id, request.headers),
         content=await request.body(),
     )
     try:
@@ -706,7 +800,7 @@ async def _remote_to_browser(websocket: WebSocket, remote) -> None:
 async def _proxy_workspace_port_websocket(websocket: WebSocket, workspace_id: str, port: int, path: str = ""):
     try:
         _validate_workspace_proxy_request(workspace_id, port)
-        await workspace_service.require_workspace_proxy()
+        await workspace_service.require_workspace_proxy(workspace_id)
     except (HTTPException, RuntimeError) as exc:
         reason = str(exc.detail) if isinstance(exc, HTTPException) else str(exc)
         await websocket.close(code=1013, reason=reason)
@@ -716,7 +810,7 @@ async def _proxy_workspace_port_websocket(websocket: WebSocket, workspace_id: st
     try:
         async with connect(
             workspace_service.remote_workspace_proxy_ws_url(workspace_id, port, path, websocket.url.query),
-            additional_headers=_remote_auth_headers(),
+            additional_headers=_remote_auth_headers_for_workspace(workspace_id),
         ) as remote:
             tasks = {
                 asyncio.create_task(_browser_to_remote(websocket, remote)),
@@ -790,7 +884,7 @@ async def get_artifact_content(artifact_id: str, asset_path: str | None = None):
         raise HTTPException(404, "artifact session not found")
     if "workspacePort" in payload:
         try:
-            await workspace_service.require_workspace_proxy()
+            await workspace_service.require_workspace_proxy(session.workspace_id)
         except RuntimeError as exc:
             raise HTTPException(503, str(exc)) from exc
         port, path = _workspace_port_payload_target(payload, asset_path)
@@ -849,12 +943,20 @@ async def send_chat(session_id: str, body: SendChatRequest) -> SendChatResponse:
     for context in consumed_contexts:
         events.broadcast(events.artifact_context(session_id, context.artifact_id, None))
 
-    # 首条消息时用内容生成标题
+    # 棣栨潯娑堟伅鏃剁敤鍐呭鐢熸垚鏍囬
     if session.title == DEFAULT_TITLE and not history:
         db.rename_session(session_id, _auto_title(body.text))
 
     run_id = uuid.uuid4().hex
-    runs.start_run(engine, session_id, session.workspace_id, run_id, history, user_message, assistant_message)
+    runs.start_run(
+        create_engine_for_workspace(session.workspace_id),
+        session_id,
+        session.workspace_id,
+        run_id,
+        history,
+        user_message,
+        assistant_message,
+    )
     return SendChatResponse(
         run_id=run_id,
         user_message_id=user_message.id,
@@ -893,7 +995,15 @@ async def restart_message(
         db.rename_session(session_id, _auto_title(body.text))
 
     run_id = uuid.uuid4().hex
-    runs.start_run(engine, session_id, session.workspace_id, run_id, result.history, result.user_message, assistant_message)
+    runs.start_run(
+        create_engine_for_workspace(session.workspace_id),
+        session_id,
+        session.workspace_id,
+        run_id,
+        result.history,
+        result.user_message,
+        assistant_message,
+    )
     return SendChatResponse(
         run_id=run_id,
         user_message_id=result.user_message.id,

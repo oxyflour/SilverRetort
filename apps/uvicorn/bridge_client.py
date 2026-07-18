@@ -12,6 +12,7 @@ import httpx
 from websockets.asyncio.client import connect
 
 import local_mcp_servers
+import switch_profiles
 
 RETRY_DELAYS = (1, 2, 5)
 LOOPBACK_HOSTS = {"127.0.0.1", "localhost", "::1"}
@@ -194,9 +195,42 @@ def start_task() -> asyncio.Task[None] | None:
     )
 
 
+def _bridge_url_from_switch_url(switch_url: str) -> str:
+    parsed = urlsplit(switch_url.rstrip("/"))
+    scheme = "wss" if parsed.scheme == "https" else "ws"
+    path = parsed.path.rstrip("/")
+    path = f"{path}/bridge" if path else "/bridge"
+    return urlunsplit((scheme, parsed.netloc, path, "", ""))
+
+
+def start_tasks() -> list[asyncio.Task[None]]:
+    tasks: list[asyncio.Task[None]] = []
+    legacy = start_task()
+    if legacy is not None:
+        tasks.append(legacy)
+    seen = {resolve_bridge_url()} if resolve_bridge_url() else set()
+    for connection in switch_profiles.list_remote_connections():
+        bridge_url = _bridge_url_from_switch_url(connection.switch_url)
+        if bridge_url in seen:
+            continue
+        seen.add(bridge_url)
+        tasks.append(
+            asyncio.create_task(
+                _bridge_forever(bridge_url, connection.api_key),
+                name=f"hermes-bridge-{connection.profile_id}",
+            )
+        )
+    return tasks
+
+
 async def stop_task(task: asyncio.Task[None] | None) -> None:
     if task is None:
         return
     task.cancel()
     with suppress(asyncio.CancelledError):
         await task
+
+
+async def stop_tasks(tasks: list[asyncio.Task[None]]) -> None:
+    for task in tasks:
+        await stop_task(task)
