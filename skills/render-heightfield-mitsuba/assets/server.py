@@ -250,6 +250,7 @@ class MitsubaRenderer:
         self._seed = 0
         self._dirty = True
         self._scene = None
+        self._scene_params = None
         self._build_scene()
 
         logger.info(
@@ -260,13 +261,22 @@ class MitsubaRenderer:
             mi.variant(),
         )
 
-    def _build_scene(self):
+    def _camera_to_world(self):
         az, el, dist = self._azimuth, self._elevation, self._distance
         x = dist * math.cos(el) * math.sin(az)
         y = dist * math.sin(el)
         z = dist * math.cos(el) * math.cos(az)
         origin = self._target + np.array([x, y, z])
+        return mi.ScalarTransform4f.look_at(
+            origin.tolist(),
+            self._target.tolist(),
+            [0.0, 1.0, 0.0],
+        )
 
+    def _reset_accumulation(self):
+        self._dirty = True
+
+    def _build_scene(self):
         hf = self._scene_spec["heightfield"]
 
         scene_dict = {
@@ -276,11 +286,7 @@ class MitsubaRenderer:
                 "type": "perspective",
                 "near_clip": 0.0001,
                 "far_clip": 100.0,
-                "to_world": mi.ScalarTransform4f.look_at(
-                    origin.tolist(),
-                    self._target.tolist(),
-                    [0.0, 1.0, 0.0],
-                ),
+                "to_world": self._camera_to_world(),
                 "fov": 45,
                 "film": {
                     "type": "hdrfilm",
@@ -348,7 +354,8 @@ class MitsubaRenderer:
         }
 
         self._scene = mi.load_dict(scene_dict)
-        self._dirty = True
+        self._scene_params = mi.traverse(self._scene)
+        self._reset_accumulation()
 
     def update_scene(self, spec):
         """Merge scene spec from the frontend — only supplied keys are updated."""
@@ -371,19 +378,32 @@ class MitsubaRenderer:
         return dict(self._scene_spec)
 
     def update_camera(self, azimuth, elevation, distance, target=None):
+        next_target = self._target
+        if target is not None:
+            next_target = np.array(target, dtype=np.float64)
+
+        next_distance = max(0.05, min(5.0, distance))
         changed = (
             abs(self._azimuth - azimuth) > 1e-6
             or abs(self._elevation - elevation) > 1e-6
-            or abs(self._distance - distance) > 1e-6
+            or abs(self._distance - next_distance) > 1e-6
+            or np.linalg.norm(self._target - next_target) > 1e-6
         )
-        if target is not None:
-            self._target = np.array(target, dtype=np.float64)
+        if not changed:
+            return
+
         self._azimuth = azimuth
         self._elevation = elevation
-        self._distance = max(0.05, min(5.0, distance))
-        if changed:
-            self._dirty = True
+        self._distance = next_distance
+        self._target = next_target
+
+        if self._scene_params is None:
             self._build_scene()
+            return
+
+        self._scene_params["sensor.to_world"] = self._camera_to_world()
+        self._scene_params.update()
+        self._reset_accumulation()
 
     def update_resolution(self, width, height):
         self.width = max(160, min(3840, width))
@@ -473,6 +493,7 @@ async def hf_watchdog(interval=2.0):
 # ============================================================================
 
 pcs = set()
+CAMERA_UPDATE_INTERVAL = 0.08
 
 
 async def handle_offer(request: web.Request):
@@ -483,6 +504,31 @@ async def handle_offer(request: web.Request):
 
     renderer = request.app["renderer"]
     data_channel_ref = []
+    pending_camera = {"data": None}
+    camera_flush_task = None
+    last_camera_update = 0.0
+
+    def apply_camera_update(data):
+        renderer.update_camera(
+            azimuth=data.get("azimuth", renderer._azimuth),
+            elevation=data.get("elevation", renderer._elevation),
+            distance=data.get("distance", renderer._distance),
+            target=data.get("target", None),
+        )
+
+    async def flush_camera_updates():
+        nonlocal camera_flush_task, last_camera_update
+        try:
+            while pending_camera["data"] is not None:
+                wait = CAMERA_UPDATE_INTERVAL - (time.monotonic() - last_camera_update)
+                if wait > 0.0:
+                    await asyncio.sleep(wait)
+                data = pending_camera["data"]
+                pending_camera["data"] = None
+                apply_camera_update(data)
+                last_camera_update = time.monotonic()
+        finally:
+            camera_flush_task = None
 
     @pc.on("datachannel")
     def on_datachannel(channel):
@@ -491,24 +537,27 @@ async def handle_offer(request: web.Request):
 
         @channel.on("message")
         def on_message(msg):
+            nonlocal camera_flush_task, last_camera_update
             try:
                 data = json.loads(msg)
             except Exception:
                 return
             if data.get("type") == "camera":
-                renderer.update_camera(
-                    azimuth=data.get("azimuth", renderer._azimuth),
-                    elevation=data.get("elevation", renderer._elevation),
-                    distance=data.get("distance", renderer._distance),
-                    target=data.get("target", None),
-                )
+                now = time.monotonic()
+                if now - last_camera_update >= CAMERA_UPDATE_INTERVAL:
+                    apply_camera_update(data)
+                    last_camera_update = now
+                else:
+                    pending_camera["data"] = data
+                    if camera_flush_task is None:
+                        camera_flush_task = asyncio.ensure_future(flush_camera_updates())
 
     track = MitsubaTrack(renderer)
     pc.addTrack(track)
 
     @pc.on("iceconnectionstatechange")
     async def on_ice_state():
-        if pc.iceConnectionState == "failed":
+        if pc.iceConnectionState in ("failed", "closed"):
             await pc.close()
             pcs.discard(pc)
         elif pc.iceConnectionState in ("completed", "connected"):
