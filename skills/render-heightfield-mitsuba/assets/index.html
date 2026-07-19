@@ -1,0 +1,603 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Mitsuba 3 Path Tracer — Heightfield</title>
+<script src="/artifact-bridge-v1.js"></script>
+<style>
+* { margin: 0; padding: 0; box-sizing: border-box; }
+html, body { width: 100%; height: 100%; overflow: hidden; background: #111; font-family: system-ui, sans-serif; }
+#container { position: relative; width: 100%; height: 100%; }
+video { display: block; width: 100%; height: 100%; object-fit: contain; cursor: grab; }
+video.dragging { cursor: grabbing; }
+#overlay {
+  position: absolute; top: 12px; right: 12px;
+  background: rgba(0,0,0,0.75); color: #fff;
+  padding: 8px 14px; border-radius: 6px;
+  font-size: 13px; line-height: 1.5;
+  pointer-events: none; user-select: none;
+  z-index: 10;
+}
+#overlay .spp { font-weight: bold; }
+#overlay .spp.reset { color: #ff6b6b; }
+#overlay .spp.live { color: #ff6b6b; }
+#overlay .spp.accum { color: #51cf66; }
+#status {
+  position: absolute; top: 50%; left: 50%; transform: translate(-50%,-50%);
+  color: #aaa; font-size: 18px; z-index: 20; pointer-events: none;
+}
+#info-bar {
+  position: absolute; bottom: 8px; left: 8px; right: 8px;
+  display: flex; gap: 12px; justify-content: center;
+  pointer-events: none; user-select: none; z-index: 10;
+}
+#info-bar span {
+  background: rgba(0,0,0,0.55); color: #ccc;
+  padding: 3px 8px; border-radius: 4px; font-size: 11px;
+}
+
+/* --- Control panel --- */
+#panel {
+  position: absolute; top: 12px; left: 12px; z-index: 30;
+  background: rgba(20,20,26,0.92); color: #ddd;
+  padding: 14px 16px; border-radius: 8px;
+  font-size: 13px; min-width: 220px;
+  backdrop-filter: blur(8px);
+  border: 1px solid rgba(255,255,255,0.1);
+  transition: opacity 0.2s;
+}
+#panel.collapsed .panel-body { display: none; }
+#panel-toggle {
+  display: flex; align-items: center; justify-content: space-between;
+  cursor: pointer; user-select: none; margin-bottom: 4px;
+}
+#panel-toggle h3 { font-size: 13px; font-weight: 600; margin: 0; color: #aaa; }
+#panel-toggle .arrow { font-size: 16px; color: #888; transition: transform 0.2s; }
+#panel.collapsed #panel-toggle .arrow { transform: rotate(-90deg); }
+
+.ctrl-row { margin-bottom: 8px; }
+.ctrl-row label {
+  display: flex; justify-content: space-between; align-items: baseline;
+  margin-bottom: 2px; font-size: 11px; color: #999;
+}
+.ctrl-row label .val { color: #fff; font-weight: 600; font-size: 12px; min-width: 55px; text-align: right; }
+.ctrl-row .slider-wrap { display: flex; align-items: center; gap: 6px; }
+.ctrl-row input[type="range"] {
+  flex: 1; height: 4px; -webkit-appearance: none; appearance: none;
+  background: #444; border-radius: 2px; outline: none;
+}
+.ctrl-row input[type="range"]::-webkit-slider-thumb {
+  -webkit-appearance: none; appearance: none;
+  width: 14px; height: 14px; border-radius: 50%;
+  background: #7eb8da; cursor: pointer; border: none;
+}
+.ctrl-row input[type="number"] {
+  width: 52px; background: rgba(255,255,255,0.08); border: 1px solid #444;
+  color: #fff; font-size: 11px; padding: 2px 4px; border-radius: 3px;
+  text-align: right;
+}
+.ctrl-row input[type="number"]:focus { outline: none; border-color: #7eb8da; }
+
+#btn-reset {
+  margin-top: 6px; width: 100%; padding: 5px 0;
+  background: rgba(255,255,255,0.08); border: 1px solid #444; color: #aaa;
+  border-radius: 4px; font-size: 11px; cursor: pointer;
+}
+#btn-reset:hover { background: rgba(255,255,255,0.15); color: #fff; }
+
+/* --- Heightfield preview image (fetched from /preview) --- */
+#preview-wrap {
+  margin-top: 10px; position: relative; cursor: grab;
+  border: 1px solid rgba(255,255,255,0.15); border-radius: 4px;
+  overflow: hidden; line-height: 0;
+}
+#preview-wrap.dragging { cursor: grabbing; }
+#preview-wrap img { display: block; width: 100%; image-rendering: pixelated; }
+#preview-info {
+  font-size: 10px; color: #666; text-align: center;
+  margin: 2px 0 0 0; pointer-events: none;
+}
+
+.hidden { display: none !important; }
+</style>
+</head>
+<body>
+<div id="container">
+  <video id="video" autoplay playsinline muted></video>
+
+  <!-- SPP display -->
+  <div id="overlay"><span class="spp reset" id="spp-text">SPP: connecting...</span></div>
+  <div id="status">Connecting to render server...</div>
+
+  <!-- Info bar -->
+  <div id="info-bar">
+    <span>Drag: rotate</span>
+    <span>Shift+Drag: pan</span>
+    <span>Scroll: zoom</span>
+    <span>SPP accumulates when idle</span>
+    <span id="res-text"></span>
+  </div>
+
+  <!-- Scene control panel -->
+  <div id="panel">
+    <div id="panel-toggle" onclick="togglePanel()">
+      <h3>Heightfield</h3>
+      <span class="arrow">&#9660;</span>
+    </div>
+    <div class="panel-body">
+      <div class="ctrl-row">
+        <label>Period <span class="val" id="val-period">300</span> um</label>
+        <div class="slider-wrap">
+          <input type="range" id="slider-period" min="50" max="2000" value="300" step="1" oninput="onSlider(this, 'period', 1)">
+          <input type="number" id="num-period" value="300" step="1" min="50" max="2000" onchange="onNumber(this, 'period', 1)">
+        </div>
+      </div>
+      <div class="ctrl-row">
+        <label>Height <span class="val" id="val-height">10</span> um</label>
+        <div class="slider-wrap">
+          <input type="range" id="slider-height" min="1" max="100" value="10" step="1" oninput="onSlider(this, 'height', 0.1)">
+          <input type="number" id="num-height" value="10" step="1" min="1" max="100" onchange="onNumber(this, 'height', 0.1)">
+        </div>
+      </div>
+      <div class="ctrl-row">
+        <label>Rotation <span class="val" id="val-rotation">0</span> rad/m</label>
+        <div class="slider-wrap">
+          <input type="range" id="slider-rotation" min="0" max="200" value="0" step="1" oninput="onSlider(this, 'rotation', 1)">
+          <input type="number" id="num-rotation" value="0" step="1" min="0" max="200" onchange="onNumber(this, 'rotation', 1)">
+        </div>
+      </div>
+      <button id="btn-reset" onclick="resetScene()">Reset defaults</button>
+      <div id="preview-wrap"><img id="preview-img" src="" alt="heightfield preview"></div>
+      <p id="preview-info">&#216; 0 &#215; 0 mm</p>
+    </div>
+  </div>
+</div>
+
+<script>
+// ======================================================================
+// Scene spec (the authoritative scene definition lives here on the frontend)
+// ======================================================================
+const DEFAULT_SCENE_SPEC = {
+  heightfield: {
+    period: 0.0003,       // 0.3 mm = 300 um
+    hmax: 0.00001,        // 0.01 mm = 10 um
+    fd_step: 0.000001,    // 1 um finite-difference step
+    rotation_speed: 0.0,  // rad/m — pyramid rotation per metre from center
+    reflectance: [0.95, 0.95, 0.95]
+  },
+  envmap: "studio/studio_envmap.exr"
+};
+
+let sceneSpec = JSON.parse(JSON.stringify(DEFAULT_SCENE_SPEC));
+
+// ======================================================================
+// DOM refs
+// ======================================================================
+const video = document.getElementById('video');
+const overlay = document.getElementById('overlay');
+const sppText = document.getElementById('spp-text');
+const statusEl = document.getElementById('status');
+const resText = document.getElementById('res-text');
+
+function e(id) { return document.getElementById(id); }
+
+// ======================================================================
+// Scene param helpers — all internal values in metres, display in um
+// ======================================================================
+const UM = 0.000001;
+
+function periodToDisplay(m) { return Math.round(m / UM); }
+function displayToPeriod(d) { return d * UM; }
+function hmaxToDisplay(m)   { return Math.round(m / UM); }
+function displayToHmax(d)   { return d * UM; }
+
+const HSTEP = 0.1 * UM;
+function hmaxToDisplaySlider(v) { return (v / UM).toFixed(1); }
+function displayToHmaxSlider(d) { return Math.round(d * UM / HSTEP); }
+
+function rotationToDisplay(v) { return Math.round(v); }
+function displayToRotation(d) { return d; }
+
+// ======================================================================
+// Heightfield preview — fetched from server's GET /preview endpoint
+// ======================================================================
+let previewCenterX = 0.0;
+let previewCenterY = 0.0;
+let previewSpan = 0.002;   // 2 mm default
+let previewVersion = 0;    // cache buster
+
+function renderPreview() {
+  const img = e("preview-img");
+  if (!img) return;
+  const hf = sceneSpec.heightfield;
+  const period = hf.period;
+  const hmax = hf.hmax;
+  const rs = hf.rotation_speed || 0;
+  const span = previewSpan;
+  const cx = previewCenterX;
+  const cy = previewCenterY;
+  previewVersion++;
+  const url = "preview?period=" + period + "&hmax=" + hmax
+    + "&rotation_speed=" + rs
+    + "&center_x=" + cx + "&center_y=" + cy
+    + "&size_mm=" + (span * 1000)
+    + "&v=" + previewVersion;
+  img.src = url;
+
+  e("preview-info").textContent =
+    "\u00d8 " + (span * 1000).toFixed(1) + " \u00d7 " + (span * 1000).toFixed(1) + " mm";
+}
+
+// Preview drag/zoom
+let prevDragging = false;
+let prevDragStart = { x: 0, y: 0 };
+let prevStartCX = 0;
+let prevStartCY = 0;
+
+(function initPreview() {
+  const wrap = document.getElementById("preview-wrap");
+  if (!wrap) return;
+  wrap.addEventListener("pointerdown", (ev) => {
+    prevDragging = true;
+    prevDragStart = { x: ev.clientX, y: ev.clientY };
+    prevStartCX = previewCenterX;
+    prevStartCY = previewCenterY;
+    wrap.classList.add("dragging");
+    ev.target.setPointerCapture(ev.pointerId);
+    ev.preventDefault();
+    ev.stopPropagation();
+  });
+  wrap.addEventListener("pointermove", (ev) => {
+    if (!prevDragging) return;
+    const dx = ev.clientX - prevDragStart.x;
+    const dy = ev.clientY - prevDragStart.y;
+    const scale = previewSpan / 128;
+    previewCenterX = prevStartCX - dx * scale;
+    previewCenterY = prevStartCY - dy * scale;
+    renderPreview();
+  });
+  wrap.addEventListener("pointerup", () => {
+    prevDragging = false;
+    wrap.classList.remove("dragging");
+  });
+  wrap.addEventListener("wheel", (ev) => {
+    ev.preventDefault();
+    ev.stopPropagation();
+    const factor = ev.deltaY > 0 ? 1.2 : 0.8;
+    previewSpan = Math.max(0.0002, Math.min(0.02, previewSpan * factor));
+    renderPreview();
+  }, { passive: false });
+})();
+
+function syncUIFromSpec() {
+  const hf = sceneSpec.heightfield;
+  const pd = periodToDisplay(hf.period);
+  const rd = rotationToDisplay(hf.rotation_speed || 0);
+  e('slider-period').value = pd;
+  e('num-period').value = pd;
+  e('val-period').textContent = pd;
+  e('slider-height').value = displayToHmaxSlider(hf.hmax);
+  e('num-height').value = hmaxToDisplay(hf.hmax);
+  e('val-height').textContent = hmaxToDisplay(hf.hmax);
+  e('slider-rotation').value = rd;
+  e('num-rotation').value = rd;
+  e('val-rotation').textContent = rd;
+  renderPreview();
+}
+
+// ======================================================================
+// Slider handlers (3-way: period, height, rotation)
+// ======================================================================
+function onSlider(el, param, stepM) {
+  const displayVal = parseInt(el.value);
+  let numEl, valEl;
+  if (param === 'period') {
+    numEl = e('num-period'); valEl = e('val-period');
+  } else if (param === 'height') {
+    numEl = e('num-height'); valEl = e('val-height');
+  } else {
+    numEl = e('num-rotation'); valEl = e('val-rotation');
+  }
+  numEl.value = displayVal;
+  valEl.textContent = displayVal;
+
+  if (param === 'period') {
+    sceneSpec.heightfield.period = displayToPeriod(displayVal);
+  } else if (param === 'height') {
+    sceneSpec.heightfield.hmax = displayToHmax(displayVal);
+  } else {
+    sceneSpec.heightfield.rotation_speed = displayToRotation(displayVal);
+  }
+  scheduleScenePost();
+}
+
+function onNumber(el, param, stepM) {
+  const displayVal = parseInt(el.value) || 0;
+  let sliderId, valEl, min, max;
+  if (param === 'period') {
+    sliderId = 'slider-period'; valEl = e('val-period');
+    min = 50; max = 2000;
+  } else if (param === 'height') {
+    sliderId = 'slider-height'; valEl = e('val-height');
+    min = 1; max = 100;
+  } else {
+    sliderId = 'slider-rotation'; valEl = e('val-rotation');
+    min = 0; max = 200;
+  }
+  const sliderEl = e(sliderId);
+
+  const clamped = Math.max(min, Math.min(max, displayVal));
+  el.value = clamped;
+  sliderEl.value = clamped;
+  valEl.textContent = clamped;
+
+  if (param === 'period') {
+    sceneSpec.heightfield.period = displayToPeriod(clamped);
+  } else if (param === 'height') {
+    sceneSpec.heightfield.hmax = displayToHmax(clamped);
+  } else {
+    sceneSpec.heightfield.rotation_speed = displayToRotation(clamped);
+  }
+  scheduleScenePost();
+}
+
+// ======================================================================
+// Panel toggle
+// ======================================================================
+function togglePanel() {
+  e('panel').classList.toggle('collapsed');
+}
+
+// ======================================================================
+// Reset
+// ======================================================================
+function resetScene() {
+  sceneSpec = JSON.parse(JSON.stringify(DEFAULT_SCENE_SPEC));
+  syncUIFromSpec();
+  scheduleScenePost();
+}
+
+// ======================================================================
+// WebRTC
+// ======================================================================
+let pc = null;
+let dc = null;
+
+async function connect() {
+  statusEl.textContent = 'Creating peer connection...';
+  pc = new RTCPeerConnection({
+    iceServers: [{ urls: 'stun:stun.l.google.com:19302' }]
+  });
+  pc.addTransceiver('video', { direction: 'recvonly' });
+
+  dc = pc.createDataChannel('stats');
+  dc.onmessage = (e) => {
+    const msg = JSON.parse(e.data);
+    if (msg.total_spp !== undefined) {
+      if (!cameraDirty && !sceneDirty && !interactiveMode) {
+        totalSpp = msg.total_spp;
+        updateSppDisplay();
+      }
+    }
+  };
+
+  pc.ontrack = (event) => {
+    statusEl.textContent = '';
+    video.srcObject = event.streams[0];
+    video.classList.remove('hidden');
+    updateResolution();
+    statusEl.classList.add('hidden');
+  };
+  pc.onconnectionstatechange = () => {
+    if (pc.connectionState === 'connected') updateResolution();
+    if (pc.connectionState === 'failed' || pc.connectionState === 'disconnected') {
+      statusEl.classList.remove('hidden');
+      statusEl.textContent = 'Connection lost. Retrying...';
+      setTimeout(connect, 2000);
+    }
+  };
+  const offer = await pc.createOffer();
+  await pc.setLocalDescription(offer);
+  const resp = await fetch('offer', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ sdp: pc.localDescription.sdp, type: pc.localDescription.type })
+  });
+  const answer = await resp.json();
+  await pc.setRemoteDescription(new RTCSessionDescription(answer));
+
+  try {
+    const sr = await fetch('scene');
+    const serverSpec = await sr.json();
+    if (serverSpec && serverSpec.heightfield) {
+      sceneSpec = serverSpec;
+      syncUIFromSpec();
+    }
+  } catch (e) {}
+}
+
+// ======================================================================
+// Camera controls
+// ======================================================================
+let azimuth = 0.0;
+let elevation = 0.524;
+let distance = 0.40;
+let target = [0, 0.001, 0];
+let totalSpp = 0;
+let dragging = false;
+let dragStart = { x: 0, y: 0 };
+let dragStartAz = 0;
+let dragStartEl = 0;
+let dragStartTarget = null;
+let cameraDirty = false;
+let lastCameraPost = 0;
+const DEBOUNCE_MS = 60;
+let interactiveMode = false;
+let wheelTimeout = null;
+
+function updateResolution() {
+  const w = Math.round(video.videoWidth || video.clientWidth || 640);
+  const h = Math.round(video.videoHeight || video.clientHeight || 480);
+  if (w > 0 && h > 0) {
+    resText.textContent = w + '\u00d7' + h;
+    fetch('config', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ width: w, height: h })
+    });
+  }
+}
+
+function sendCamera() {
+  if (dc && dc.readyState === 'open') {
+    dc.send(JSON.stringify({ type: 'camera', azimuth, elevation, distance, target }));
+  }
+}
+
+let debounceTimer = null;
+function scheduleCameraPost() {
+  cameraDirty = true;
+  updateSppDisplay();
+  if (debounceTimer) clearTimeout(debounceTimer);
+  const delay = Math.max(0, DEBOUNCE_MS - (Date.now() - lastCameraPost));
+  debounceTimer = setTimeout(() => {
+    if (cameraDirty) {
+      cameraDirty = false;
+      sendCamera();
+    }
+  }, delay);
+}
+
+// ======================================================================
+// Scene posting (debounced, 150ms)
+// ======================================================================
+let sceneDirty = false;
+let lastScenePost = 0;
+
+async function postScene() {
+  lastScenePost = Date.now();
+  try {
+    await fetch('scene', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(sceneSpec)
+    });
+  } catch (e) {}
+}
+
+let sceneDebounce = null;
+function scheduleScenePost() {
+  sceneDirty = true;
+  totalSpp = 0;
+  updateSppDisplay();
+  if (sceneDebounce) clearTimeout(sceneDebounce);
+  renderPreview();  // immediate preview update from server
+  sceneDebounce = setTimeout(() => {
+    if (sceneDirty) {
+      sceneDirty = false;
+      postScene();
+    }
+  }, 150);
+}
+
+// ======================================================================
+// Pointer
+// ======================================================================
+video.addEventListener('pointerdown', (e) => {
+  dragging = true;
+  dragStart = { x: e.clientX, y: e.clientY };
+  dragStartAz = azimuth;
+  dragStartEl = elevation;
+  dragStartTarget = [...target];
+  video.classList.add('dragging');
+  video.setPointerCapture(e.pointerId);
+  enterInteractive();
+});
+
+video.addEventListener('pointermove', (e) => {
+  if (!dragging) return;
+  const dx = e.clientX - dragStart.x;
+  const dy = e.clientY - dragStart.y;
+  const sensitivity = 0.005;
+  if (e.shiftKey) {
+    const panScale = distance * 0.002;
+    target = [
+      dragStartTarget[0] - dx * panScale * Math.cos(azimuth) + dy * panScale * Math.sin(azimuth),
+      dragStartTarget[1] + dy * panScale,
+      dragStartTarget[2] + dx * panScale * Math.sin(azimuth) + dy * panScale * Math.cos(azimuth),
+    ];
+  } else {
+    azimuth = dragStartAz - dx * sensitivity;
+    elevation = Math.max(-Math.PI / 2 + 0.01, Math.min(Math.PI / 2 - 0.01, dragStartEl + dy * sensitivity));
+  }
+  scheduleCameraPost();
+});
+
+video.addEventListener('pointerup', () => {
+  dragging = false;
+  video.classList.remove('dragging');
+  exitInteractive();
+});
+
+video.addEventListener('wheel', (e) => {
+  e.preventDefault();
+  distance = Math.max(0.05, Math.min(5.0, distance * (1 + e.deltaY * 0.001)));
+  scheduleCameraPost();
+  enterInteractive();
+  if (wheelTimeout) clearTimeout(wheelTimeout);
+  wheelTimeout = setTimeout(exitInteractive, 200);
+}, { passive: false });
+
+// ======================================================================
+// Interactive mode
+// ======================================================================
+async function enterInteractive() {
+  if (interactiveMode) return;
+  interactiveMode = true;
+  updateSppDisplay();
+}
+async function exitInteractive() {
+  if (!interactiveMode) return;
+  interactiveMode = false;
+  totalSpp = 0;
+  updateSppDisplay();
+}
+
+// ======================================================================
+// SPP display
+// ======================================================================
+function updateSppDisplay() {
+  if (interactiveMode) {
+    sppText.textContent = 'SPP: live';
+    sppText.className = 'spp live';
+  } else if (cameraDirty || sceneDirty) {
+    sppText.textContent = 'SPP: reset';
+    sppText.className = 'spp reset';
+  } else if (totalSpp > 0) {
+    sppText.textContent = 'SPP: ~' + totalSpp;
+    sppText.className = 'spp accum';
+  } else {
+    sppText.textContent = 'SPP: 0';
+    sppText.className = 'spp reset';
+  }
+}
+
+// ======================================================================
+// Resize
+// ======================================================================
+let resizeTimer = null;
+window.addEventListener('resize', () => {
+  if (resizeTimer) clearTimeout(resizeTimer);
+  resizeTimer = setTimeout(updateResolution, 500);
+});
+
+// ======================================================================
+// Start
+// ======================================================================
+syncUIFromSpec();
+connect();
+updateResolution();
+</script>
+</body>
+</html>
