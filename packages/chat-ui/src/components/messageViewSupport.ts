@@ -74,35 +74,48 @@ function isShowArtifactTool(toolName: string): boolean {
   return toolName.includes("ui_show_artifact");
 }
 
-function parseArtifactResult(result: string | null | undefined): string | null {
-  const trimmed = result?.trim();
-  if (!trimmed || trimmed.startsWith("error:")) {
+function parseArtifactResultValue(value: unknown, depth = 0): string | null {
+  if (depth > 3) {
     return null;
   }
 
-  try {
-    const parsed = JSON.parse(trimmed);
-    if (typeof parsed === "string") {
-      return parsed;
+  if (typeof value === "string") {
+    const trimmed = value.trim();
+    if (!trimmed || trimmed.startsWith("error:")) {
+      return null;
     }
-    if (parsed && typeof parsed === "object") {
-      const artifactId =
-        "artifactId" in parsed
-          ? parsed.artifactId
-          : "id" in parsed
-            ? parsed.id
-            : null;
-      return typeof artifactId === "string" ? artifactId : null;
+
+    try {
+      return parseArtifactResultValue(JSON.parse(trimmed), depth + 1);
+    } catch {
+      return null;
     }
-  } catch {
-    // Plain string result is still valid.
   }
 
-  const unquoted =
-    trimmed.startsWith('"') && trimmed.endsWith('"')
-      ? trimmed.slice(1, -1)
-      : trimmed;
-  return unquoted || null;
+  if (!value || typeof value !== "object") {
+    return null;
+  }
+
+  const payload = value as Record<string, unknown>;
+  const artifactId =
+    typeof payload.artifactId === "string"
+      ? payload.artifactId
+      : typeof payload.id === "string"
+        ? payload.id
+        : null;
+  if (artifactId) {
+    return artifactId;
+  }
+
+  if ("result" in payload) {
+    return parseArtifactResultValue(payload.result, depth + 1);
+  }
+
+  return null;
+}
+
+function parseArtifactResult(result: string | null | undefined): string | null {
+  return parseArtifactResultValue(result);
 }
 
 export function inferArtifactIdFromMessageWindow(

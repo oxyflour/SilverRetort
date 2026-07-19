@@ -2,6 +2,7 @@
 - apps 下是独立可执行模块，packages 下是功能模块，保持 apps 下的逻辑简洁干净
 - 每个文件尽量小于 500 行
 - 写测试用例之前跟我确认
+- 碰到可能的接口或者类型变更，应该找我确认，不要偷偷做兼容
 
 # 基础模块分工
 - apps/desktop: electron 容器，启动后拉起 apps/next 和 apps/uvicorn
