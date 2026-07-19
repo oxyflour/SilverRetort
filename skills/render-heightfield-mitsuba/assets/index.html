@@ -519,7 +519,7 @@ video.addEventListener('pointermove', function(e) {
   } else {
     // Rotate
     azimuth = dragStartAz - dx * 0.005;
-    elevation = Math.max(-1.5, Math.min(1.5, dragStartEl - dy * 0.005));
+    elevation = Math.max(-1.5, Math.min(1.5, dragStartEl + dy * 0.005));
   }
   scheduleCameraPost();
 });

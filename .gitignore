@@ -1,5 +1,6 @@
 .*/
 *.tsbuildinfo
+*.exr
 
 node_modules/
 __pycache__/
