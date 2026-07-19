@@ -827,6 +827,9 @@ export const useChatStore = create<ChatState>((set, get) => {
         void get()
           .client.listArtifacts(resolvedSessionId)
           .then((artifacts) => {
+            const artifactExists = artifacts.some(
+              (currentArtifact) => currentArtifact.id === id,
+            );
             set((state) => ({
               artifacts: {
                 ...state.artifacts,
@@ -837,6 +840,16 @@ export const useChatStore = create<ChatState>((set, get) => {
                   ]),
                 ),
               },
+              artifactWorkspaces: artifactExists
+                ? state.artifactWorkspaces
+                : {
+                    ...state.artifactWorkspaces,
+                    [resolvedSessionId]: closeArtifactInWorkspace(
+                      state.artifactWorkspaces[resolvedSessionId] ??
+                        emptyArtifactWorkspace(),
+                      id,
+                    ),
+                  },
             }));
           });
       }

@@ -208,7 +208,10 @@ export class ApiClient {
   }
 
   getArtifact(artifactId: string): Promise<Artifact> {
-    return this.request(ArtifactSchema, `/api/artifacts/${artifactId}`);
+    return this.request(
+      ArtifactSchema,
+      `/api/artifacts/${encodeURIComponent(artifactId)}`,
+    );
   }
 
   setArtifactContext(
