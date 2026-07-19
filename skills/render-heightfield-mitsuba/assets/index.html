@@ -1,3 +1,4 @@
+
 <!DOCTYPE html>
 <html lang="en">
 <head>
@@ -12,7 +13,7 @@ html, body { width: 100%; height: 100%; overflow: hidden; background: #111; font
 video { display: block; width: 100%; height: 100%; object-fit: contain; cursor: grab; }
 video.dragging { cursor: grabbing; }
 #overlay {
-  position: absolute; top: 12px; right: 12px;
+  position: absolute; bottom: 12px; right: 12px;
   background: rgba(0,0,0,0.75); color: #fff;
   padding: 8px 14px; border-radius: 6px;
   font-size: 13px; line-height: 1.5;
@@ -86,7 +87,7 @@ video.dragging { cursor: grabbing; }
 }
 #btn-reset:hover { background: rgba(255,255,255,0.15); color: #fff; }
 
-/* --- Heightfield preview image (fetched from /preview) --- */
+/* --- Heightfield preview --- */
 #preview-wrap {
   margin-top: 10px; position: relative; cursor: grab;
   border: 1px solid rgba(255,255,255,0.15); border-radius: 4px;
@@ -99,6 +100,22 @@ video.dragging { cursor: grabbing; }
   margin: 2px 0 0 0; pointer-events: none;
 }
 
+/* --- Preview overlay (top-right) --- */
+#preview-overlay {
+  position: absolute; top: 12px; right: 12px; z-index: 20;
+  max-width: 140px;
+  background: rgba(20,20,26,0.85);
+  padding: 4px; border-radius: 6px;
+  border: 1px solid rgba(255,255,255,0.1);
+  backdrop-filter: blur(8px);
+}
+#preview-overlay #preview-wrap {
+  margin-top: 0; border-radius: 4px;
+}
+#preview-overlay #preview-info {
+  color: #999; font-size: 9px; margin: 2px 0 0 0;
+}
+
 .hidden { display: none !important; }
 </style>
 </head>
@@ -106,106 +123,186 @@ video.dragging { cursor: grabbing; }
 <div id="container">
   <video id="video" autoplay playsinline muted></video>
 
-  <!-- SPP display -->
   <div id="overlay"><span class="spp reset" id="spp-text">SPP: connecting...</span></div>
+
+  <div id="preview-overlay">
+    <div id="preview-wrap"><img id="preview-img" src="" alt="heightfield preview"></div>
+    <p id="preview-info">&#216; 0 &#215; 0 mm</p>
+  </div>
+
   <div id="status">Connecting to render server...</div>
 
-  <!-- Info bar -->
   <div id="info-bar">
     <span>Drag: rotate</span>
     <span>Shift+Drag: pan</span>
     <span>Scroll: zoom</span>
-    <span>SPP accumulates when idle</span>
     <span id="res-text"></span>
   </div>
 
-  <!-- Scene control panel -->
+  <!-- Panel: header is static, sliders are built dynamically from /params -->
   <div id="panel">
     <div id="panel-toggle" onclick="togglePanel()">
       <h3>Heightfield</h3>
       <span class="arrow">&#9660;</span>
     </div>
     <div class="panel-body">
-      <div class="ctrl-row">
-        <label>Period <span class="val" id="val-period">300</span> um</label>
-        <div class="slider-wrap">
-          <input type="range" id="slider-period" min="50" max="2000" value="300" step="1" oninput="onSlider(this, 'period', 1)">
-          <input type="number" id="num-period" value="300" step="1" min="50" max="2000" onchange="onNumber(this, 'period', 1)">
-        </div>
-      </div>
-      <div class="ctrl-row">
-        <label>Height <span class="val" id="val-height">10</span> um</label>
-        <div class="slider-wrap">
-          <input type="range" id="slider-height" min="1" max="100" value="10" step="1" oninput="onSlider(this, 'height', 0.1)">
-          <input type="number" id="num-height" value="10" step="1" min="1" max="100" onchange="onNumber(this, 'height', 0.1)">
-        </div>
-      </div>
-      <div class="ctrl-row">
-        <label>Rotation <span class="val" id="val-rotation">0</span> rad/m</label>
-        <div class="slider-wrap">
-          <input type="range" id="slider-rotation" min="0" max="200" value="0" step="1" oninput="onSlider(this, 'rotation', 1)">
-          <input type="number" id="num-rotation" value="0" step="1" min="0" max="200" onchange="onNumber(this, 'rotation', 1)">
-        </div>
-      </div>
+      <div id="sliders-container"></div>
       <button id="btn-reset" onclick="resetScene()">Reset defaults</button>
-      <div id="preview-wrap"><img id="preview-img" src="" alt="heightfield preview"></div>
-      <p id="preview-info">&#216; 0 &#215; 0 mm</p>
     </div>
   </div>
 </div>
 
 <script>
 // ======================================================================
-// Scene spec (the authoritative scene definition lives here on the frontend)
+// Helper
 // ======================================================================
-const DEFAULT_SCENE_SPEC = {
-  heightfield: {
-    period: 0.0003,       // 0.3 mm = 300 um
-    hmax: 0.00001,        // 0.01 mm = 10 um
-    fd_step: 0.000001,    // 1 um finite-difference step
-    rotation_speed: 0.0,  // rad/m — pyramid rotation per metre from center
-    reflectance: [0.95, 0.95, 0.95]
-  },
-  envmap: "studio/studio_envmap.exr"
-};
+function e(id) { return document.getElementById(id); }
 
-let sceneSpec = JSON.parse(JSON.stringify(DEFAULT_SCENE_SPEC));
+// ======================================================================
+// Scene spec — built dynamically from /params
+// ======================================================================
+let sceneSpec = { heightfield: {}, envmap: "studio/studio_envmap.exr" };
+let DEFAULT_SCENE_SPEC = null;  // set by buildPanel()
+let allParams = [];             // PARAMS list from server
 
 // ======================================================================
 // DOM refs
 // ======================================================================
 const video = document.getElementById('video');
-const overlay = document.getElementById('overlay');
 const sppText = document.getElementById('spp-text');
 const statusEl = document.getElementById('status');
 const resText = document.getElementById('res-text');
 
-function e(id) { return document.getElementById(id); }
+// ======================================================================
+// Panel toggle
+// ======================================================================
+function togglePanel() {
+  e('panel').classList.toggle('collapsed');
+}
 
 // ======================================================================
-// Scene param helpers — all internal values in metres, display in um
+// Fetch /params and dynamically build sliders
 // ======================================================================
-const UM = 0.000001;
+async function fetchParams() {
+  try {
+    const resp = await fetch('params');
+    allParams = await resp.json();
+    buildPanel(allParams);
+  } catch(err) {
+    console.error('Failed to fetch /params:', err);
+    // Fallback: try connecting anyway with whatever sceneSpec we have
+  }
+}
 
-function periodToDisplay(m) { return Math.round(m / UM); }
-function displayToPeriod(d) { return d * UM; }
-function hmaxToDisplay(m)   { return Math.round(m / UM); }
-function displayToHmax(d)   { return d * UM; }
+function buildPanel(params) {
+  const container = document.getElementById('sliders-container');
+  container.innerHTML = '';
 
-const HSTEP = 0.1 * UM;
-function hmaxToDisplaySlider(v) { return (v / UM).toFixed(1); }
-function displayToHmaxSlider(d) { return Math.round(d * UM / HSTEP); }
+  // Build default spec from param defaults
+  const hfDefaults = {};
+  for (const p of params) {
+    hfDefaults[p.internal_name] = p.default * p.internal_scale;
+  }
+  DEFAULT_SCENE_SPEC = {
+    heightfield: { ...hfDefaults, fd_step: 0.000001, reflectance: [0.95, 0.95, 0.95] },
+    envmap: "studio/studio_envmap.exr"
+  };
+  // Init sceneSpec from defaults
+  sceneSpec = JSON.parse(JSON.stringify(DEFAULT_SCENE_SPEC));
 
-function rotationToDisplay(v) { return Math.round(v); }
-function displayToRotation(d) { return d; }
+  // Create slider rows
+  for (const p of params) {
+    const row = document.createElement('div');
+    row.className = 'ctrl-row';
+
+    const displayVal = p.default;
+    const displayStep = p.step || 1;
+
+    row.innerHTML =
+      '<label>' + p.label +
+      ' <span class="val" id="val-' + p.name + '">' + displayVal + '</span> ' + (p.unit || '') +
+      '</label>' +
+      '<div class="slider-wrap">' +
+      '<input type="range" id="slider-' + p.name + '" min="' + p.min + '" max="' + p.max +
+      '" value="' + displayVal + '" step="' + displayStep + '">' +
+      '<input type="number" id="num-' + p.name + '" value="' + displayVal +
+      '" step="' + displayStep + '" min="' + p.min + '" max="' + p.max + '">' +
+      '</div>';
+
+    container.appendChild(row);
+
+    // Attach event listeners (after DOM insertion)
+    const slider = row.querySelector('input[type=range]');
+    const num = row.querySelector('input[type=number]');
+    slider.addEventListener('input', function() { onParamChange(p.name, 'slider'); });
+    num.addEventListener('change', function() { onParamChange(p.name, 'number'); });
+  }
+}
 
 // ======================================================================
-// Heightfield preview — fetched from server's GET /preview endpoint
+// Universal param change handler
+// ======================================================================
+function onParamChange(name, source) {
+  const slider = e('slider-' + name);
+  const num = e('num-' + name);
+  const valEl = e('val-' + name);
+  const param = allParams.find(function(p) { return p.name === name; });
+  if (!param) return;
+
+  let displayVal;
+  if (source === 'slider') {
+    displayVal = parseFloat(slider.value);
+    num.value = displayVal;
+  } else {
+    displayVal = parseFloat(num.value) || param.default;
+    displayVal = Math.max(param.min, Math.min(param.max, displayVal));
+    num.value = displayVal;
+    slider.value = displayVal;
+  }
+
+  valEl.textContent = displayVal;
+
+  // Convert display value to internal (meters, etc.)
+  const internalVal = displayVal * param.internal_scale;
+  sceneSpec.heightfield[param.internal_name] = internalVal;
+
+  scheduleScenePost();
+}
+
+// ======================================================================
+// Sync all UI from current sceneSpec
+// ======================================================================
+function syncUIFromSpec() {
+  for (const p of allParams) {
+    const internalVal = sceneSpec.heightfield[p.internal_name];
+    if (internalVal === undefined) continue;
+    const displayVal = Math.round(internalVal / p.internal_scale);
+    const slider = e('slider-' + p.name);
+    const num = e('num-' + p.name);
+    const valEl = e('val-' + p.name);
+    if (slider) slider.value = displayVal;
+    if (num) num.value = displayVal;
+    if (valEl) valEl.textContent = displayVal;
+  }
+  renderPreview();
+}
+
+// ======================================================================
+// Reset to defaults
+// ======================================================================
+function resetScene() {
+  sceneSpec = JSON.parse(JSON.stringify(DEFAULT_SCENE_SPEC));
+  syncUIFromSpec();
+  scheduleScenePost();
+}
+
+// ======================================================================
+// Heightfield preview — fetched from GET /preview
 // ======================================================================
 let previewCenterX = 0.0;
 let previewCenterY = 0.0;
-let previewSpan = 0.002;   // 2 mm default
-let previewVersion = 0;    // cache buster
+let previewSpan = 0.002;  // 2 mm
+let previewVersion = 0;
 
 function renderPreview() {
   const img = e("preview-img");
@@ -214,12 +311,18 @@ function renderPreview() {
   const period = hf.period;
   const hmax = hf.hmax;
   const rs = hf.rotation_speed || 0;
+  const jit = hf.jitter !== undefined ? hf.jitter : 0.5;
+  const hm = hf.hmin_scale !== undefined ? hf.hmin_scale : 0.15;
+  const sd = hf.seed !== undefined ? hf.seed : 42;
   const span = previewSpan;
   const cx = previewCenterX;
   const cy = previewCenterY;
   previewVersion++;
   const url = "preview?period=" + period + "&hmax=" + hmax
     + "&rotation_speed=" + rs
+    + "&jitter=" + jit
+    + "&hmin_scale=" + hm
+    + "&seed=" + sd
     + "&center_x=" + cx + "&center_y=" + cy
     + "&size_mm=" + (span * 1000)
     + "&v=" + previewVersion;
@@ -230,15 +333,15 @@ function renderPreview() {
 }
 
 // Preview drag/zoom
-let prevDragging = false;
-let prevDragStart = { x: 0, y: 0 };
-let prevStartCX = 0;
-let prevStartCY = 0;
-
 (function initPreview() {
+  let prevDragging = false;
+  let prevDragStart = { x: 0, y: 0 };
+  let prevStartCX = 0;
+  let prevStartCY = 0;
+
   const wrap = document.getElementById("preview-wrap");
   if (!wrap) return;
-  wrap.addEventListener("pointerdown", (ev) => {
+  wrap.addEventListener("pointerdown", function(ev) {
     prevDragging = true;
     prevDragStart = { x: ev.clientX, y: ev.clientY };
     prevStartCX = previewCenterX;
@@ -248,115 +351,27 @@ let prevStartCY = 0;
     ev.preventDefault();
     ev.stopPropagation();
   });
-  wrap.addEventListener("pointermove", (ev) => {
+  wrap.addEventListener("pointermove", function(ev) {
     if (!prevDragging) return;
-    const dx = ev.clientX - prevDragStart.x;
-    const dy = ev.clientY - prevDragStart.y;
-    const scale = previewSpan / 128;
+    var dx = ev.clientX - prevDragStart.x;
+    var dy = ev.clientY - prevDragStart.y;
+    var scale = previewSpan / 128;
     previewCenterX = prevStartCX - dx * scale;
     previewCenterY = prevStartCY - dy * scale;
     renderPreview();
   });
-  wrap.addEventListener("pointerup", () => {
+  wrap.addEventListener("pointerup", function() {
     prevDragging = false;
     wrap.classList.remove("dragging");
   });
-  wrap.addEventListener("wheel", (ev) => {
+  wrap.addEventListener("wheel", function(ev) {
     ev.preventDefault();
     ev.stopPropagation();
-    const factor = ev.deltaY > 0 ? 1.2 : 0.8;
+    var factor = ev.deltaY > 0 ? 1.2 : 0.8;
     previewSpan = Math.max(0.0002, Math.min(0.02, previewSpan * factor));
     renderPreview();
   }, { passive: false });
 })();
-
-function syncUIFromSpec() {
-  const hf = sceneSpec.heightfield;
-  const pd = periodToDisplay(hf.period);
-  const rd = rotationToDisplay(hf.rotation_speed || 0);
-  e('slider-period').value = pd;
-  e('num-period').value = pd;
-  e('val-period').textContent = pd;
-  e('slider-height').value = displayToHmaxSlider(hf.hmax);
-  e('num-height').value = hmaxToDisplay(hf.hmax);
-  e('val-height').textContent = hmaxToDisplay(hf.hmax);
-  e('slider-rotation').value = rd;
-  e('num-rotation').value = rd;
-  e('val-rotation').textContent = rd;
-  renderPreview();
-}
-
-// ======================================================================
-// Slider handlers (3-way: period, height, rotation)
-// ======================================================================
-function onSlider(el, param, stepM) {
-  const displayVal = parseInt(el.value);
-  let numEl, valEl;
-  if (param === 'period') {
-    numEl = e('num-period'); valEl = e('val-period');
-  } else if (param === 'height') {
-    numEl = e('num-height'); valEl = e('val-height');
-  } else {
-    numEl = e('num-rotation'); valEl = e('val-rotation');
-  }
-  numEl.value = displayVal;
-  valEl.textContent = displayVal;
-
-  if (param === 'period') {
-    sceneSpec.heightfield.period = displayToPeriod(displayVal);
-  } else if (param === 'height') {
-    sceneSpec.heightfield.hmax = displayToHmax(displayVal);
-  } else {
-    sceneSpec.heightfield.rotation_speed = displayToRotation(displayVal);
-  }
-  scheduleScenePost();
-}
-
-function onNumber(el, param, stepM) {
-  const displayVal = parseInt(el.value) || 0;
-  let sliderId, valEl, min, max;
-  if (param === 'period') {
-    sliderId = 'slider-period'; valEl = e('val-period');
-    min = 50; max = 2000;
-  } else if (param === 'height') {
-    sliderId = 'slider-height'; valEl = e('val-height');
-    min = 1; max = 100;
-  } else {
-    sliderId = 'slider-rotation'; valEl = e('val-rotation');
-    min = 0; max = 200;
-  }
-  const sliderEl = e(sliderId);
-
-  const clamped = Math.max(min, Math.min(max, displayVal));
-  el.value = clamped;
-  sliderEl.value = clamped;
-  valEl.textContent = clamped;
-
-  if (param === 'period') {
-    sceneSpec.heightfield.period = displayToPeriod(clamped);
-  } else if (param === 'height') {
-    sceneSpec.heightfield.hmax = displayToHmax(clamped);
-  } else {
-    sceneSpec.heightfield.rotation_speed = displayToRotation(clamped);
-  }
-  scheduleScenePost();
-}
-
-// ======================================================================
-// Panel toggle
-// ======================================================================
-function togglePanel() {
-  e('panel').classList.toggle('collapsed');
-}
-
-// ======================================================================
-// Reset
-// ======================================================================
-function resetScene() {
-  sceneSpec = JSON.parse(JSON.stringify(DEFAULT_SCENE_SPEC));
-  syncUIFromSpec();
-  scheduleScenePost();
-}
 
 // ======================================================================
 // WebRTC
@@ -372,8 +387,8 @@ async function connect() {
   pc.addTransceiver('video', { direction: 'recvonly' });
 
   dc = pc.createDataChannel('stats');
-  dc.onmessage = (e) => {
-    const msg = JSON.parse(e.data);
+  dc.onmessage = function(e) {
+    var msg = JSON.parse(e.data);
     if (msg.total_spp !== undefined) {
       if (!cameraDirty && !sceneDirty && !interactiveMode) {
         totalSpp = msg.total_spp;
@@ -382,14 +397,14 @@ async function connect() {
     }
   };
 
-  pc.ontrack = (event) => {
+  pc.ontrack = function(event) {
     statusEl.textContent = '';
     video.srcObject = event.streams[0];
     video.classList.remove('hidden');
     updateResolution();
     statusEl.classList.add('hidden');
   };
-  pc.onconnectionstatechange = () => {
+  pc.onconnectionstatechange = function() {
     if (pc.connectionState === 'connected') updateResolution();
     if (pc.connectionState === 'failed' || pc.connectionState === 'disconnected') {
       statusEl.classList.remove('hidden');
@@ -397,24 +412,25 @@ async function connect() {
       setTimeout(connect, 2000);
     }
   };
-  const offer = await pc.createOffer();
+  var offer = await pc.createOffer();
   await pc.setLocalDescription(offer);
-  const resp = await fetch('offer', {
+  var resp = await fetch('offer', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ sdp: pc.localDescription.sdp, type: pc.localDescription.type })
   });
-  const answer = await resp.json();
+  var answer = await resp.json();
   await pc.setRemoteDescription(new RTCSessionDescription(answer));
 
+  // Sync scene spec from server
   try {
-    const sr = await fetch('scene');
-    const serverSpec = await sr.json();
+    var sr = await fetch('scene');
+    var serverSpec = await sr.json();
     if (serverSpec && serverSpec.heightfield) {
       sceneSpec = serverSpec;
       syncUIFromSpec();
     }
-  } catch (e) {}
+  } catch(e) {}
 }
 
 // ======================================================================
@@ -437,8 +453,8 @@ let interactiveMode = false;
 let wheelTimeout = null;
 
 function updateResolution() {
-  const w = Math.round(video.videoWidth || video.clientWidth || 640);
-  const h = Math.round(video.videoHeight || video.clientHeight || 480);
+  var w = Math.round(video.videoWidth || video.clientWidth || 640);
+  var h = Math.round(video.videoHeight || video.clientHeight || 480);
   if (w > 0 && h > 0) {
     resText.textContent = w + '\u00d7' + h;
     fetch('config', {
@@ -451,17 +467,17 @@ function updateResolution() {
 
 function sendCamera() {
   if (dc && dc.readyState === 'open') {
-    dc.send(JSON.stringify({ type: 'camera', azimuth, elevation, distance, target }));
+    dc.send(JSON.stringify({ type: 'camera', azimuth: azimuth, elevation: elevation, distance: distance, target: target }));
   }
 }
 
-let debounceTimer = null;
+let camDebounce = null;
 function scheduleCameraPost() {
   cameraDirty = true;
   updateSppDisplay();
-  if (debounceTimer) clearTimeout(debounceTimer);
-  const delay = Math.max(0, DEBOUNCE_MS - (Date.now() - lastCameraPost));
-  debounceTimer = setTimeout(() => {
+  if (camDebounce) clearTimeout(camDebounce);
+  var delay = Math.max(0, DEBOUNCE_MS - (Date.now() - lastCameraPost));
+  camDebounce = setTimeout(function() {
     if (cameraDirty) {
       cameraDirty = false;
       sendCamera();
@@ -469,135 +485,113 @@ function scheduleCameraPost() {
   }, delay);
 }
 
-// ======================================================================
-// Scene posting (debounced, 150ms)
-// ======================================================================
-let sceneDirty = false;
-let lastScenePost = 0;
-
-async function postScene() {
-  lastScenePost = Date.now();
-  try {
-    await fetch('scene', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(sceneSpec)
-    });
-  } catch (e) {}
-}
-
-let sceneDebounce = null;
-function scheduleScenePost() {
-  sceneDirty = true;
-  totalSpp = 0;
-  updateSppDisplay();
-  if (sceneDebounce) clearTimeout(sceneDebounce);
-  renderPreview();  // immediate preview update from server
-  sceneDebounce = setTimeout(() => {
-    if (sceneDirty) {
-      sceneDirty = false;
-      postScene();
-    }
-  }, 150);
-}
-
-// ======================================================================
-// Pointer
-// ======================================================================
-video.addEventListener('pointerdown', (e) => {
+video.addEventListener('pointerdown', function(e) {
   dragging = true;
   dragStart = { x: e.clientX, y: e.clientY };
   dragStartAz = azimuth;
   dragStartEl = elevation;
-  dragStartTarget = [...target];
+  dragStartTarget = target.slice();
   video.classList.add('dragging');
   video.setPointerCapture(e.pointerId);
   enterInteractive();
 });
 
-video.addEventListener('pointermove', (e) => {
+video.addEventListener('pointermove', function(e) {
   if (!dragging) return;
-  const dx = e.clientX - dragStart.x;
-  const dy = e.clientY - dragStart.y;
-  const sensitivity = 0.005;
+  var dx = e.clientX - dragStart.x;
+  var dy = e.clientY - dragStart.y;
+
   if (e.shiftKey) {
-    const panScale = distance * 0.002;
+    // Pan
+    var dx_w = dx / video.clientWidth * distance * 0.8;
+    var dy_w = dy / video.clientHeight * distance * 0.8;
+    var ca = Math.cos(azimuth);
+    var sa = Math.sin(azimuth);
+    var ce = Math.cos(elevation);
+    var se = Math.sin(elevation);
+    var right = [ca, 0, -sa];
+    var up = [-sa * se, ce, -ca * se];
     target = [
-      dragStartTarget[0] - dx * panScale * Math.cos(azimuth) + dy * panScale * Math.sin(azimuth),
-      dragStartTarget[1] + dy * panScale,
-      dragStartTarget[2] + dx * panScale * Math.sin(azimuth) + dy * panScale * Math.cos(azimuth),
+      dragStartTarget[0] - dx_w * right[0] + dy_w * up[0],
+      dragStartTarget[1] - dx_w * right[1] + dy_w * up[1],
+      dragStartTarget[2] - dx_w * right[2] + dy_w * up[2],
     ];
   } else {
-    azimuth = dragStartAz - dx * sensitivity;
-    elevation = Math.max(-Math.PI / 2 + 0.01, Math.min(Math.PI / 2 - 0.01, dragStartEl + dy * sensitivity));
+    // Rotate
+    azimuth = dragStartAz - dx * 0.005;
+    elevation = Math.max(-1.5, Math.min(1.5, dragStartEl - dy * 0.005));
   }
   scheduleCameraPost();
 });
 
-video.addEventListener('pointerup', () => {
+video.addEventListener('pointerup', function() {
   dragging = false;
   video.classList.remove('dragging');
   exitInteractive();
 });
 
-video.addEventListener('wheel', (e) => {
+video.addEventListener('wheel', function(e) {
   e.preventDefault();
-  distance = Math.max(0.05, Math.min(5.0, distance * (1 + e.deltaY * 0.001)));
+  distance = Math.max(0.05, Math.min(5.0, distance * (e.deltaY > 0 ? 1.1 : 0.9)));
   scheduleCameraPost();
   enterInteractive();
-  if (wheelTimeout) clearTimeout(wheelTimeout);
-  wheelTimeout = setTimeout(exitInteractive, 200);
 }, { passive: false });
 
-// ======================================================================
-// Interactive mode
-// ======================================================================
-async function enterInteractive() {
-  if (interactiveMode) return;
+function enterInteractive() {
   interactiveMode = true;
   updateSppDisplay();
+  if (wheelTimeout) { clearTimeout(wheelTimeout); wheelTimeout = null; }
+  wheelTimeout = setTimeout(exitInteractive, 1000);
 }
-async function exitInteractive() {
-  if (!interactiveMode) return;
+
+function exitInteractive() {
   interactiveMode = false;
-  totalSpp = 0;
   updateSppDisplay();
+  if (wheelTimeout) { clearTimeout(wheelTimeout); wheelTimeout = null; }
+}
+
+// ======================================================================
+// Scene update (POST to /interactive)
+// ======================================================================
+let sceneDirty = false;
+let sceneDebounce = null;
+const SCENE_DEBOUNCE_MS = 250;
+
+function scheduleScenePost() {
+  sceneDirty = true;
+  updateSppDisplay();
+  renderPreview();
+  if (sceneDebounce) clearTimeout(sceneDebounce);
+  sceneDebounce = setTimeout(async function() {
+    if (sceneDirty) {
+      sceneDirty = false;
+      await fetch('interactive', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(sceneSpec)
+      });
+      // Let the next SPP update restore the display
+    }
+  }, SCENE_DEBOUNCE_MS);
 }
 
 // ======================================================================
 // SPP display
 // ======================================================================
 function updateSppDisplay() {
-  if (interactiveMode) {
-    sppText.textContent = 'SPP: live';
-    sppText.className = 'spp live';
-  } else if (cameraDirty || sceneDirty) {
+  if (cameraDirty || sceneDirty || interactiveMode) {
     sppText.textContent = 'SPP: reset';
     sppText.className = 'spp reset';
-  } else if (totalSpp > 0) {
-    sppText.textContent = 'SPP: ~' + totalSpp;
-    sppText.className = 'spp accum';
   } else {
-    sppText.textContent = 'SPP: 0';
-    sppText.className = 'spp reset';
+    sppText.textContent = 'SPP: ' + totalSpp;
+    sppText.className = 'spp accum';
   }
 }
 
 // ======================================================================
-// Resize
+// Bootstrap
 // ======================================================================
-let resizeTimer = null;
-window.addEventListener('resize', () => {
-  if (resizeTimer) clearTimeout(resizeTimer);
-  resizeTimer = setTimeout(updateResolution, 500);
-});
-
-// ======================================================================
-// Start
-// ======================================================================
-syncUIFromSpec();
-connect();
-updateResolution();
+fetchParams().then(function() { connect(); });
 </script>
 </body>
 </html>
