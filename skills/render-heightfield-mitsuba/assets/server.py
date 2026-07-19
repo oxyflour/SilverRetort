@@ -358,26 +358,43 @@ class MitsubaRenderer:
         self._reset_accumulation()
 
     def update_scene(self, spec):
-        """Merge scene spec from the frontend — only supplied keys are updated."""
-        changed = False
+        """Merge scene spec and choose the cheapest valid update path."""
+        rebuild_scene = False
+
+        camera_spec = spec.get("sensor") or spec.get("camera")
+        camera_changed = False
+        if isinstance(camera_spec, dict):
+            camera_changed = self._set_camera_state(
+                azimuth=camera_spec.get("azimuth", self._azimuth),
+                elevation=camera_spec.get("elevation", self._elevation),
+                distance=camera_spec.get("distance", self._distance),
+                target=camera_spec.get("target", None),
+                update_sensor=False,
+            )
+
         for section in ("heightfield",):
             if section in spec:
                 incoming = spec[section]
                 current = self._scene_spec.setdefault(section, {})
                 for k, v in incoming.items():
                     if current.get(k) != v:
-                        changed = True
+                        rebuild_scene = True
                         current[k] = v
         if "envmap" in spec and spec["envmap"] != self._scene_spec.get("envmap"):
             self._scene_spec["envmap"] = spec["envmap"]
-            changed = True
-        if changed:
+            rebuild_scene = True
+
+        if rebuild_scene:
             self._build_scene()
+        elif camera_changed:
+            self._update_sensor_transform()
+
+        return {"reloaded": rebuild_scene, "sensor_updated": camera_changed}
 
     def get_scene_spec(self):
         return dict(self._scene_spec)
 
-    def update_camera(self, azimuth, elevation, distance, target=None):
+    def _set_camera_state(self, azimuth, elevation, distance, target=None, update_sensor=True):
         next_target = self._target
         if target is not None:
             next_target = np.array(target, dtype=np.float64)
@@ -397,6 +414,11 @@ class MitsubaRenderer:
         self._distance = next_distance
         self._target = next_target
 
+        if update_sensor:
+            self._update_sensor_transform()
+        return True
+
+    def _update_sensor_transform(self):
         if self._scene_params is None:
             self._build_scene()
             return
@@ -404,6 +426,9 @@ class MitsubaRenderer:
         self._scene_params["sensor.to_world"] = self._camera_to_world()
         self._scene_params.update()
         self._reset_accumulation()
+
+    def update_camera(self, azimuth, elevation, distance, target=None):
+        self._set_camera_state(azimuth, elevation, distance, target, update_sensor=True)
 
     def update_resolution(self, width, height):
         self.width = max(160, min(3840, width))
@@ -592,17 +617,13 @@ async def handle_config(request: web.Request):
 
 
 async def handle_scene(request: web.Request):
-    """GET /scene — return current scene spec."""
+    """GET /scene returns current scene spec; POST /scene updates it."""
     renderer = request.app["renderer"]
-    return web.json_response(renderer.get_scene_spec())
-
-
-async def handle_interactive(request: web.Request):
-    """POST /interactive — update scene spec."""
+    if request.method == "GET":
+        return web.json_response(renderer.get_scene_spec())
     body = await request.json()
-    renderer = request.app["renderer"]
-    renderer.update_scene(body)
-    return web.json_response({"ok": True})
+    result = renderer.update_scene(body)
+    return web.json_response({"ok": True, **result})
 
 
 async def handle_params(request: web.Request):
@@ -646,7 +667,7 @@ def create_app():
     app.router.add_post("/offer", handle_offer)
     app.router.add_post("/config", handle_config)
     app.router.add_get("/scene", handle_scene)
-    app.router.add_post("/interactive", handle_interactive)
+    app.router.add_post("/scene", handle_scene)
     app.router.add_get("/params", handle_params)
     app.router.add_get("/preview", handle_preview)
 
