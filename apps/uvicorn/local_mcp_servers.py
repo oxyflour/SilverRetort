@@ -9,6 +9,15 @@ servers. Configuration lives in DATA_DIR/settings.json:
       "url": "http://127.0.0.1:9901/mcp/",
       "headers": {"Authorization": "Bearer ..."}
     }
+  },
+  "managedMcpServers": {
+    "example_adapter": {
+      "serverName": "example_adapter",
+      "enabled": true,
+      "installedVersion": "0.1.0",
+      "running": true,
+      "port": 9901
+    }
   }
 }
 """
@@ -72,9 +81,38 @@ def _builtin_server() -> dict[str, Any]:
     return {"url": f"http://127.0.0.1:{port}/mcp/", "headers": {}}
 
 
+def _load_managed_servers(settings: dict[str, Any]) -> dict[str, dict[str, Any]]:
+    raw_servers = settings.get("managedMcpServers")
+    if not isinstance(raw_servers, dict):
+        return {}
+
+    result: dict[str, dict[str, Any]] = {}
+    for raw_id, raw_config in raw_servers.items():
+        config = raw_config if isinstance(raw_config, dict) else {}
+        if config.get("enabled") is False:
+            continue
+        if not str(config.get("installedVersion") or "").strip():
+            continue
+        if config.get("running") is not True:
+            continue
+        name = str(config.get("serverName") or raw_id or "").strip()
+        if name == BUILTIN_MCP_SERVER_NAME or not SERVER_NAME_RE.fullmatch(name):
+            continue
+        try:
+            port = int(config.get("port") or 0)
+        except (TypeError, ValueError):
+            continue
+        if port < 1 or port > 65535:
+            continue
+        result[name] = {"url": f"http://127.0.0.1:{port}/mcp/", "headers": {}}
+    return result
+
+
 def load_servers() -> dict[str, dict[str, Any]]:
-    raw_servers = _read_settings().get("mcpServers")
+    settings = _read_settings()
+    raw_servers = settings.get("mcpServers")
     servers: dict[str, dict[str, Any]] = {BUILTIN_MCP_SERVER_NAME: _builtin_server()}
+    servers.update(_load_managed_servers(settings))
     if not isinstance(raw_servers, dict):
         return servers
 

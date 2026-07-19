@@ -1,0 +1,38 @@
+{
+  "id": "cst_studio",
+  "serverName": "cst_studio",
+  "name": "CST Studio",
+  "description": "Control the user's local CST Studio Suite through a SilverRetort MCP adapter.",
+  "version": "0.1.0",
+  "defaultPort": 9901,
+  "defaultConfig": {
+    "attachExisting": true,
+    "cstExecutablePath": "",
+    "allowedProjectRoots": [],
+    "allowMacroExecution": false
+  },
+  "configFields": [
+    {
+      "key": "attachExisting",
+      "label": "优先连接已运行 CST",
+      "type": "boolean"
+    },
+    {
+      "key": "allowMacroExecution",
+      "label": "允许宏执行",
+      "type": "boolean"
+    },
+    {
+      "key": "cstExecutablePath",
+      "label": "CST 可执行文件",
+      "type": "string",
+      "placeholder": "可留空，使用 COM 自动发现"
+    },
+    {
+      "key": "allowedProjectRoots",
+      "label": "允许访问的工程目录",
+      "type": "stringList",
+      "placeholder": "每行一个目录；留空表示不限制"
+    }
+  ]
+}

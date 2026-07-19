@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { CheckCircle2, LoaderCircle, Network, Trash2 } from "lucide-react";
+import { ManagedMcpSettingsCard } from "./ManagedMcpSettingsCard";
 
 interface McpServer {
   name: string;
@@ -136,7 +137,9 @@ export function McpSettingsCard() {
   };
 
   return (
-    <div className="rounded-xl border border-neutral-200 p-5 dark:border-neutral-700">
+    <div className="space-y-5">
+      <ManagedMcpSettingsCard />
+      <div className="rounded-xl border border-neutral-200 p-5 dark:border-neutral-700">
       <div className="flex items-start justify-between gap-4">
         <div className="flex gap-3">
           <span className="grid h-9 w-9 shrink-0 place-items-center rounded-lg bg-neutral-100 dark:bg-neutral-800">
@@ -197,7 +200,7 @@ export function McpSettingsCard() {
           {saved && !error && (
             <p className="flex items-center gap-1.5 text-xs text-emerald-600 dark:text-emerald-400">
               <CheckCircle2 className="h-3.5 w-3.5" />
-              MCP 配置已保存，重连 bridge 后生效。
+              MCP 配置已保存并通知 bridge。
             </p>
           )}
         </div>
@@ -210,6 +213,7 @@ export function McpSettingsCard() {
           {saving ? "保存中..." : "保存 MCP"}
         </button>
       </div>
+    </div>
     </div>
   );
 }

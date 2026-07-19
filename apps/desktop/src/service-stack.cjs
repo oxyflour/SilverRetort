@@ -3,6 +3,7 @@ const path = require("node:path");
 const { existsSync } = require("node:fs");
 const { spawn } = require("node:child_process");
 const { resolveHermesMode, startHermes } = require("./hermes-service.cjs");
+const { createManagedMcpService, resolveMcpsRoot } = require("./managed-mcp-service.cjs");
 const { toWebSocketUrl } = require("./desktop-config.cjs");
 
 const DEFAULT_NEXT_PORT = 23000;
@@ -89,13 +90,19 @@ function startNextServer(config, utilityProcess, nextPort, pythonPort) {
     });
 }
 
-function buildUvicornEnv(config, hermesMode, pythonPort, publicBaseUrl = "") {
+function buildUvicornEnv(config, hermesMode, pythonPort, publicBaseUrl = "", managedMcpControl = null) {
+    const mcpsRoot = resolveMcpsRoot(config);
     return config.buildChildEnv({
         LISTEN_PORT: `${pythonPort}`,
         ...(publicBaseUrl ? { SILVERRETORT_PUBLIC_BASE_URL: publicBaseUrl } : {}),
         DATA_DIR: config.dataDir,
+        ...(mcpsRoot ? { SILVERRETORT_MCPS_ROOT: mcpsRoot } : {}),
         SILVERRETORT_DESKTOP_MODE: config.isPackaged ? "packaged" : "development",
         SILVERRETORT_HERMES_MODE: hermesMode.mode,
+        ...(managedMcpControl ? {
+            DESKTOP_CONTROL_URL: managedMcpControl.url,
+            DESKTOP_CONTROL_TOKEN: managedMcpControl.token,
+        } : {}),
         ...(hermesMode.mode === "disabled" ? {} : {
             HERMES_URL: hermesMode.url,
             HERMES_API_KEY: hermesMode.apiKey,
@@ -121,11 +128,14 @@ async function startServiceStack({ config, supervisor, utilityProcess, ports = {
     const hermesPort = ports.hermes ?? DEFAULT_HERMES_PORT;
     const hermesMode = resolveHermesMode(config, pythonPort, hermesPort);
     const pythonRuntime = resolvePythonRuntime(config, pythonPort);
+    const managedMcp = createManagedMcpService({ config, supervisor });
+    const managedMcpControl = await managedMcp.startControlServer();
+    await managedMcp.startAuto();
 
     const publicBaseUrl = `http://127.0.0.1:${nextPort}`;
     const uvicorn = spawn(pythonRuntime.command, pythonRuntime.args, {
         cwd: pythonRuntime.cwd,
-        env: buildUvicornEnv(config, hermesMode, pythonPort, publicBaseUrl),
+        env: buildUvicornEnv(config, hermesMode, pythonPort, publicBaseUrl, managedMcpControl),
         stdio: "pipe",
     });
     supervisor.monitor("uvicorn", uvicorn);
