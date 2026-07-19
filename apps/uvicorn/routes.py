@@ -26,7 +26,7 @@ import mcp_server
 import runs
 import switch_profiles
 import workspace_service
-from api_routes import artifacts, chat, files, hermes, proxy, system, workspaces
+from api_routes import artifacts, chat, files, hermes, managed_mcp, proxy, system, workspaces
 from api_routes.artifacts import (
     _artifact_content_headers,
     _workspace_file_response,
@@ -143,5 +143,5 @@ from models import (
 )
 
 router = APIRouter(prefix="/api")
-for route_module in (hermes, system, workspaces, artifacts, proxy, chat, files):
+for route_module in (hermes, managed_mcp, system, workspaces, artifacts, proxy, chat, files):
     router.include_router(route_module.router)

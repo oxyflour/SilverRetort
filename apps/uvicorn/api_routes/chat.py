@@ -5,6 +5,7 @@ import uuid
 from fastapi import APIRouter, HTTPException
 
 import db
+import events
 import runs
 import workspace_service
 from api_routes.common import DEFAULT_TITLE, _auto_title

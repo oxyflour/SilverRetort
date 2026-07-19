@@ -9,6 +9,7 @@ from urllib.parse import urlparse
 import httpx
 from fastapi import APIRouter, Body, HTTPException
 
+import bridge_client
 import db
 import switch_profiles
 from api_routes.common import _engine_from_context, _models_response, _require_engine_method
@@ -159,7 +160,7 @@ def hermes_mcp_servers() -> dict:
 
 
 @router.put("/hermes/mcp-servers")
-def set_hermes_mcp_servers(body: dict = Body(...)) -> dict:
+async def set_hermes_mcp_servers(body: dict = Body(...)) -> dict:
     settings = _read_desktop_settings()
     servers = _mcp_servers_from_body(body)
     if servers:
@@ -167,6 +168,7 @@ def set_hermes_mcp_servers(body: dict = Body(...)) -> dict:
     else:
         settings.pop("mcpServers", None)
     _write_desktop_settings(settings)
+    await bridge_client.refresh_local_mcp_servers()
     return _mcp_server_response(settings)
 
 

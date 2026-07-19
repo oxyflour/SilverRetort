@@ -16,6 +16,7 @@ import switch_profiles
 
 RETRY_DELAYS = (1, 2, 5)
 LOOPBACK_HOSTS = {"127.0.0.1", "localhost", "::1"}
+_ACTIVE_CONNECTIONS: set[tuple[Any, asyncio.Lock]] = set()
 HOP_BY_HOP_HEADERS = {
     "connection",
     "content-length",
@@ -101,6 +102,14 @@ async def _send_local_mcp_servers(websocket: Any, send_lock: asyncio.Lock) -> No
     await _send_json(websocket, send_lock, {"kind": "mcp_servers", "servers": servers})
 
 
+async def refresh_local_mcp_servers() -> None:
+    for websocket, send_lock in list(_ACTIVE_CONNECTIONS):
+        try:
+            await _send_local_mcp_servers(websocket, send_lock)
+        except Exception as exc:
+            print(f"[bridge] failed to refresh MCP servers: {exc}")
+
+
 async def _handle_mcp_http(payload: dict[str, Any], websocket: Any, send_lock: asyncio.Lock) -> None:
     request_id = str(payload.get("id") or "")
     server_name = str(payload.get("server") or "")
@@ -166,16 +175,20 @@ async def _bridge_forever(bridge_url: str, api_key: str) -> None:
                 print(f"[bridge] connected {bridge_url}")
                 attempt = 0
                 send_lock = asyncio.Lock()
+                _ACTIVE_CONNECTIONS.add((websocket, send_lock))
                 await _send_local_mcp_servers(websocket, send_lock)
-                async for raw_message in websocket:
-                    try:
-                        payload = json.loads(raw_message)
-                    except json.JSONDecodeError:
-                        continue
-                    if not isinstance(payload, dict):
-                        continue
-                    if payload.get("kind") == "mcp_http_request":
-                        asyncio.create_task(_handle_mcp_http(payload, websocket, send_lock))
+                try:
+                    async for raw_message in websocket:
+                        try:
+                            payload = json.loads(raw_message)
+                        except json.JSONDecodeError:
+                            continue
+                        if not isinstance(payload, dict):
+                            continue
+                        if payload.get("kind") == "mcp_http_request":
+                            asyncio.create_task(_handle_mcp_http(payload, websocket, send_lock))
+                finally:
+                    _ACTIVE_CONNECTIONS.discard((websocket, send_lock))
         except asyncio.CancelledError:
             raise
         except Exception as exc:

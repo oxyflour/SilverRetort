@@ -49,6 +49,11 @@ def artifact_bridge():
 
 
 def main() -> None:
+    if len(sys.argv) >= 3 and sys.argv[1] == "managed-mcp":
+        from managed_mcp_registry import load_adapter_main
+
+        load_adapter_main(sys.argv[2])(sys.argv[3:])
+        return
     port = int(os.getenv("LISTEN_PORT", "23001"))
     uvicorn.run(app, host="127.0.0.1", port=port, log_level=os.getenv("LOG_LEVEL", "info"))
 

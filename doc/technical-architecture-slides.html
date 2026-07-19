@@ -344,6 +344,42 @@
     <section class="slide">
       <div class="stage">
         <div>
+          <p class="kicker">Managed MCP 设计</p>
+          <h2>一键安装并托管专业程序 adapter</h2>
+        </div>
+        <div class="grid">
+          <article class="card">
+            <span class="tag blue">Catalog</span>
+            <h3>根目录插件位</h3>
+            <p>每个专业程序独立放在 mcps/&lt;id&gt;/ 下，manifest 声明名称、默认端口、配置字段，adapter.py 暴露 MCP HTTP 服务。</p>
+            <p class="code">mcps/cst_studio/manifest.json · adapter.py</p>
+          </article>
+          <article class="card">
+            <span class="tag teal">Lifecycle</span>
+            <h3>Desktop 管进程</h3>
+            <p>Electron 扫描 manifest，提供私有 control API，负责安装状态、autoStart、端口分配、日志和子进程清理。</p>
+            <p class="code">managed-mcp-service.cjs</p>
+          </article>
+          <article class="card">
+            <span class="tag green">Bridge</span>
+            <h3>uvicorn 管协议</h3>
+            <p>FastAPI 暴露 /api/hermes/managed-mcp，合并 running 的受管 server，并在启停后刷新 bridge server 列表。</p>
+            <p class="code">managed_mcp.py · local_mcp_servers.py</p>
+          </article>
+        </div>
+        <div class="flow">
+          <article class="node"><h3>设置页</h3><p>根据 configFields 自动渲染表单，用户点击安装并启动。</p><p class="code">ManagedMcpSettingsCard.tsx</p></article>
+          <div class="arrow"></div>
+          <article class="node"><h3>Adapter 进程</h3><p>main.py managed-mcp &lt;id&gt; 动态加载 mcps/&lt;id&gt;/adapter.py。</p><p class="code">managed_mcp_registry.py</p></article>
+          <div class="arrow"></div>
+          <article class="node"><h3>安装包</h3><p>desktop build 把根目录 mcps 复制到 resources/mcps，打包后继续自动扫描。</p><p class="code">apps/desktop/package.json</p></article>
+        </div>
+      </div>
+    </section>
+
+    <section class="slide">
+      <div class="stage">
+        <div>
           <p class="kicker">Artifact 交互组件</p>
           <h2>从聊天输出升级为可操作界面</h2>
         </div>
