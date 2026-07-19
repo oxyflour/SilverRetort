@@ -551,7 +551,7 @@ function exitInteractive() {
 }
 
 // ======================================================================
-// Scene update (POST to /interactive)
+// Scene update (POST to /scene)
 // ======================================================================
 let sceneDirty = false;
 let sceneDebounce = null;
@@ -565,7 +565,7 @@ function scheduleScenePost() {
   sceneDebounce = setTimeout(async function() {
     if (sceneDirty) {
       sceneDirty = false;
-      await fetch('interactive', {
+      await fetch('scene', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(sceneSpec)
