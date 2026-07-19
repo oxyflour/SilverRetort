@@ -14,7 +14,12 @@ RenderDefinition = dict[str, Any]
 BUILTIN_RENDER_DEFINITIONS: list[RenderDefinition] = [
     {
         "type": "iframe",
-        "description": "Iframe artifact served from a workspace-relative HTML entry file, an external http(s) URL, or a workspace loopback port preview.",
+        "description": (
+            "Iframe artifact served from a workspace-relative HTML entry file, "
+            "an external http(s) URL, or a workspacePort HTTP preview server. "
+            "For workspacePort, path is a URL route served by that HTTP server, "
+            "not a workspace file path."
+        ),
         "payloadSchema": {
             "oneOf": [
                 {
@@ -41,8 +46,20 @@ BUILTIN_RENDER_DEFINITIONS: list[RenderDefinition] = [
                             "additionalProperties": False,
                             "required": ["port"],
                             "properties": {
-                                "port": {"type": "integer", "minimum": 1, "maximum": 65535},
-                                "path": {"type": "string"},
+                                "port": {
+                                    "type": "integer",
+                                    "minimum": 1,
+                                    "maximum": 65535,
+                                    "description": "Port for a server already listening on 127.0.0.1 inside the current workspace.",
+                                },
+                                "path": {
+                                    "type": "string",
+                                    "description": (
+                                        "Optional URL route on that server. Use an empty string or omit when the server "
+                                        "serves its entry at /. Do not put workspace-relative file paths such as "
+                                        "site/index.html here unless the server itself serves that exact URL route."
+                                    ),
+                                },
                             },
                         }
                     },
@@ -190,10 +207,31 @@ def validate_iframe_payload(session_id: str, payload: Any) -> str | None:
     return None
 
 
+def _show_artifact_result(artifact: Artifact) -> dict[str, str]:
+    result = {"artifactId": artifact.id}
+    payload = artifact.payload
+    if artifact.type != "iframe" or not isinstance(payload, dict):
+        return result
+    config = payload.get("workspacePort")
+    if not isinstance(config, dict):
+        return result
+    port = config.get("port")
+    if isinstance(port, bool) or not isinstance(port, int):
+        return result
+    session = db.get_session(artifact.session_id)
+    if session is None:
+        return result
+    result["baseUrl"] = workspace_service.local_workspace_proxy_url(
+        session.workspace_id,
+        port,
+    )
+    return result
+
+
 def ui_show_artifact(
     session_id: str, type: str, title: str, payload: dict[str, Any] | None = None
-) -> str:
-    """Show an artifact in the user's right panel and return its artifact_id.
+) -> dict[str, str] | str:
+    """Show an artifact in the user's right panel and return artifact metadata.
 
     For iframe artifacts, payload must be {path: <workspace-relative HTML
     entry file>}, {url: <absolute http(s) URL>}, or
@@ -203,9 +241,27 @@ def ui_show_artifact(
     or ./assets/app.js. Parent-directory assets are not served. Path artifacts
     may also load external http(s) resources and embed external http(s) frames.
     For workspacePort artifacts, start the HTTP server inside the current
-    workspace and bind it to 127.0.0.1 on the given port. Configure the server
-    with the proxy path prefix, or use relative resource URLs; the proxy does
-    not rewrite HTML, CSS, or JavaScript content.
+    workspace and bind it to 127.0.0.1 on the given port. workspacePort.path is
+    an HTTP route on that running server, not a workspace-relative file path.
+    If the preview page is available at http://127.0.0.1:8766/, use
+    {workspacePort: {port: 8766}} or {workspacePort: {port: 8766, path: ""}}.
+    Do not use {workspacePort: {port: 8766, path: "project/index.html"}}
+    merely because project/index.html is the file you created in the workspace;
+    that will request http://127.0.0.1:8766/project/index.html and usually 404.
+    Only set path when you have verified the server responds at that URL route,
+    for example path: "preview/" if http://127.0.0.1:8766/preview/ works.
+    Configure the server with the proxy path prefix, or use relative resource
+    URLs; the proxy does not rewrite HTML, CSS, or JavaScript content. In page
+    code, avoid root-relative requests like fetch('/offer') unless the server is
+    mounted at origin root; use fetch('offer') or the returned baseUrl instead.
+    workspacePort is only a transparent proxy; it does not create application
+    endpoints. If the iframe page uses POST/PUT/PATCH/DELETE requests such as
+    fetch('interactive', {method: 'POST'}) or fetch('camera', {method: 'POST'}),
+    the server running on that port must implement those exact methods and
+    routes. Do not serve only static HTML with a static file server and then add
+    JavaScript calls to missing API routes. Before calling this tool for an
+    interactive app, verify the entry and every API route through the proxy with
+    curl or fetch, including POST routes.
 
     To return a user interaction from an iframe to the agent, include
     <script src="/artifact-bridge-v1.js"></script> in the HTML and call
@@ -213,8 +269,11 @@ def ui_show_artifact(
     when meaningful UI state changes. Debounce rapid changes in complex UIs.
     The host saves only the latest revision and does not start an agent run.
     The context is attached when the user next sends a normal chat message.
-    Context must be JSON and no larger than 64 KiB. This tool returns the
-    artifact_id immediately and does not wait for context updates.
+    Context must be JSON and no larger than 64 KiB. This tool returns
+    {artifactId, baseUrl?} immediately and does not wait for context updates.
+    For workspacePort iframe artifacts, baseUrl is the workspace proxy resource
+    root to use when configuring a preview server base path. workspacePort.path
+    is an HTTP route on that server, not a workspace-relative file path.
     """
     if db.get_session(session_id) is None:
         return f"error: session not found: {session_id}"
@@ -238,7 +297,7 @@ def ui_show_artifact(
     events.broadcast(
         events.ui_command({"command": "show-artifact", "artifactId": artifact.id}, session_id)
     )
-    return artifact.id
+    return _show_artifact_result(artifact)
 
 
 def ui_update_artifact(artifact_id: str, payload: dict[str, Any]) -> str:

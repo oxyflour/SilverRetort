@@ -14,7 +14,6 @@ import {
   SwitchProfile,
   ToolCall,
   Workspace,
-  WorkspaceCapability,
 } from "silverretort-protocol";
 
 export interface SessionBucket {
@@ -34,7 +33,6 @@ interface ChatState {
   client: ApiClient;
   workspaces: Workspace[];
   switchProfiles: SwitchProfile[];
-  workspaceCapability: WorkspaceCapability | null;
   currentWorkspaceId: string | null;
   collapsedWorkspaceIds: string[];
   sessions: Session[];
@@ -402,7 +400,6 @@ export const useChatStore = create<ChatState>((set, get) => {
     client: new ApiClient(),
     workspaces: [],
     switchProfiles: [],
-    workspaceCapability: null,
     currentWorkspaceId: null,
     collapsedWorkspaceIds: [],
     sessions: [],
@@ -420,14 +417,13 @@ export const useChatStore = create<ChatState>((set, get) => {
     hermesControlsAvailable: true,
 
     refreshSessions: async () => {
-      const [workspaces, capability, sessions] = await Promise.all([
+      const [workspaces, sessions] = await Promise.all([
         get().client.listWorkspaces(),
-        get().client.workspaceCapability(),
         get().client.listSessions(),
       ]);
       const switchProfiles = await get().client.listSwitchProfiles().catch(() => []);
       const currentWorkspaceId = get().currentWorkspaceId ?? workspaces[0]?.id ?? null;
-      set({ workspaces, switchProfiles, workspaceCapability: capability, sessions, currentWorkspaceId });
+      set({ workspaces, switchProfiles, sessions, currentWorkspaceId });
       void get().refreshHermesControls();
       if (!get().currentSessionId && sessions.length > 0) {
         const first = sessions.find((session) => session.workspaceId === currentWorkspaceId) ?? sessions[0];

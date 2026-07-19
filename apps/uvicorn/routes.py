@@ -52,7 +52,6 @@ from models import (
     UpdateSwitchProfileRequest,
     UpdateWorkspaceRequest,
     Workspace,
-    WorkspaceCapability,
     HermesModel,
     HermesModelsResponse,
     HermesUsageResponse,
@@ -226,8 +225,6 @@ def _models_response(payload: dict) -> HermesModelsResponse:
         default_model=str(default.get("model") or ""),
     )
 
-
-
 @router.get("/hermes/connection")
 def hermes_connection() -> dict:
     return _hermes_connection_response()
@@ -343,11 +340,6 @@ def search_messages(q: str = "") -> MessageSearchResponse:
     if len(query) > 200:
         raise HTTPException(400, "query is too long")
     return MessageSearchResponse(query=query, results=db.search_messages(query))
-
-
-@router.get("/workspaces/capability")
-async def workspace_capability(workspaceId: str | None = None) -> WorkspaceCapability:
-    return WorkspaceCapability.model_validate(await workspace_service.capability(workspaceId))
 
 
 @router.get("/hermes/slash-commands")
@@ -466,18 +458,7 @@ async def set_hermes_vision_model(body: SetModelRequest, sessionId: str | None =
 
 @router.get("/workspaces")
 async def list_workspaces() -> list[Workspace]:
-    workspaces = db.list_workspaces()
-    for workspace in workspaces:
-        try:
-            capability = await workspace_service.capability(workspace.id)
-            if capability.get("supported") and capability.get("writable"):
-                await workspace_service.create_remote(workspace.id)
-                db.set_workspace_status(workspace.id, "active")
-        except Exception:
-            db.set_workspace_status(workspace.id, "error")
-    if workspaces:
-        workspaces = db.list_workspaces()
-    return [_workspace_response(workspace) for workspace in workspaces]
+    return [_workspace_response(workspace) for workspace in db.list_workspaces()]
 
 
 @router.post("/workspaces")
@@ -488,6 +469,9 @@ async def create_workspace(body: CreateWorkspaceRequest) -> Workspace:
     connection_id = body.connection_id or switch_profiles.default_profile_id()
     if switch_profiles.get_profile(connection_id) is None:
         raise HTTPException(400, "switch profile not found")
+    capability = await workspace_service.capability(connection_id=connection_id)
+    if not capability.get("supported") or not capability.get("writable"):
+        raise HTTPException(503, "Workspace creation is unavailable for this switchUrl")
     workspace_id = uuid.uuid4().hex
     workspace = db.create_workspace(workspace_id, name, "creating", connection_id)
     try:

@@ -31,7 +31,11 @@ const iframePayloadSchema = {
           required: ["port"],
           properties: {
             port: { type: "integer", minimum: 1, maximum: 65535 },
-            path: { type: "string" },
+            path: {
+              type: "string",
+              description:
+                "Optional URL route on the running HTTP server, not a workspace file path. Omit or use an empty string when the server serves its entry at /. Do not use values like site/index.html unless http://127.0.0.1:PORT/site/index.html really works. workspacePort is only a proxy; any POST API used by the page must be implemented by the server on this port and verified through the proxy.",
+            },
           },
         },
       },

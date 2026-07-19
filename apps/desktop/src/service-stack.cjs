@@ -89,9 +89,10 @@ function startNextServer(config, utilityProcess, nextPort, pythonPort) {
     });
 }
 
-function buildUvicornEnv(config, hermesMode, pythonPort) {
+function buildUvicornEnv(config, hermesMode, pythonPort, publicBaseUrl = "") {
     return config.buildChildEnv({
         LISTEN_PORT: `${pythonPort}`,
+        ...(publicBaseUrl ? { SILVERRETORT_PUBLIC_BASE_URL: publicBaseUrl } : {}),
         DATA_DIR: config.dataDir,
         SILVERRETORT_DESKTOP_MODE: config.isPackaged ? "packaged" : "development",
         SILVERRETORT_HERMES_MODE: hermesMode.mode,
@@ -121,9 +122,10 @@ async function startServiceStack({ config, supervisor, utilityProcess, ports = {
     const hermesMode = resolveHermesMode(config, pythonPort, hermesPort);
     const pythonRuntime = resolvePythonRuntime(config, pythonPort);
 
+    const publicBaseUrl = `http://127.0.0.1:${nextPort}`;
     const uvicorn = spawn(pythonRuntime.command, pythonRuntime.args, {
         cwd: pythonRuntime.cwd,
-        env: buildUvicornEnv(config, hermesMode, pythonPort),
+        env: buildUvicornEnv(config, hermesMode, pythonPort, publicBaseUrl),
         stdio: "pipe",
     });
     supervisor.monitor("uvicorn", uvicorn);

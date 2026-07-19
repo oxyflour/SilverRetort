@@ -24,18 +24,33 @@ export function SessionSidebar() {
   const [creating, setCreating] = useState(false);
   const [createName, setCreateName] = useState("New workspace");
   const [createConnectionId, setCreateConnectionId] = useState<string | undefined>(undefined);
+  const [createError, setCreateError] = useState<string | null>(null);
   const [connectionMenuOpen, setConnectionMenuOpen] = useState(false);
   const [deletingId, setDeletingId] = useState<string | null>(null);
   const [expandedSessionCounts, setExpandedSessionCounts] = useState<Record<string, number>>({});
   const [searchQuery, setSearchQuery] = useState("");
   const [searchOpen, setSearchOpen] = useState(false);
-  const available = Boolean(
-    store.workspaceCapability?.supported && store.workspaceCapability.writable,
-  );
   const currentWorkspace = store.workspaces.find(
     (workspace) => workspace.id === store.currentWorkspaceId,
   );
   const defaultConnectionId = currentWorkspace?.connectionId;
+  const defaultCreateConnectionId =
+    store.switchProfiles.find((profile) => profile.id === defaultConnectionId)?.id ??
+    store.switchProfiles[0]?.id;
+  const selectedCreateProfile = store.switchProfiles.find(
+    (profile) => profile.id === createConnectionId,
+  );
+  const submitCreateWorkspace = () => {
+    const name = createName.trim();
+    if (!name) return;
+    setCreateError(null);
+    void store
+      .createWorkspace(name, createConnectionId)
+      .then(() => setCreating(false))
+      .catch((error: unknown) => {
+        setCreateError(error instanceof Error ? error.message : String(error));
+      });
+  };
   const workspaceViews = store.workspaces.map((workspace) => {
     const sessions = store.sessions.filter(
       (session) => session.workspaceId === workspace.id,
@@ -68,22 +83,21 @@ export function SessionSidebar() {
         </div>
         <div className="relative flex">
           <button
-            disabled={!available}
             onClick={() => {
               setCreateName("New workspace");
-              setCreateConnectionId(defaultConnectionId);
+              setCreateConnectionId(defaultCreateConnectionId);
+              setCreateError(null);
               setCreating(true);
             }}
-            className="flex min-w-0 flex-1 items-center justify-center gap-2 rounded-l-md border border-neutral-300 px-3 py-1.5 text-sm hover:bg-neutral-200 disabled:cursor-not-allowed disabled:opacity-40 dark:border-neutral-700 dark:hover:bg-neutral-800"
+            className="flex min-w-0 flex-1 items-center justify-center gap-2 rounded-l-md border border-neutral-300 px-3 py-1.5 text-sm hover:bg-neutral-200 dark:border-neutral-700 dark:hover:bg-neutral-800"
           >
             <AppIcon icon={FolderPlus} className="h-4 w-4" />
             New workspace
           </button>
           <button
-            disabled={!available}
             title="Choose connection"
             onClick={() => setConnectionMenuOpen((open) => !open)}
-            className="grid w-9 place-items-center rounded-r-md border border-l-0 border-neutral-300 text-neutral-500 hover:bg-neutral-200 disabled:cursor-not-allowed disabled:opacity-40 dark:border-neutral-700 dark:hover:bg-neutral-800"
+            className="grid w-9 place-items-center rounded-r-md border border-l-0 border-neutral-300 text-neutral-500 hover:bg-neutral-200 dark:border-neutral-700 dark:hover:bg-neutral-800"
           >
             <AppIcon icon={ChevronDown} className="h-4 w-4" />
           </button>
@@ -98,6 +112,7 @@ export function SessionSidebar() {
                     setConnectionMenuOpen(false);
                     setCreateName("New workspace");
                     setCreateConnectionId(profile.id);
+                    setCreateError(null);
                     setCreating(true);
                   }}
                 >
@@ -108,11 +123,6 @@ export function SessionSidebar() {
             </div>
           )}
         </div>
-        {!available && store.workspaceCapability && (
-          <p className="px-1 text-xs text-amber-600">
-            Workspace support is unavailable in the current Hermes build.
-          </p>
-        )}
       </div>
       <div className="flex-1 overflow-y-auto px-2 pb-2">
         {workspaceViews.map((view) => {
@@ -182,7 +192,7 @@ export function SessionSidebar() {
                 <span className="ml-1 flex shrink-0 items-center gap-1 opacity-0 transition-opacity pointer-events-none group-hover:opacity-100 group-hover:pointer-events-auto">
                   <button
                     title="New session"
-                    disabled={!available || workspace.status !== "active"}
+                    disabled={workspace.status !== "active"}
                     onClick={() => void store.createSession(workspace.id)}
                     className="rounded p-1 text-neutral-500 hover:text-neutral-900 disabled:opacity-40 dark:hover:text-neutral-100"
                   >
@@ -247,32 +257,28 @@ export function SessionSidebar() {
           <input
             autoFocus
             value={createName}
-            onChange={(event) => setCreateName(event.target.value)}
+            onChange={(event) => {
+              setCreateName(event.target.value);
+              setCreateError(null);
+            }}
             onKeyDown={(event) => {
-              if (event.key === "Enter" && createName.trim()) {
-                void store
-                  .createWorkspace(createName.trim(), createConnectionId)
-                  .then(() => setCreating(false));
-              }
+              if (event.key === "Enter") submitCreateWorkspace();
               if (event.key === "Escape") setCreating(false);
             }}
             className="w-full rounded border border-neutral-300 bg-white px-2 py-1.5 text-sm dark:border-neutral-600 dark:bg-neutral-800"
           />
           <p className="text-xs text-neutral-500">
             Connection:{" "}
-            {store.switchProfiles.find((profile) => profile.id === createConnectionId)?.name ??
-              currentWorkspace?.connectionId ??
-              "Local"}
+            {selectedCreateProfile?.name ?? "Default"}
           </p>
+          {createError && (
+            <p className="rounded-md border border-red-200 bg-red-50 px-2 py-1.5 text-xs text-red-700 dark:border-red-900/60 dark:bg-red-950/30 dark:text-red-300">
+              {createError}
+            </p>
+          )}
           <DialogActions
             onCancel={() => setCreating(false)}
-            onConfirm={() => {
-              if (createName.trim()) {
-                void store
-                  .createWorkspace(createName.trim(), createConnectionId)
-                  .then(() => setCreating(false));
-              }
-            }}
+            onConfirm={submitCreateWorkspace}
             confirmLabel="Create"
             disabled={!createName.trim()}
           />

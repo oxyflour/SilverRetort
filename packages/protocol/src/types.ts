@@ -268,14 +268,6 @@ export type CreateWorkspaceRequest = z.infer<typeof CreateWorkspaceRequestSchema
 export const UpdateWorkspaceRequestSchema = z.object({ name: z.string() });
 export type UpdateWorkspaceRequest = z.infer<typeof UpdateWorkspaceRequestSchema>;
 
-export const WorkspaceCapabilitySchema = z.object({
-  supported: z.boolean(),
-  version: z.number(),
-  writable: z.boolean(),
-  cwdEnforced: z.boolean(),
-});
-export type WorkspaceCapability = z.infer<typeof WorkspaceCapabilitySchema>;
-
 export const SlashCommandSchema = z.object({
   command: z.string(),
   name: z.string(),

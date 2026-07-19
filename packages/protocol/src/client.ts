@@ -20,8 +20,6 @@ import {
   ToolCall,
   ToolCallSchema,
   Workspace,
-  WorkspaceCapability,
-  WorkspaceCapabilitySchema,
   WorkspaceSchema,
   HermesModelsResponse,
   HermesModelsResponseSchema,
@@ -53,7 +51,14 @@ export class ApiClient {
       ...init,
     });
     if (!res.ok) {
-      throw new Error(`${init?.method ?? "GET"} ${path} failed: HTTP ${res.status}`);
+      let detail = "";
+      try {
+        const payload = await res.json();
+        detail = typeof payload?.detail === "string" ? payload.detail : "";
+      } catch {
+        // Keep the generic HTTP error when the server did not return JSON.
+      }
+      throw new Error(detail || `${init?.method ?? "GET"} ${path} failed: HTTP ${res.status}`);
     }
     return schema.parse(await res.json());
   }
@@ -64,10 +69,6 @@ export class ApiClient {
 
   listWorkspaces(): Promise<Workspace[]> {
     return this.request(z.array(WorkspaceSchema), "/api/workspaces");
-  }
-
-  workspaceCapability(): Promise<WorkspaceCapability> {
-    return this.request(WorkspaceCapabilitySchema, "/api/workspaces/capability");
   }
 
   listSwitchProfiles(): Promise<SwitchProfile[]> {

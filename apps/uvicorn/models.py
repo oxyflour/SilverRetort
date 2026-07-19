@@ -162,14 +162,6 @@ class UpdateSwitchProfileRequest(ApiModel):
     hermes_api_key: str | None = None
 
 
-class WorkspaceCapability(ApiModel):
-    supported: bool
-    version: int
-    writable: bool
-    cwd_enforced: bool
-    workspace_proxy: dict[str, Any] | None = None
-
-
 class SlashCommand(ApiModel):
     command: str
     name: str
