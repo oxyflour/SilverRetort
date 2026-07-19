@@ -11,11 +11,13 @@ Prerequisite: understand the WebRTC streaming architecture from the `render-with
 
 ## Quick start
 
-Copy `assets/server.py` and `assets/index.html` into your workspace subdirectory (e.g. `mitsuba-stream/`). Download an HDR envmap to `studio/studio_envmap.exr` or provide your own path in `_build_scene()`. Then:
+Copy `assets/heightfield.py`, `assets/server.py`, and `assets/index.html` into your workspace. Download an HDR envmap to `studio/studio_envmap.exr` or provide your own path in `_build_scene()`. Then:
 
 ```bash
-python mitsuba-stream/server.py    # binds 127.0.0.1:8766
+python server.py    # loads ./heightfield.py, binds 127.0.0.1:8766
 ```
+
+Show the artifact via `mcp__silverretort_ui__ui_show_artifact` with `type="iframe"` and `payload={workspacePort: {port: 8766}}`. NEVER use `{path: "index.html"}` — the path artifact has caching issues and the wrong origin for WebRTC. Always use `workspacePort`.
 
 Display via Hermes artifact:
 
@@ -38,21 +40,19 @@ It also exports:
 - `get_default_spec()` — builds the default heightfield scene spec from PARAMS defaults
 - `heightfield_preview()` — generates a PNG preview using `dr.scalar.ArrayXf`
 
-**`server.py`** imports `evaluate`, `gradient`, `heightfield_preview`, and `PARAMS` from heightfield.py. The custom BSDF calls `heightfield.gradient()` directly — there is no inline `evaluate_drjit()` anymore. The server accepts an optional CLI argument for the heightfield path:
+**`server.py`** imports `evaluate`, `gradient`, `heightfield_preview`, `PARAMS`, and `get_default_spec` from heightfield.py. The custom BSDF calls `heightfield.gradient()` directly — there is no inline `evaluate_drjit()` anymore.
 
-```bash
-python server.py [path/to/heightfield.py]
-```
+The server validates the heightfield at import time: it calls `evaluate()` and `gradient()` via `dr.scalar.ArrayXf` with `**heightfield.get_default_spec()`. If either crashes or returns NaN/Inf, the server logs the error and calls `sys.exit(1)` BEFORE starting the HTTP server. See Pitfall 17 for details.
 
-If omitted, defaults to `heightfield.py` in the server directory. The background watchdog task (`hf_watchdog`) checks the file every 2 seconds and calls `importlib.reload(heightfield)` on change — no server restart needed for preview OR BSDF formula changes.
+The `/preview` endpoint reads `jitter`, `hmin_scale`, and `seed` from query params and passes them to `heightfield.heightfield_preview()`, keeping the preview and render output in sync.
 
 **`index.html`** fetches `GET /params` on startup and dynamically builds the slider control panel from the returned schema. Adding a new parameter only requires editing `heightfield.py`'s `PARAMS` list — the UI updates automatically.
 
-All three files live in the workspace:
+All three files live in the workspace (copy from skill assets/):
 ```
-server.py          # import heightfield; BSDF calls heightfield.gradient()
-heightfield.py     # single source of truth (drjit) — edit this file
-index.html         # frontend — sliders built dynamically from /params
+heightfield.py     # PARAMS + evaluate/gradient/preview — edit THIS file to change the formula
+server.py          # import heightfield; BSDF; HTTP/WebRTC; preview endpoint
+index.html         # frontend — PARAMS-driven sliders, preview overlay, SPP bottom-right
 ```
 
 ## Scene spec and live controls
@@ -90,13 +90,21 @@ The `POST` handler does a **deep merge** at leaf keys — sending only `{"height
 
 The `index.html` page fetches `GET /params` on startup and dynamically builds the control panel from the returned schema. Each slider row is generated from a param definition in `heightfield.PARAMS`. To add a new control, edit `heightfield.py`'s `PARAMS` list — the UI updates automatically with no HTML changes.
 
-The built-in controls are:
-
 Sliders debounce at 150ms before POSTing to `/scene`. Changing parameters resets SPP accumulation (the scene rebuilds, so accumulation starts fresh). A "Reset defaults" button restores the default spec.
 
-### Heightfield preview thumbnail (server-side)
+### UI layout
 
-Below the sliders is a preview image fetched from `GET /preview?period=...&hmax=...&rotation_speed=...&center_x=...&center_y=...&size_mm=...`. The server computes the heightfield using `heightfield.heightfield_preview()` which calls the same `evaluate()` function that the BSDF uses (via `dr.scalar.ArrayXf` for CPU-side computation). The frontend `<img>` tag updates its `src` on parameter changes — no client-side computation.
+Three overlay regions floating over the canvas:
+
+- **Top-left**: slider control panel (dynamic, built from `GET /params`)
+- **Top-right**: heightfield preview thumbnail (server-rendered PNG, drag/pannable, zoom with scroll wheel)
+- **Bottom-right**: SPP counter (live from WebRTC data channel, shows current accumulated samples)
+
+No bottom info bar — the old "SPP accumulates when idle" text has been removed. The SPP counter is a minimal floating label at bottom-right that updates in real time via data channel messages.
+
+### Heightfield preview thumbnail (top-right overlay, server-side)
+
+The preview thumbnail floats in the top-right corner of the canvas as a standalone overlay (`#preview-overlay`). It fetches `GET /preview?period=...&hmax=...&rotation_speed=...&jitter=...&hmin_scale=...&seed=...&center_x=...&center_y=...&size_mm=...`. The server computes the heightfield using `heightfield.heightfield_preview()` which calls the same `evaluate()` function that the BSDF uses (via `dr.scalar.ArrayXf` for CPU-side computation). The frontend `<img>` tag updates its `src` on parameter changes — no client-side computation.
 
 When you edit `heightfield.py`, the background watchdog task detects the change and calls `importlib.reload(heightfield)`, so the next preview request AND the next BSDF evaluation use the updated formula. No server restart needed.
 
@@ -164,40 +172,56 @@ def perturbed_normal(self, si):
     return N
 ```
 
-### Periodic height field functions in Dr.Jit
+### Heightfield formula (Dr.Jit, from heightfield.py)
 
-The `evaluate()` and `gradient()` functions live in `heightfield.py` — the single source of truth. They use Dr.Jit ops (`dr.floor`, `dr.sqrt`, etc.) so they work for both GPU rendering (CUDA arrays) and CPU preview (scalar arrays). Use `dr.floor` (not `%`) for sign-independent periodicity:
+The `evaluate()` and `gradient()` functions live in `heightfield.py` — the single source of truth. They use Dr.Jit ops (`dr.floor`, `dr.sqrt`, etc.) so they work for both GPU rendering (CUDA arrays) and CPU preview (scalar arrays). Use `dr.floor` (not `%`) for sign-independent periodicity.
+
+The current default formula is **random pyramids**: each cell gets pseudo-random height and jittered center position via sine-based hash of `(seed, cell_u, cell_v)`. See `assets/heightfield.py` for the full implementation. Key points:
+
+- `_cell_hash(seed, cell_u, cell_v)` — deterministic hash returning 3 values in [0, 1) using only Dr.Jit ops
+- `cell_hmax = hmax * (hmin_scale + (1 - hmin_scale) * r_height)` — random height per cell
+- `peak_u = 0.5 + (r_jx - 0.5) * jitter` — jittered peak position
+- Pyramid distance computed from jittered peak: `d = max(|u - peak_u|, |v - peak_v|)`
+- Return `cell_hmax * max(1.0 - 2.0 * d, 0.0)`
+
+### Per-cell random variation via hash functions
+
+The current heightfield (random pyramids) uses a deterministic hash function on
+the cell index `(cell_u, cell_v)`. This preserves differentiability for the
+finite-difference gradient while giving each cell unique parameters. The hash
+lives in `heightfield.py` and uses only Dr.Jit ops:
 
 ```python
-# In heightfield.py:
-def evaluate(x, y, period, hmax, rotation_speed=0.0):
-    """Height field in physical coordinates (metres).
-    Each pyramid is rotated by rotation_speed * distance_from_center (radians)."""
-    cell_u = dr.floor(x / period)
-    cell_v = dr.floor(y / period)
-    cell_cx = (cell_u + 0.5) * period  # cell center x
-    cell_cy = (cell_v + 0.5) * period  # cell center y
-    dist = dr.sqrt(cell_cx * cell_cx + cell_cy * cell_cy)
-    angle = rotation_speed * dist
+def _cell_hash(seed, cell_u, cell_v):
+    """Hash (cell_u, cell_v) + seed -> three pseudo-random values in [0,1)."""
+    s1 = dr.sin(cell_u * 127.1 + cell_v * 311.7 + seed * 123.456) * 43758.5453
+    s2 = dr.sin(cell_u * 269.5 + cell_v * 183.3 + seed * 789.012) * 43758.5453
+    s3 = dr.sin(cell_u * 419.2 + cell_v * 89.7 + seed * 345.678) * 43758.5453
 
-    u_local = x / period - cell_u   # 0..1 within cell
-    v_local = y / period - cell_v
+    def _frac(v):
+        return dr.abs(v) - dr.floor(dr.abs(v))
 
-    # rotate local coords around cell center (0.5, 0.5)
-    uc = u_local - 0.5
-    vc = v_local - 0.5
-    cos_a = dr.cos(angle)
-    sin_a = dr.sin(angle)
-    ur = uc * cos_a - vc * sin_a + 0.5
-    vr = uc * sin_a + vc * cos_a + 0.5
-
-    du = dr.abs(ur - 0.5)
-    dv = dr.abs(vr - 0.5)
-    d = dr.maximum(du, dv)
-    return hmax * dr.maximum(1.0 - 2.0 * d, 0.0)
+    return _frac(s1), _frac(s2), _frac(s3)
 ```
 
-The BSDF's `height_gradient()` method calls `heightfield.gradient(x, y, ...)` and then applies the UV-to-physical chain rule. This keeps the heightfield math fully isolated in one file.
+`dr.abs` + `frac(v) = abs(v) - floor(abs(v))` ensures [0, 1) output regardless of sine sign.
+**Do NOT use `dr.fmod` — it does not exist in Dr.Jit.**
+Use the three hash values for:
+- `r_height`: scale hmax per cell: `cell_hmax = hmax * (hmin_scale + (1 - hmin_scale) * r_height)`
+- `r_jx`, `r_jy`: jitter the pyramid peak within the cell: `peak_u = 0.5 + (r_jx - 0.5) * jitter`
+
+Then compute pyramid distance from the jittered peak instead of (0.5, 0.5):
+
+```python
+du = dr.abs(u_local - peak_u)
+dv = dr.abs(v_local - peak_v)
+d = dr.maximum(du, dv)
+return cell_hmax * dr.maximum(1.0 - 2.0 * d, 0.0)
+```
+
+Expose `jitter`, `hmin_scale`, and `seed` in PARAMS and wire them through
+`evaluate()`, `gradient()`, and `heightfield_preview()`. See `assets/heightfield.py`
+for the full working pattern.
 
 ### BSDF properties (configurable in scene dict)
 
@@ -206,6 +230,9 @@ The BSDF's `height_gradient()` method calls `heightfield.gradient(x, y, ...)` an
 | `period` | 3e-4 (0.3 mm) | Pyramid cell period in metres |
 | `hmax` | 1e-5 (0.01 mm) | Pyramid peak height in metres |
 | `rotation_speed` | 0.0 | Pyramid rotation rate in rad/m (radians per metre from center) |
+| `jitter` | 0.5 | Max center displacement as fraction of cell period [0, 1] |
+| `hmin_scale` | 0.15 | Minimum height as fraction of hmax [0, 1]; cells get random heights in [hmin_scale*hmax, hmax] |
+| `seed` | 42.0 | Hash seed — different values produce different pseudo-random patterns |
 | `fd_step` | 1e-6 (1 um) | Finite difference step in metres |
 | `height_scale` | 1.0 | Overall height multiplier |
 | `uv_scale_x` | 1.0 | UV-to-physical X scale |
@@ -402,7 +429,29 @@ This eliminates both the `setInterval` polling of `/state` and the `fetch('camer
 
 12. **SPP and camera go through WebRTC data channel, NOT HTTP**: The `"stats"` data channel handles both SPP push (server→client) and camera updates (client→server via `{"type":"camera",...}` messages). Do NOT add `setInterval` polling of `/state` for SPP or `fetch('camera', ...)` for camera — both waste bandwidth. The `/state` and `/camera` endpoints still exist for debugging but are not used by the client during normal operation. Only `/config` (resolution) and `/scene` (heightfield params) remain as HTTP endpoints.
 
-13. **Edit heightfield.py responsibly — PARAMS and function signatures must agree**: When adding a new parameter to the `PARAMS` list, you must also: (a) add the corresponding keyword argument to `evaluate()` and `gradient()` function signatures, (b) use it in the formula body, (c) verify `get_default_spec()` picks it up (it derives defaults from PARAMS via `internal_name` + `internal_scale`). The frontend slider is built from `internal_name`; the server passes `sceneSpec.heightfield[internal_name]` to the BSDF properties. If the function signature doesn't accept the parameter, it silently ignores it.
+13. **Black screen is NOT a data channel problem — it's a BSDF crash**: When the heightfield surface renders completely black with no visible error message, the cause is almost always a Dr.Jit bug in `evaluate()` or `gradient()` (e.g. `dr.fmod`, missing kwarg, shape mismatch) that produces NaN normals for all ray hits. The data channel, WebRTC, and SPP counter still work fine — you're just accumulating crisp images of NaN reflections. The diagnostic: (a) check server logs for `Heightfield OK` validation message — if absent, fix the startup crash first; (b) if validation passed but surface is black, the bug is in `gradient()` specifically (not `evaluate()`) — verify gradient returns non-NaN values for sample inputs; (c) if validation IS present and gradient works standalone, the BSDF is receiving different parameters than expected — check that `DEFAULT_SCENE_SPEC` keys match `evaluate()`/`gradient()` kwargs.
+
+14. **DO NOT patch server.py to add PARAMS-driven parameters**: The `heightfield.py` `PARAMS` list is the single source of truth for every slider-driven parameter. To add a new parameter: (a) add an entry to `PARAMS` in heightfield.py, (b) add a kwarg (matching `internal_name`, with sensible default) to `evaluate()`, `gradient()`, and `heightfield_preview()`. Restart the server. That's it. `get_default_spec()` auto-includes the new entry, `DEFAULT_SCENE_SPEC` picks it up via `**heightfield.get_default_spec()`, the BSDF's `__init__` uses `get_float()` falling back to `hf_defaults`, and the frontend slider is built automatically from `GET /params`. Zero changes to server.py or index.html. Patching server.py directly is actively harmful — it creates a second source of truth that desyncs from PARAMS.
+
+15. **`dr.fmod` does not exist in Dr.Jit**: Use `abs(v) - floor(abs(v))` to extract the fractional part of a floating-point value. Attempting `dr.fmod(abs(v), 1.0)` will raise `AttributeError` at render time, causing all normals to be NaN and the entire heightfield surface to render black. Test hash/modulo code with a standalone Python script before feeding it to Mitsuba.
+
+17. **server.py must validate heightfield on load using get_default_spec() and exit on error**: A broken heightfield formula (typo, missing Dr.Jit op like `dr.fmod`, bad array shape) produces NaN normals at render time — the surface renders black with no visible error message. Always run test `evaluate()` and `gradient()` calls immediately after importing heightfield, before the HTTP server starts. Use `dr.scalar.ArrayXf` so validation works BEFORE `mi.set_variant()` is called. Pass ALL params via `**heightfield.get_default_spec()`. On failure, log the full traceback and `sys.exit(1)`. The validation pattern:
+
+    ```python
+    import drjit as _dr
+    _hf_d = heightfield.get_default_spec()
+    _x = _dr.scalar.ArrayXf([0.0, 0.0001, 0.0002, 0.0003])
+    _y = _dr.scalar.ArrayXf([0.0, 0.0001, 0.0002, 0.0003])
+    _z = heightfield.evaluate(_x, _y, **_hf_d)
+    _g = heightfield.gradient(_x, _y, **_hf_d)
+    _z_np = np.array(_z)
+    if np.any(np.isnan(_z_np)) or np.any(np.isinf(_z_np)):
+        raise ValueError("evaluate returned NaN/Inf")
+    ```
+
+18. **Data channel troubleshooting: check server logs first**: When the WebRTC data channel appears broken (SPP counter not updating from initial "SPP: ...", camera drag not working), the FIRST diagnostic is the server log. Look for `INFO:mitsuba-stream:Data channel opened: stats` — if present, the channel IS established and SPP updates are being pushed. The issue is likely: (a) stale cached HTML (hard-reload the page after server restart), (b) a JavaScript error in the client (check browser console), or (c) the SPP messages are being suppressed by `cameraDirty`/`sceneDirty` guards (expected during interaction). If the log line is absent, the client is not creating the data channel or there's an aiortc negotiation issue. Also verify the correct server process is running: use `process(action='list')` to check which server is bound to port 8766. A server from a previous session can linger and handle requests while the new server fails to bind.
+
+19. **Server port conflicts across sessions**: When restarting the server, always kill any existing process on the target port first. Use `netstat -ano | grep :8766` to find the PID, then `taskkill /PID N /F`. Better: use `process(action='list')` to find all running servers, kill by session_id, then start the new one. Sessions can leave orphaned servers that prevent the new one from binding, or worse, both bind in sequence and the old one still serves stale requests through cached ICE connections. Do NOT assume `python server.py` will fail with an address-in-use error — if the previous server was killed mid-gracefully, the port may be silently inherited.
 
 See `references/custom-bsdf-heightfield.py` for the complete, self-contained BSDF registration code (no WebRTC dependency — just the BSDF class and registration).
 
