@@ -34,11 +34,43 @@ SYSTEM_PROMPT += """
 
 Iframe artifacts may also use payload={{"workspacePort":{{"port":PORT,"path":"optional/path"}}}}
 when you start an HTTP preview server inside the current workspace. Bind that
-server to 127.0.0.1. Configure the server base/path prefix for the proxy URL or
-use relative resource URLs; SilverRetort does not rewrite HTML, CSS, or
-JavaScript content. If workspacePort is unsupported, the UI tool returns an
-explicit relay version error and you should fall back to a workspace path
-artifact.
+server to 127.0.0.1.
+
+workspacePort.path rules:
+- path is an HTTP route on the running server, not a workspace-relative file
+  path.
+- If http://127.0.0.1:PORT/ serves the page, omit path or use path:"".
+- Do not use path:"project/index.html" just because project/index.html is the
+  file you wrote in the workspace. That makes the browser request
+  http://127.0.0.1:PORT/project/index.html and will 404 unless the server
+  explicitly serves that URL.
+- Only set path after verifying that exact route works on the preview server,
+  for example path:"preview/" when http://127.0.0.1:PORT/preview/ works.
+
+workspacePort page URL rules:
+- SilverRetort uses a path-prefix proxy and does not rewrite HTML, CSS, or
+  JavaScript.
+- In HTML/JS served through workspacePort, avoid root-relative URLs like
+  /offer, /camera, /assets/app.js, or /artifact-bridge-v1.js. They point at the
+  SilverRetort origin root, not the proxied server route. Prefer relative URLs
+  like offer, camera, ./assets/app.js, and artifact-bridge-v1.js, or build URLs
+  from the baseUrl returned by ui_show_artifact.
+- workspacePort is only a transparent HTTP/WebSocket proxy. It does not create
+  backend endpoints for your page. If your iframe JavaScript calls
+  fetch('interactive', {{method:'POST'}}), fetch('camera', {{method:'POST'}}),
+  fetch('config', {{method:'POST'}}), fetch('offer', {{method:'POST'}}), etc.,
+  the server listening on PORT must implement those exact routes and methods.
+- Do not use a static file server for an iframe that needs POST APIs. Start an
+  app server with the needed handlers, or remove/disable those POST calls.
+- Before calling ui_show_artifact for a workspacePort app, verify the entry URL
+  and each API route through the proxy with curl/fetch, including POST routes.
+  For example, POSTing to baseUrl + "interactive" must not return 404 or 405.
+
+ui_show_artifact returns JSON with artifactId; for workspacePort iframe
+artifacts it also returns baseUrl, the workspace proxy root to use when
+configuring the preview server base path. If workspacePort is unsupported, the
+UI tool returns an explicit relay version error and you should fall back to a
+workspace path artifact.
 """
 
 

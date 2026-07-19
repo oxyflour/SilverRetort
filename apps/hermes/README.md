@@ -58,9 +58,22 @@ shared directory directly; Docker and remote modes stream through relay.
 
 Iframe artifacts can also reference an HTTP server running in the current
 workspace with `{"workspacePort":{"port":5173,"path":""}}`. The server must bind
-to `127.0.0.1` in the Hermes container. The first implementation is a path-prefix
-proxy and does not rewrite HTML, CSS, or JavaScript, so dev servers should be
-configured with the proxy base path or emit relative resource URLs.
+to `127.0.0.1` in the Hermes container. `workspacePort.path` is an HTTP route
+on that server, not a workspace-relative file path; omit it when the server
+serves the entry at `/`. The first implementation is a path-prefix proxy and
+does not rewrite HTML, CSS, or JavaScript, so dev servers should be configured
+with the proxy base path or emit relative resource URLs.
+`ui_show_artifact` returns `{"artifactId":"...","baseUrl":"..."}` for
+workspacePort iframe artifacts; use `baseUrl` as the preview server's public
+resource root when absolute asset URLs are required. HTML and JavaScript served
+through workspacePort should prefer relative URLs such as `offer` and
+`./assets/app.js` over root-relative URLs such as `/offer` or `/assets/app.js`,
+because the proxy does not rewrite URLs. workspacePort is only a transparent
+proxy; if the page sends `POST` requests such as `fetch('interactive',
+{method:'POST'})`, the server on that port must implement those routes. Static
+file servers usually only support `GET`/`HEAD`, so interactive previews need an
+app server with explicit handlers and should be verified through the proxy
+before showing the artifact.
 
 Interactive iframe artifacts can save JSON context for the user's next chat
 turn. Load the host bridge and call it when meaningful state changes:

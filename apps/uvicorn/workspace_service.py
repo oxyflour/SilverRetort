@@ -19,29 +19,31 @@ WORKSPACE_PROXY_CACHE_SECONDS = 5
 _workspace_proxy_cache: dict[str, tuple[float, bool]] = {}
 
 
-def _connection(workspace_id: str | None = None) -> switch_profiles.SwitchConnection:
+def _connection(workspace_id: str | None = None, connection_id: str | None = None) -> switch_profiles.SwitchConnection:
+    if connection_id is not None:
+        return switch_profiles.connection_for_profile(connection_id)
     workspace = db.get_workspace(workspace_id) if workspace_id else None
     return switch_profiles.connection_for_profile(
         workspace.connection_id if workspace is not None else None
     )
 
 
-def _cache_key(workspace_id: str | None = None) -> str:
-    connection = _connection(workspace_id)
+def _cache_key(workspace_id: str | None = None, connection_id: str | None = None) -> str:
+    connection = _connection(workspace_id, connection_id)
     return f"{connection.mode}:{connection.switch_url}"
 
 
-def _base_url(workspace_id: str | None = None) -> str:
-    return _connection(workspace_id).switch_url.rstrip("/")
+def _base_url(workspace_id: str | None = None, connection_id: str | None = None) -> str:
+    return _connection(workspace_id, connection_id).switch_url.rstrip("/")
 
 
-def _headers(workspace_id: str | None = None) -> dict[str, str]:
-    key = _connection(workspace_id).api_key.strip()
+def _headers(workspace_id: str | None = None, connection_id: str | None = None) -> dict[str, str]:
+    key = _connection(workspace_id, connection_id).api_key.strip()
     return {"authorization": f"Bearer {key}"} if key else {}
 
 
-def _local_root(workspace_id: str | None = None) -> Path | None:
-    value = _connection(workspace_id).local_workspaces_dir.strip()
+def _local_root(workspace_id: str | None = None, connection_id: str | None = None) -> Path | None:
+    value = _connection(workspace_id, connection_id).local_workspaces_dir.strip()
     return Path(value).resolve() if value else None
 
 
@@ -121,6 +123,10 @@ def remote_workspace_proxy_ws_url(workspace_id: str, port: int, path: str = "", 
 
 
 def local_workspace_proxy_url(workspace_id: str, port: int, path: str = "", query: str = "") -> str:
+    public_base_url = os.getenv("SILVERRETORT_PUBLIC_BASE_URL", "").strip().rstrip("/")
+    if public_base_url:
+        url = f"{public_base_url}/api{_workspace_proxy_path(workspace_id, port, path)}"
+        return f"{url}?{query}" if query else url
     listen_port = int(os.getenv("LISTEN_PORT", "23001"))
     url = f"http://127.0.0.1:{listen_port}/api{_workspace_proxy_path(workspace_id, port, path)}"
     return f"{url}?{query}" if query else url
@@ -142,50 +148,50 @@ def _has_workspace_proxy(payload: dict) -> bool:
     )
 
 
-def _cached_workspace_proxy_supported(workspace_id: str | None = None) -> bool | None:
-    cached_item = _workspace_proxy_cache.get(_cache_key(workspace_id))
+def _cached_workspace_proxy_supported(workspace_id: str | None = None, connection_id: str | None = None) -> bool | None:
+    cached_item = _workspace_proxy_cache.get(_cache_key(workspace_id, connection_id))
     if cached_item is None:
         return None
     expires_at, supported = cached_item
     return supported if time.monotonic() < expires_at else None
 
 
-def _set_workspace_proxy_cache(supported: bool, workspace_id: str | None = None) -> bool:
-    _workspace_proxy_cache[_cache_key(workspace_id)] = (
+def _set_workspace_proxy_cache(supported: bool, workspace_id: str | None = None, connection_id: str | None = None) -> bool:
+    _workspace_proxy_cache[_cache_key(workspace_id, connection_id)] = (
         time.monotonic() + WORKSPACE_PROXY_CACHE_SECONDS,
         supported,
     )
     return supported
 
 
-async def workspace_proxy_supported(workspace_id: str | None = None) -> bool:
-    cached = _cached_workspace_proxy_supported(workspace_id)
+async def workspace_proxy_supported(workspace_id: str | None = None, connection_id: str | None = None) -> bool:
+    cached = _cached_workspace_proxy_supported(workspace_id, connection_id)
     if cached is not None:
         return cached
-    if not _base_url(workspace_id):
-        return _set_workspace_proxy_cache(False, workspace_id)
+    if not _base_url(workspace_id, connection_id):
+        return _set_workspace_proxy_cache(False, workspace_id, connection_id)
     try:
         async with httpx.AsyncClient(timeout=10) as client:
-            response = await client.get(f"{_base_url(workspace_id)}/workspace-api/capability", headers=_headers(workspace_id))
+            response = await client.get(f"{_base_url(workspace_id, connection_id)}/workspace-api/capability", headers=_headers(workspace_id, connection_id))
             response.raise_for_status()
-            return _set_workspace_proxy_cache(_has_workspace_proxy(response.json()), workspace_id)
+            return _set_workspace_proxy_cache(_has_workspace_proxy(response.json()), workspace_id, connection_id)
     except (httpx.HTTPError, ValueError):
-        return _set_workspace_proxy_cache(False, workspace_id)
+        return _set_workspace_proxy_cache(False, workspace_id, connection_id)
 
 
-def workspace_proxy_supported_sync(workspace_id: str | None = None) -> bool:
-    cached = _cached_workspace_proxy_supported(workspace_id)
+def workspace_proxy_supported_sync(workspace_id: str | None = None, connection_id: str | None = None) -> bool:
+    cached = _cached_workspace_proxy_supported(workspace_id, connection_id)
     if cached is not None:
         return cached
-    if not _base_url(workspace_id):
-        return _set_workspace_proxy_cache(False, workspace_id)
+    if not _base_url(workspace_id, connection_id):
+        return _set_workspace_proxy_cache(False, workspace_id, connection_id)
     try:
         with httpx.Client(timeout=10) as client:
-            response = client.get(f"{_base_url(workspace_id)}/workspace-api/capability", headers=_headers(workspace_id))
+            response = client.get(f"{_base_url(workspace_id, connection_id)}/workspace-api/capability", headers=_headers(workspace_id, connection_id))
             response.raise_for_status()
-            return _set_workspace_proxy_cache(_has_workspace_proxy(response.json()), workspace_id)
+            return _set_workspace_proxy_cache(_has_workspace_proxy(response.json()), workspace_id, connection_id)
     except (httpx.HTTPError, ValueError):
-        return _set_workspace_proxy_cache(False, workspace_id)
+        return _set_workspace_proxy_cache(False, workspace_id, connection_id)
 
 
 async def require_workspace_proxy(workspace_id: str | None = None) -> None:
@@ -197,10 +203,10 @@ def require_workspace_proxy_sync(workspace_id: str | None = None) -> str | None:
     return None if workspace_proxy_supported_sync(workspace_id) else WORKSPACE_PROXY_ERROR
 
 
-async def capability(workspace_id: str | None = None) -> dict:
-    if _local_root(workspace_id) is not None:
+async def capability(workspace_id: str | None = None, connection_id: str | None = None) -> dict:
+    if _local_root(workspace_id, connection_id) is not None:
         result = {"supported": True, "version": 1, "writable": True, "cwdEnforced": False}
-        if await workspace_proxy_supported(workspace_id):
+        if await workspace_proxy_supported(workspace_id, connection_id):
             result["workspaceProxy"] = {
                 "supported": True,
                 "version": 1,
@@ -209,11 +215,11 @@ async def capability(workspace_id: str | None = None) -> dict:
                 "pathPrefixRequired": True,
             }
         return result
-    if not _base_url(workspace_id):
+    if not _base_url(workspace_id, connection_id):
         return {"supported": False, "version": 0, "writable": False, "cwdEnforced": False}
     try:
         async with httpx.AsyncClient(timeout=10) as client:
-            response = await client.get(f"{_base_url(workspace_id)}/workspace-api/capability", headers=_headers(workspace_id))
+            response = await client.get(f"{_base_url(workspace_id, connection_id)}/workspace-api/capability", headers=_headers(workspace_id, connection_id))
             response.raise_for_status()
             return response.json()
     except (httpx.HTTPError, ValueError):
