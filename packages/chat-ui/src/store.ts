@@ -6,6 +6,7 @@ import {
   Attachment,
   ChatEvent,
   HermesModel,
+  HermesRuntimeResponse,
   HermesUsageResponse,
   Message,
   SessionModel,
@@ -45,6 +46,7 @@ interface ChatState {
   slashCommands: SlashCommand[];
   hermesModels: HermesModel[];
   hermesUsage: HermesUsageResponse | null;
+  hermesRuntime: HermesRuntimeResponse | null;
   defaultModel: { provider: string; model: string };
   sessionModels: Record<string, SessionModel>;
   hermesControlsAvailable: boolean;
@@ -52,6 +54,7 @@ interface ChatState {
   refreshSessions: () => Promise<void>;
   refreshHermesControls: () => Promise<void>;
   refreshHermesUsage: (id?: string | null) => Promise<void>;
+  refreshHermesRuntime: (id?: string | null) => Promise<void>;
   createWorkspace: (name: string, connectionId?: string) => Promise<void>;
   renameWorkspace: (id: string, name: string) => Promise<void>;
   deleteWorkspace: (id: string, force?: boolean) => Promise<void>;
@@ -412,6 +415,7 @@ export const useChatStore = create<ChatState>((set, get) => {
     slashCommands: [],
     hermesModels: [],
     hermesUsage: null,
+    hermesRuntime: null,
     defaultModel: { provider: "", model: "" },
     sessionModels: {},
     hermesControlsAvailable: true,
@@ -465,6 +469,16 @@ export const useChatStore = create<ChatState>((set, get) => {
         set({ hermesUsage: usage });
       } catch {
         set({ hermesUsage: null });
+      }
+    },
+
+    refreshHermesRuntime: async (id) => {
+      try {
+        const sessionId = id === undefined ? get().currentSessionId : id;
+        const runtime = await get().client.getHermesRuntime(sessionId);
+        set({ hermesRuntime: runtime });
+      } catch {
+        set({ hermesRuntime: null });
       }
     },
 
@@ -528,6 +542,7 @@ export const useChatStore = create<ChatState>((set, get) => {
       set({ currentSessionId: id, currentWorkspaceId: session?.workspaceId ?? get().currentWorkspaceId, pendingAttachments: [] });
       void get().refreshSessionModel(id);
       void get().refreshHermesUsage(id);
+      void get().refreshHermesRuntime(id);
       const bucket = get().buckets[id];
       if (bucket?.loaded) {
         const contexts = await get().client.listArtifactContexts(id);
@@ -1030,6 +1045,7 @@ export const useChatStore = create<ChatState>((set, get) => {
           }));
           touchSession(event.sessionId);
           void get().refreshHermesUsage(event.sessionId);
+          void get().refreshHermesRuntime(event.sessionId);
           void get()
             .client.listSessions()
             .then((sessions) => set({ sessions }));
@@ -1044,6 +1060,7 @@ export const useChatStore = create<ChatState>((set, get) => {
             runId: null,
             error: event.message,
           }));
+          void get().refreshHermesRuntime(event.sessionId);
           break;
 
         case "ui-command": {
