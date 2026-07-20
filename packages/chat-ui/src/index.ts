@@ -13,6 +13,7 @@ export {
   type ArtifactRendererProps,
 } from "./registry";
 export { registerBuiltinRenderers } from "./renderers/builtins";
+export { getWorkspaceTemplateModule } from "./templateModules";
 export {
   artifactViewerPath,
   openArtifactInNewWindow,

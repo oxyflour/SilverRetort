@@ -7,6 +7,7 @@ from typing import Any, AsyncGenerator
 import httpx
 
 import db
+import workspace_templates
 from models import ArtifactContextPart, ArtifactInputPart, Message, TextPart
 
 MCP_TOOL_PREFIX = "mcp__silverretort_ui__"
@@ -116,6 +117,23 @@ def _attachments_note(history: list[Message], user_message: Message) -> str:
     if not lines:
         return ""
     return "\n工作区内已上传以下文件，可使用 Hermes 原生文件工具读取：\n" + "\n".join(lines)
+
+
+def _template_instructions(workspace_id: str) -> str | None:
+    workspace = db.get_workspace(workspace_id)
+    if workspace is None or workspace.template_id is None:
+        return None
+    template = workspace_templates.get_template(workspace.template_id)
+    if template is None or template.agent is None:
+        return None
+    return template.agent.instructions
+
+
+def _append_template_instructions(system: str, workspace_id: str) -> str:
+    instructions = _template_instructions(workspace_id)
+    if instructions is None:
+        return system
+    return f"{system}\n\nWorkspace template instructions:\n{instructions}"
 
 
 def _flatten_response_output(output: Any) -> str | None:
@@ -484,6 +502,7 @@ class HermesEngine:
             ui_update_artifact_tool=UI_UPDATE_ARTIFACT_TOOL,
             attachments_note=_attachments_note(history, user_message),
         )
+        system = _append_template_instructions(system, workspace_id)
         conversation_history = [
             _to_openai_message(m) for m in history if _content_of(m) or m.attachments
         ]

@@ -15,6 +15,7 @@ import {
   SwitchProfile,
   ToolCall,
   Workspace,
+  WorkspaceTemplate,
 } from "silverretort-protocol";
 
 export interface SessionBucket {
@@ -33,6 +34,7 @@ export interface ArtifactWorkspaceState {
 interface ChatState {
   client: ApiClient;
   workspaces: Workspace[];
+  workspaceTemplates: WorkspaceTemplate[];
   switchProfiles: SwitchProfile[];
   currentWorkspaceId: string | null;
   collapsedWorkspaceIds: string[];
@@ -55,7 +57,11 @@ interface ChatState {
   refreshHermesControls: () => Promise<void>;
   refreshHermesUsage: (id?: string | null) => Promise<void>;
   refreshHermesRuntime: (id?: string | null) => Promise<void>;
-  createWorkspace: (name: string, connectionId?: string) => Promise<void>;
+  createWorkspace: (
+    name: string,
+    connectionId?: string,
+    templateId?: string | null,
+  ) => Promise<void>;
   renameWorkspace: (id: string, name: string) => Promise<void>;
   deleteWorkspace: (id: string, force?: boolean) => Promise<void>;
   selectWorkspace: (id: string) => void;
@@ -402,6 +408,7 @@ export const useChatStore = create<ChatState>((set, get) => {
   return {
     client: new ApiClient(),
     workspaces: [],
+    workspaceTemplates: [],
     switchProfiles: [],
     currentWorkspaceId: null,
     collapsedWorkspaceIds: [],
@@ -421,13 +428,14 @@ export const useChatStore = create<ChatState>((set, get) => {
     hermesControlsAvailable: true,
 
     refreshSessions: async () => {
-      const [workspaces, sessions] = await Promise.all([
+      const [workspaces, sessions, workspaceTemplates] = await Promise.all([
         get().client.listWorkspaces(),
         get().client.listSessions(),
+        get().client.listWorkspaceTemplates(),
       ]);
       const switchProfiles = await get().client.listSwitchProfiles().catch(() => []);
       const currentWorkspaceId = get().currentWorkspaceId ?? workspaces[0]?.id ?? null;
-      set({ workspaces, switchProfiles, sessions, currentWorkspaceId });
+      set({ workspaces, workspaceTemplates, switchProfiles, sessions, currentWorkspaceId });
       void get().refreshHermesControls();
       if (!get().currentSessionId && sessions.length > 0) {
         const first = sessions.find((session) => session.workspaceId === currentWorkspaceId) ?? sessions[0];
@@ -482,11 +490,15 @@ export const useChatStore = create<ChatState>((set, get) => {
       }
     },
 
-    createWorkspace: async (name, connectionId) => {
+    createWorkspace: async (name, connectionId, templateId) => {
       const resolvedConnectionId =
         connectionId ??
         get().workspaces.find((workspace) => workspace.id === get().currentWorkspaceId)?.connectionId;
-      const workspace = await get().client.createWorkspace(name, resolvedConnectionId);
+      const workspace = await get().client.createWorkspace(
+        name,
+        resolvedConnectionId,
+        templateId,
+      );
       set((state) => ({
         workspaces: [workspace, ...state.workspaces],
         currentWorkspaceId: workspace.id,

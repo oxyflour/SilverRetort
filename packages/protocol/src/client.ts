@@ -21,6 +21,8 @@ import {
   ToolCallSchema,
   Workspace,
   WorkspaceSchema,
+  WorkspaceTemplate,
+  WorkspaceTemplateSchema,
   HermesModelsResponse,
   HermesModelsResponseSchema,
   HermesRuntimeResponse,
@@ -71,6 +73,13 @@ export class ApiClient {
 
   listWorkspaces(): Promise<Workspace[]> {
     return this.request(z.array(WorkspaceSchema), "/api/workspaces");
+  }
+
+  listWorkspaceTemplates(): Promise<WorkspaceTemplate[]> {
+    return this.request(
+      z.array(WorkspaceTemplateSchema),
+      "/api/workspace-templates",
+    );
   }
 
   listSwitchProfiles(): Promise<SwitchProfile[]> {
@@ -134,10 +143,18 @@ export class ApiClient {
     });
   }
 
-  createWorkspace(name: string, connectionId?: string): Promise<Workspace> {
+  createWorkspace(
+    name: string,
+    connectionId?: string,
+    templateId?: string | null,
+  ): Promise<Workspace> {
     return this.request(WorkspaceSchema, "/api/workspaces", {
       method: "POST",
-      body: JSON.stringify({ name, ...(connectionId ? { connectionId } : {}) }),
+      body: JSON.stringify({
+        name,
+        ...(connectionId ? { connectionId } : {}),
+        ...(templateId ? { templateId } : {}),
+      }),
     });
   }
 

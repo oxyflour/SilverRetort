@@ -20,6 +20,11 @@
     "remark-gfm": "^4.0.1",
     "silverretort-protocol": "workspace:*",
     "silverretort-setting-ui": "workspace:*",
+    "silverretort-template-algorithm-research": "workspace:*",
+    "silverretort-template-antenna-design": "workspace:*",
+    "silverretort-template-industrial-design": "workspace:*",
+    "silverretort-template-sdk": "workspace:*",
+    "silverretort-template-structural-design": "workspace:*",
     "zustand": "^5.0.5"
   },
   "peerDependencies": {

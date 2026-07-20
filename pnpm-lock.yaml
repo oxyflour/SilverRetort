@@ -135,6 +135,21 @@ importers:
       silverretort-setting-ui:
         specifier: workspace:*
         version: link:../setting-ui
+      silverretort-template-algorithm-research:
+        specifier: workspace:*
+        version: link:../template-algorithm-research
+      silverretort-template-antenna-design:
+        specifier: workspace:*
+        version: link:../template-antenna-design
+      silverretort-template-industrial-design:
+        specifier: workspace:*
+        version: link:../template-industrial-design
+      silverretort-template-sdk:
+        specifier: workspace:*
+        version: link:../template-sdk
+      silverretort-template-structural-design:
+        specifier: workspace:*
+        version: link:../template-structural-design
       zustand:
         specifier: ^5.0.5
         version: 5.0.14(@types/react@19.2.17)(react@19.2.4)
@@ -214,6 +229,80 @@ importers:
       typescript:
         specifier: ^5
         version: 5.9.3
+
+  packages/template-algorithm-research:
+    dependencies:
+      silverretort-template-domain-ui:
+        specifier: workspace:*
+        version: link:../template-domain-ui
+      silverretort-template-sdk:
+        specifier: workspace:*
+        version: link:../template-sdk
+
+  packages/template-antenna-design:
+    dependencies:
+      silverretort-template-domain-ui:
+        specifier: workspace:*
+        version: link:../template-domain-ui
+      silverretort-template-sdk:
+        specifier: workspace:*
+        version: link:../template-sdk
+
+  packages/template-domain-ui:
+    dependencies:
+      lucide-react:
+        specifier: ^1.24.0
+        version: 1.24.0(react@19.2.4)
+      react:
+        specifier: ^19
+        version: 19.2.4
+      react-dom:
+        specifier: ^19
+        version: 19.2.4(react@19.2.4)
+      silverretort-template-sdk:
+        specifier: workspace:*
+        version: link:../template-sdk
+    devDependencies:
+      '@types/react':
+        specifier: ^19
+        version: 19.2.17
+      typescript:
+        specifier: ^5
+        version: 5.9.3
+
+  packages/template-industrial-design:
+    dependencies:
+      silverretort-template-domain-ui:
+        specifier: workspace:*
+        version: link:../template-domain-ui
+      silverretort-template-sdk:
+        specifier: workspace:*
+        version: link:../template-sdk
+
+  packages/template-sdk:
+    dependencies:
+      react:
+        specifier: ^19
+        version: 19.2.4
+      silverretort-protocol:
+        specifier: workspace:*
+        version: link:../protocol
+    devDependencies:
+      '@types/react':
+        specifier: ^19
+        version: 19.2.17
+      typescript:
+        specifier: ^5
+        version: 5.9.3
+
+  packages/template-structural-design:
+    dependencies:
+      silverretort-template-domain-ui:
+        specifier: workspace:*
+        version: link:../template-domain-ui
+      silverretort-template-sdk:
+        specifier: workspace:*
+        version: link:../template-sdk
 
 packages:
 

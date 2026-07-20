@@ -105,6 +105,7 @@ from api_routes.workspaces import (
     list_messages,
     list_sessions,
     list_workspaces,
+    list_workspace_templates,
     rename_session,
     rename_workspace,
     search_messages,
@@ -140,6 +141,7 @@ from models import (
     UpdateSwitchProfileRequest,
     UpdateWorkspaceRequest,
     Workspace,
+    WorkspaceTemplate,
 )
 
 router = APIRouter(prefix="/api")

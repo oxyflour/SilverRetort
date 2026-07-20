@@ -424,6 +424,47 @@
         </div>
       </div>
     </section>
+    <section class="slide">
+      <div class="stage">
+        <div>
+          <p class="kicker">领域工作区模板</p>
+          <h2>JSON 定义行为，React 模块承载界面</h2>
+        </div>
+        <div class="flow">
+          <article class="node">
+            <h3>启动期配置</h3>
+            <p>根目录 template/*.json 声明领域名称、引导任务、ui.module 与 agent instructions。</p>
+            <p class="code">WorkspaceTemplate · version: 1</p>
+          </article>
+          <div class="arrow"></div>
+          <article class="node">
+            <h3>稳定宿主协议</h3>
+            <p>template-sdk 定义 toolbar 与空会话组件 props；静态 registry 按 module ID 解析实现。</p>
+            <p class="code">template-sdk → templateModules.ts</p>
+          </article>
+          <div class="arrow"></div>
+          <article class="node">
+            <h3>领域 React 模块</h3>
+            <p>packages/template-* 提供工具栏、设计状态和引导界面，不直接依赖 chat store。</p>
+            <p class="code">WorkspaceTemplateModule</p>
+          </article>
+        </div>
+        <div class="grid two">
+          <article class="card">
+            <span class="tag teal">Runtime</span>
+            <h3>工作区绑定贯穿前后端</h3>
+            <p>templateId 持久化到 SQLite；前端加载对应模块，Hermes 在基础系统指令之后附加领域 instructions。</p>
+            <p class="code">workspace.templateId → ui.module / agent.instructions</p>
+          </article>
+          <article class="card">
+            <span class="tag amber">Fallback</span>
+            <h3>扩展失败不影响主流程</h3>
+            <p>无模板时不显示顶部 toolbar；模块缺失、版本不兼容或组件渲染失败时回退宿主默认实现。</p>
+            <p class="code">TemplateBoundary · apiVersion: 1</p>
+          </article>
+        </div>
+      </div>
+    </section>
   </main>
 
   <footer class="footer">

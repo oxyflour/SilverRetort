@@ -289,3 +289,50 @@ describe("session model state", () => {
     expect(useChatStore.getState().sessionModels[sessionId]).toEqual(sessionModel);
   });
 });
+
+describe("workspace templates", () => {
+  it("passes the selected template to the API and creates the first session", async () => {
+    const workspace = {
+      id: "workspace-domain",
+      name: "Domain workspace",
+      templateId: "structural-design",
+      status: "active" as const,
+      connectionId: "local",
+      switchMode: "local" as const,
+      switchUrl: "",
+      hasHermesApiKey: false,
+      createdAt: "2026-07-20T00:00:00Z",
+      updatedAt: "2026-07-20T00:00:00Z",
+    };
+    const createWorkspace = vi
+      .spyOn(useChatStore.getState().client, "createWorkspace")
+      .mockResolvedValue(workspace);
+    const createSession = vi
+      .spyOn(useChatStore.getState().client, "createSession")
+      .mockResolvedValue({
+        id: "session-domain",
+        workspaceId: workspace.id,
+        title: "New chat",
+        createdAt: "2026-07-20T00:00:00Z",
+        updatedAt: "2026-07-20T00:00:00Z",
+      });
+    vi.spyOn(useChatStore.getState().client, "listMessages").mockResolvedValue([]);
+    vi.spyOn(useChatStore.getState().client, "listArtifacts").mockResolvedValue([]);
+    vi.spyOn(useChatStore.getState().client, "listArtifactContexts").mockResolvedValue([]);
+
+    await useChatStore.getState().createWorkspace(
+      workspace.name,
+      "local",
+      workspace.templateId,
+    );
+
+    expect(createWorkspace).toHaveBeenCalledWith(
+      workspace.name,
+      "local",
+      workspace.templateId,
+    );
+    expect(createSession).toHaveBeenCalledWith(workspace.id);
+    expect(useChatStore.getState().currentWorkspaceId).toBe(workspace.id);
+    expect(useChatStore.getState().currentSessionId).toBe("session-domain");
+  });
+});

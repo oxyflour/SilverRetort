@@ -41,6 +41,7 @@ export type IframeArtifactPayload = z.infer<typeof IframeArtifactPayloadSchema>;
 export const WorkspaceSchema = z.object({
   id: z.string(),
   name: z.string(),
+  templateId: z.string().nullable(),
   status: z.enum(["active", "creating", "deleting", "error"]),
   connectionId: z.string().default("local"),
   switchMode: z.enum(["local", "remote"]).default("local"),
@@ -124,6 +125,33 @@ export const JsonValueSchema: z.ZodType<JsonValue> = z.lazy(() =>
     z.record(JsonValueSchema),
   ]),
 );
+
+export const WorkspaceTemplateSuggestionSchema = z.object({
+  label: z.string().min(1).max(80),
+  prompt: z.string().min(1).max(2000),
+}).strict();
+export type WorkspaceTemplateSuggestion = z.infer<
+  typeof WorkspaceTemplateSuggestionSchema
+>;
+
+export const WorkspaceTemplateSchema = z.object({
+  version: z.literal(1),
+  id: z.string().regex(/^[a-z0-9][a-z0-9._-]*$/),
+  name: z.string().min(1).max(80),
+  description: z.string().min(1).max(500),
+  emptyState: z.object({
+    title: z.string().min(1).max(120),
+    description: z.string().min(1).max(500),
+    suggestions: z.array(WorkspaceTemplateSuggestionSchema).min(1).max(6),
+  }).strict(),
+  ui: z.object({
+    module: z.string().regex(/^[a-z0-9][a-z0-9._-]*$/),
+  }).strict(),
+  agent: z.object({
+    instructions: z.string().trim().min(1).max(20000),
+  }).strict().optional(),
+}).strict();
+export type WorkspaceTemplate = z.infer<typeof WorkspaceTemplateSchema>;
 
 export const MessagePartSchema = z.discriminatedUnion("type", [
   z.object({ type: z.literal("text"), text: z.string() }),
@@ -262,6 +290,7 @@ export type UpdateSessionRequest = z.infer<typeof UpdateSessionRequestSchema>;
 export const CreateWorkspaceRequestSchema = z.object({
   name: z.string(),
   connectionId: z.string().optional(),
+  templateId: z.string().nullable().optional(),
 });
 export type CreateWorkspaceRequest = z.infer<typeof CreateWorkspaceRequestSchema>;
 
@@ -337,11 +366,31 @@ export type HermesBackgroundProcess = z.infer<
   typeof HermesBackgroundProcessSchema
 >;
 
+export const HermesAsyncDelegationSchema = z.object({
+  id: z.string(),
+  goal: z.string().default(""),
+  context: z.string().default(""),
+  toolsets: z.array(z.string()).default([]),
+  role: z.string().default(""),
+  model: z.string().default(""),
+  status: z.string().default(""),
+  dispatchedAt: z.number().nullable().default(null),
+  completedAt: z.number().nullable().default(null),
+  durationSeconds: z.number().nullable().default(null),
+  isBatch: z.boolean().default(false),
+  taskCount: z.number().int().positive().default(1),
+});
+export type HermesAsyncDelegation = z.infer<
+  typeof HermesAsyncDelegationSchema
+>;
+
 export const HermesRuntimeResponseSchema = z.object({
   busy: z.boolean().default(false),
   activeTaskCount: z.number().int().nonnegative().default(0),
   backgroundProcessCount: z.number().int().nonnegative().default(0),
   backgroundProcesses: z.array(HermesBackgroundProcessSchema).default([]),
+  asyncDelegationCount: z.number().int().nonnegative().default(0),
+  asyncDelegations: z.array(HermesAsyncDelegationSchema).default([]),
 });
 export type HermesRuntimeResponse = z.infer<
   typeof HermesRuntimeResponseSchema

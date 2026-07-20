@@ -4,6 +4,7 @@ from collections.abc import Callable
 from typing import Any, TypeVar
 import asyncio
 import re
+import time
 
 from fastapi import HTTPException
 from starlette.requests import Request
@@ -278,6 +279,51 @@ def _redact_process_entry(entry: dict[str, Any]) -> dict[str, Any]:
     return redacted
 
 
+def _redact_delegation_entry(entry: dict[str, Any]) -> dict[str, Any]:
+    redacted = dict(entry)
+    try:
+        from agent.redact import redact_sensitive_text
+
+        for key in ("goal", "context"):
+            value = redacted.get(key)
+            if isinstance(value, str) and value:
+                redacted[key] = redact_sensitive_text(value, code_file=False)
+    except Exception:
+        pass
+    goal = redacted.get("goal")
+    if isinstance(goal, str) and len(goal) > 500:
+        redacted["goal"] = goal[:500]
+    context = redacted.get("context")
+    if isinstance(context, str) and len(context) > 500:
+        redacted["context"] = context[:500]
+    return redacted
+
+
+def _delegation_response(entry: dict[str, Any]) -> dict[str, Any]:
+    redacted = _redact_delegation_entry(entry)
+    dispatched_at = redacted.get("dispatched_at")
+    completed_at = redacted.get("completed_at")
+    duration_seconds = None
+    if isinstance(dispatched_at, (int, float)):
+        end = completed_at if isinstance(completed_at, (int, float)) else None
+        duration_seconds = round((end or time.time()) - dispatched_at, 2)
+    goals = redacted.get("goals")
+    return {
+        "id": str(redacted.get("delegation_id") or ""),
+        "goal": str(redacted.get("goal") or ""),
+        "context": str(redacted.get("context") or "") if redacted.get("context") is not None else "",
+        "toolsets": list(redacted.get("toolsets") or []),
+        "role": str(redacted.get("role") or ""),
+        "model": str(redacted.get("model") or ""),
+        "status": str(redacted.get("status") or ""),
+        "dispatchedAt": dispatched_at if isinstance(dispatched_at, (int, float)) else None,
+        "completedAt": completed_at if isinstance(completed_at, (int, float)) else None,
+        "durationSeconds": duration_seconds,
+        "isBatch": bool(redacted.get("is_batch")),
+        "taskCount": len(goals) if isinstance(goals, list) else 1,
+    }
+
+
 def background_processes_response(session_key: str = "") -> dict[str, Any]:
     payload = runtime_status_response()
     try:
@@ -293,6 +339,26 @@ def background_processes_response(session_key: str = "") -> dict[str, Any]:
     except Exception:
         payload["backgroundProcessCount"] = 0
         payload["backgroundProcesses"] = []
+    try:
+        from tools.async_delegation import active_count, list_async_delegations
+
+        delegations = [
+            item
+            for item in list_async_delegations()
+            if isinstance(item, dict)
+            and (not session_key or item.get("session_key") == session_key)
+        ]
+        payload["asyncDelegationCount"] = (
+            sum(1 for item in delegations if item.get("status") == "running")
+            if session_key
+            else active_count()
+        )
+        payload["asyncDelegations"] = [
+            _delegation_response(item) for item in delegations
+        ]
+    except Exception:
+        payload["asyncDelegationCount"] = 0
+        payload["asyncDelegations"] = []
     return payload
 
 

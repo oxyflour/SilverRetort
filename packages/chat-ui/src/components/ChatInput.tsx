@@ -6,7 +6,12 @@ import { useChatStore } from "../store";
 import { AppIcon } from "./icons";
 import { SessionModelSelector } from "./SessionModelSelector";
 
-export function ChatInput() {
+interface ChatInputProps {
+  text: string;
+  onTextChange: (text: string) => void;
+}
+
+export function ChatInput({ text, onTextChange }: ChatInputProps) {
   const currentSessionId = useChatStore((s) => s.currentSessionId);
   const running = useChatStore((s) =>
     s.currentSessionId ? s.buckets[s.currentSessionId]?.runId != null : false,
@@ -21,7 +26,6 @@ export function ChatInput() {
   const clearArtifactContext = useChatStore((s) => s.clearArtifactContext);
   const slashCommands = useChatStore((s) => s.slashCommands);
   const refreshHermesControls = useChatStore((s) => s.refreshHermesControls);
-  const [text, setText] = useState("");
   const [draggingFiles, setDraggingFiles] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
@@ -40,7 +44,7 @@ export function ChatInput() {
 
   const submit = () => {
     if (!canSubmit) return;
-    setText("");
+    onTextChange("");
     void sendMessage(trimmedText);
   };
 
@@ -54,7 +58,7 @@ export function ChatInput() {
   }, [slashCommands, text]);
 
   const insertSlashCommand = (command: string) => {
-    setText(`${command} `);
+    onTextChange(`${command} `);
   };
 
   const addFiles = (files: FileList | File[]) => {
@@ -199,7 +203,7 @@ export function ChatInput() {
               value={text}
               onChange={(e) => {
                 const next = e.target.value;
-                setText(next);
+                onTextChange(next);
                 if (next === "/") void refreshHermesControls();
               }}
               onKeyDown={(e) => {
