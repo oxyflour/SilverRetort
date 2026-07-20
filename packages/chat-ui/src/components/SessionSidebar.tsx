@@ -17,6 +17,9 @@ import { AppIcon } from "./icons";
 import { SearchSessionsModal } from "./SearchSessionsModal";
 import { DialogActions, Modal } from "./SidebarDialog";
 
+const isExpiredWorkspaceProfileError = (error: unknown) =>
+  error instanceof Error && error.message.includes("workspace profile is no longer available");
+
 export function SessionSidebar() {
   const store = useChatStore();
   const [editingId, setEditingId] = useState<string | null>(null);
@@ -27,6 +30,8 @@ export function SessionSidebar() {
   const [createError, setCreateError] = useState<string | null>(null);
   const [connectionMenuOpen, setConnectionMenuOpen] = useState(false);
   const [deletingId, setDeletingId] = useState<string | null>(null);
+  const [workspaceError, setWorkspaceError] = useState<string | null>(null);
+  const [forceDeleteAvailable, setForceDeleteAvailable] = useState(false);
   const [expandedSessionCounts, setExpandedSessionCounts] = useState<Record<string, number>>({});
   const [searchQuery, setSearchQuery] = useState("");
   const [searchOpen, setSearchOpen] = useState(false);
@@ -193,7 +198,16 @@ export function SessionSidebar() {
                   <button
                     title="New session"
                     disabled={workspace.status !== "active"}
-                    onClick={() => void store.createSession(workspace.id)}
+                    onClick={() => {
+                      setWorkspaceError(null);
+                      void store.createSession(workspace.id).catch((error: unknown) => {
+                        if (isExpiredWorkspaceProfileError(error)) {
+                          setDeletingId(workspace.id);
+                          setForceDeleteAvailable(true);
+                          setWorkspaceError(error instanceof Error ? error.message : String(error));
+                        }
+                      });
+                    }}
                     className="rounded p-1 text-neutral-500 hover:text-neutral-900 disabled:opacity-40 dark:hover:text-neutral-100"
                   >
                     <AppIcon icon={MessageSquarePlus} className="h-4 w-4" />
@@ -212,6 +226,8 @@ export function SessionSidebar() {
                     title="Delete workspace"
                     className="rounded p-1 text-neutral-500 hover:text-red-600 dark:text-neutral-400"
                     onClick={() => {
+                      setWorkspaceError(null);
+                      setForceDeleteAvailable(false);
                       setDeletingId(workspace.id);
                     }}
                   >
@@ -296,13 +312,25 @@ export function SessionSidebar() {
               Delete workspace "{workspace.name}" and permanently remove its {count}{" "}
               session{count === 1 ? "" : "s"} and files?
             </p>
+            {workspaceError && (
+              <p className="rounded-md border border-amber-200 bg-amber-50 px-2 py-1.5 text-sm text-amber-800 dark:border-amber-900/60 dark:bg-amber-950/30 dark:text-amber-200">
+                {workspaceError}
+              </p>
+            )}
             <DialogActions
               danger
               onCancel={() => setDeletingId(null)}
               onConfirm={() => {
-                void store.deleteWorkspace(deletingId).then(() => setDeletingId(null));
+                setWorkspaceError(null);
+                void store
+                  .deleteWorkspace(deletingId, forceDeleteAvailable)
+                  .then(() => setDeletingId(null))
+                  .catch((error: unknown) => {
+                    setForceDeleteAvailable(isExpiredWorkspaceProfileError(error));
+                    setWorkspaceError(error instanceof Error ? error.message : String(error));
+                  });
               }}
-              confirmLabel="Delete permanently"
+              confirmLabel={forceDeleteAvailable ? "Force delete locally" : "Delete permanently"}
             />
           </Modal>
         );
