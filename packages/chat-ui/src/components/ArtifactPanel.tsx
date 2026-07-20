@@ -1,6 +1,7 @@
 "use client";
 
-import { ExternalLink, X } from "lucide-react";
+import { useState } from "react";
+import { ExternalLink, RefreshCw, X } from "lucide-react";
 import { openArtifactInNewWindow } from "../openArtifactInNewWindow";
 import { useChatStore } from "../store";
 import { ArtifactContent } from "./ArtifactContent";
@@ -9,6 +10,7 @@ import { AppIcon } from "./icons";
 const EMPTY_TAB_IDS: string[] = [];
 
 export function ArtifactPanel() {
+  const [refreshVersion, setRefreshVersion] = useState(0);
   const currentSessionId = useChatStore((state) => state.currentSessionId);
   const workspace = useChatStore((state) =>
     currentSessionId ? state.artifactWorkspaces[currentSessionId] : undefined,
@@ -73,6 +75,16 @@ export function ArtifactPanel() {
         {activeArtifactId && (
           <button
             type="button"
+            title="Refresh artifact"
+            onClick={() => setRefreshVersion((version) => version + 1)}
+            className="shrink-0 rounded p-1.5 text-neutral-500 transition-colors hover:bg-neutral-100 hover:text-neutral-900 dark:hover:bg-neutral-800 dark:hover:text-neutral-100"
+          >
+            <AppIcon icon={RefreshCw} className="h-4 w-4" />
+          </button>
+        )}
+        {activeArtifactId && (
+          <button
+            type="button"
             title="Open in new window"
             onClick={() => popOutArtifact(activeArtifactId)}
             className="shrink-0 rounded p-1.5 text-neutral-500 transition-colors hover:bg-neutral-100 hover:text-neutral-900 dark:hover:bg-neutral-800 dark:hover:text-neutral-100"
@@ -92,6 +104,7 @@ export function ArtifactPanel() {
 
       <div className="min-h-0 flex-1">
         <ArtifactContent
+          key={`${activeArtifactId ?? "empty"}:${refreshVersion}`}
           artifact={activeArtifact}
           loading={Boolean(activeArtifactId && !activeArtifact)}
         />
