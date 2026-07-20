@@ -22,6 +22,7 @@ class Attachment(ApiModel):
 class Workspace(ApiModel):
     id: str
     name: str
+    template_id: str | None
     status: Literal["active", "creating", "deleting", "error"] = "active"
     connection_id: str = "local"
     switch_mode: Literal["local", "remote"] = "local"
@@ -136,6 +137,67 @@ class UpdateSessionRequest(ApiModel):
 class CreateWorkspaceRequest(ApiModel):
     name: str
     connection_id: str | None = None
+    template_id: str | None = None
+
+
+class WorkspaceTemplateSuggestion(ApiModel):
+    model_config = ConfigDict(
+        alias_generator=to_camel,
+        populate_by_name=True,
+        extra="forbid",
+    )
+
+    label: str = Field(min_length=1, max_length=80)
+    prompt: str = Field(min_length=1, max_length=2000)
+
+
+class WorkspaceTemplateEmptyState(ApiModel):
+    model_config = ConfigDict(
+        alias_generator=to_camel,
+        populate_by_name=True,
+        extra="forbid",
+    )
+
+    title: str = Field(min_length=1, max_length=120)
+    description: str = Field(min_length=1, max_length=500)
+    suggestions: list[WorkspaceTemplateSuggestion] = Field(min_length=1, max_length=6)
+
+
+class WorkspaceTemplateUi(ApiModel):
+    model_config = ConfigDict(
+        alias_generator=to_camel,
+        populate_by_name=True,
+        extra="forbid",
+    )
+
+    module: str = Field(min_length=1, max_length=100, pattern=r"^[a-z0-9][a-z0-9._-]*$")
+
+
+class WorkspaceTemplateAgent(ApiModel):
+    model_config = ConfigDict(
+        alias_generator=to_camel,
+        populate_by_name=True,
+        extra="forbid",
+        str_strip_whitespace=True,
+    )
+
+    instructions: str = Field(min_length=1, max_length=20000)
+
+
+class WorkspaceTemplate(ApiModel):
+    model_config = ConfigDict(
+        alias_generator=to_camel,
+        populate_by_name=True,
+        extra="forbid",
+    )
+
+    version: Literal[1]
+    id: str = Field(min_length=1, max_length=80, pattern=r"^[a-z0-9][a-z0-9._-]*$")
+    name: str = Field(min_length=1, max_length=80)
+    description: str = Field(min_length=1, max_length=500)
+    empty_state: WorkspaceTemplateEmptyState
+    ui: WorkspaceTemplateUi
+    agent: WorkspaceTemplateAgent | None = None
 
 
 class UpdateWorkspaceRequest(ApiModel):
@@ -223,11 +285,28 @@ class HermesBackgroundProcess(ApiModel):
     detached: bool = False
 
 
+class HermesAsyncDelegation(ApiModel):
+    id: str
+    goal: str = ""
+    context: str = ""
+    toolsets: list[str] = Field(default_factory=list)
+    role: str = ""
+    model: str = ""
+    status: str = ""
+    dispatched_at: float | None = None
+    completed_at: float | None = None
+    duration_seconds: float | None = None
+    is_batch: bool = False
+    task_count: int = 1
+
+
 class HermesRuntimeResponse(ApiModel):
     busy: bool = False
     active_task_count: int = 0
     background_process_count: int = 0
     background_processes: list[HermesBackgroundProcess] = Field(default_factory=list)
+    async_delegation_count: int = 0
+    async_delegations: list[HermesAsyncDelegation] = Field(default_factory=list)
 
 
 class SessionModel(ApiModel):

@@ -27,6 +27,7 @@ export function SessionSidebar() {
   const [creating, setCreating] = useState(false);
   const [createName, setCreateName] = useState("New workspace");
   const [createConnectionId, setCreateConnectionId] = useState<string | undefined>(undefined);
+  const [createTemplateId, setCreateTemplateId] = useState<string | null>(null);
   const [createError, setCreateError] = useState<string | null>(null);
   const [connectionMenuOpen, setConnectionMenuOpen] = useState(false);
   const [deletingId, setDeletingId] = useState<string | null>(null);
@@ -50,7 +51,7 @@ export function SessionSidebar() {
     if (!name) return;
     setCreateError(null);
     void store
-      .createWorkspace(name, createConnectionId)
+      .createWorkspace(name, createConnectionId, createTemplateId)
       .then(() => setCreating(false))
       .catch((error: unknown) => {
         setCreateError(error instanceof Error ? error.message : String(error));
@@ -91,6 +92,7 @@ export function SessionSidebar() {
             onClick={() => {
               setCreateName("New workspace");
               setCreateConnectionId(defaultCreateConnectionId);
+              setCreateTemplateId(null);
               setCreateError(null);
               setCreating(true);
             }}
@@ -117,6 +119,7 @@ export function SessionSidebar() {
                     setConnectionMenuOpen(false);
                     setCreateName("New workspace");
                     setCreateConnectionId(profile.id);
+                    setCreateTemplateId(null);
                     setCreateError(null);
                     setCreating(true);
                   }}
@@ -287,6 +290,26 @@ export function SessionSidebar() {
             Connection:{" "}
             {selectedCreateProfile?.name ?? "Default"}
           </p>
+          <label className="block space-y-1.5 text-xs font-medium text-neutral-600 dark:text-neutral-300">
+            应用领域
+            <select
+              value={createTemplateId ?? ""}
+              onChange={(event) => setCreateTemplateId(event.target.value || null)}
+              className="block w-full rounded border border-neutral-300 bg-white px-2 py-1.5 text-sm font-normal text-neutral-900 dark:border-neutral-600 dark:bg-neutral-800 dark:text-neutral-100"
+            >
+              <option value="">通用（无模板）</option>
+              {store.workspaceTemplates.map((template) => (
+                <option key={template.id} value={template.id}>
+                  {template.name}
+                </option>
+              ))}
+            </select>
+          </label>
+          {createTemplateId && (
+            <p className="text-xs leading-5 text-neutral-500">
+              {store.workspaceTemplates.find((template) => template.id === createTemplateId)?.description}
+            </p>
+          )}
           {createError && (
             <p className="rounded-md border border-red-200 bg-red-50 px-2 py-1.5 text-xs text-red-700 dark:border-red-900/60 dark:bg-red-950/30 dark:text-red-300">
               {createError}

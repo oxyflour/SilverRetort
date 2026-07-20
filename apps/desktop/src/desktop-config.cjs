@@ -103,6 +103,9 @@ function loadDesktopConfig({
     const serviceRoot = app.isPackaged
         ? resourcesPath
         : path.resolve(sourceDir, "..", "..");
+    const templateRoot = app.isPackaged
+        ? path.join(serviceRoot, "template")
+        : path.resolve(serviceRoot, "..", "template");
     const envPath = path.join(desktopRoot, ".env");
     const iconPath = path.join(desktopRoot, "assets", "icon.png");
     const desktopEnv = existsSync(envPath)
@@ -120,6 +123,7 @@ function loadDesktopConfig({
         isPackaged: app.isPackaged,
         desktopRoot,
         serviceRoot,
+        templateRoot,
         envPath,
         iconPath,
         desktopEnv,

@@ -47,6 +47,7 @@ test("loadDesktopConfig resolves paths, settings, and child environment", (t) =>
 
     assert.equal(config.desktopRoot, path.join(root, "desktop"));
     assert.equal(config.serviceRoot, root);
+    assert.equal(config.templateRoot, path.join(path.dirname(root), "template"));
     assert.equal(config.dataDir, dataDir);
     assert.deepEqual(config.settings, {
         switchUrl: "https://example.test",
@@ -67,6 +68,20 @@ test("normalizeSettingsEnv trims keys and stringifies values", () => {
         ENABLE_LOCAL_HERMES: "1",
         EMPTY: "",
     });
+});
+
+test("packaged config resolves templates from resources", (t) => {
+    const root = mkdtempSync(path.join(os.tmpdir(), "silverretort-packaged-config-"));
+    t.after(() => rmSync(root, { recursive: true, force: true }));
+
+    const config = loadDesktopConfig({
+        app: { isPackaged: true, getPath: () => path.join(root, "user-data") },
+        sourceDir: path.join(root, "app", "src"),
+        resourcesPath: path.join(root, "resources"),
+        processEnv: {},
+    });
+
+    assert.equal(config.templateRoot, path.join(root, "resources", "template"));
 });
 
 test("readJsonObject rejects non-object JSON", (t) => {

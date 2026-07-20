@@ -5,6 +5,7 @@ import { useChatStore } from "../store";
 import { MessageView } from "./MessageView";
 import { ChatInput } from "./ChatInput";
 import { HermesProcessFloat } from "./HermesProcessFloat";
+import { ChatPaneToolbarSlot, EmptySessionSlot } from "../templateSlots";
 
 export function ChatPane() {
   const currentSessionId = useChatStore((s) => s.currentSessionId);
@@ -12,10 +13,25 @@ export function ChatPane() {
     s.currentSessionId ? s.buckets[s.currentSessionId] : undefined,
   );
   const artifacts = useChatStore((s) => s.artifacts);
+  const hermesRuntime = useChatStore((s) => s.hermesRuntime);
+  const currentWorkspace = useChatStore((s) =>
+    s.workspaces.find((workspace) => workspace.id === s.currentWorkspaceId),
+  );
+  const currentTemplate = useChatStore((s) =>
+    s.workspaceTemplates.find(
+      (template) => template.id === currentWorkspace?.templateId,
+    ),
+  );
+  const currentSession = useChatStore((s) =>
+    s.sessions.find((session) => session.id === s.currentSessionId),
+  );
+  const sendMessage = useChatStore((s) => s.sendMessage);
+  const refreshHermesRuntime = useChatStore((s) => s.refreshHermesRuntime);
   const scrollRef = useRef<HTMLDivElement>(null);
   const scrollFrameRef = useRef<number | null>(null);
   // 用户上滚时暂停自动跟随，回到底部恢复
   const [follow, setFollow] = useState(true);
+  const [drafts, setDrafts] = useState<Record<string, string>>({});
   const [renderWindow, setRenderWindow] = useState({
     sessionId: "",
     count: 8,
@@ -44,6 +60,12 @@ export function ChatPane() {
   useEffect(() => {
     setFollow(true);
   }, [currentSessionId]);
+
+  useEffect(() => {
+    if (currentSessionId) {
+      void refreshHermesRuntime(currentSessionId);
+    }
+  }, [currentSessionId, refreshHermesRuntime]);
 
   const renderedCount =
     renderWindow.sessionId === currentSessionId ? renderWindow.count : 8;
@@ -81,12 +103,47 @@ export function ChatPane() {
         sessionArtifacts.map((artifact) => [artifact.id, artifact.createdAt]),
       ),
     };
-  }, [artifacts, bucket?.runId, currentSessionId, messageOrderKey]);
+  }, [
+    artifacts,
+    bucket?.runId,
+    currentSessionId,
+    messageOrderKey,
+  ]);
   const firstRenderedIndex = Math.max(0, totalMessages - renderedCount);
   const renderedMessages = bucket?.messages.slice(firstRenderedIndex) ?? [];
+  const hasHermesFloat =
+    (hermesRuntime?.backgroundProcessCount ?? 0) > 0 ||
+    (hermesRuntime?.asyncDelegationCount ?? 0) > 0 ||
+    (hermesRuntime?.backgroundProcesses.length ?? 0) > 0 ||
+    (hermesRuntime?.asyncDelegations.length ?? 0) > 0;
+  const sessionArtifacts = Object.values(artifacts).filter(
+    (artifact) => artifact.sessionId === currentSessionId,
+  );
+  const selectPrompt = (prompt: string) => {
+    if (!currentSessionId) return;
+    setDrafts((current) => ({ ...current, [currentSessionId]: prompt }));
+  };
+  const sendTemplateMessage = async (text: string) => {
+    const prompt = text.trim();
+    if (!currentSessionId || bucket?.runId != null || !prompt) return;
+    setDrafts((current) => ({ ...current, [currentSessionId]: "" }));
+    await sendMessage(prompt);
+  };
 
   return (
     <div className="flex h-full flex-col bg-white dark:bg-neutral-900">
+      {currentWorkspace && (
+        <ChatPaneToolbarSlot
+          workspace={currentWorkspace}
+          template={currentTemplate}
+          session={currentSession ?? null}
+          messages={bucket?.messages ?? []}
+          artifacts={sessionArtifacts}
+          running={bucket?.runId != null}
+          setDraft={selectPrompt}
+          sendMessage={sendTemplateMessage}
+        />
+      )}
       <div className="relative min-h-0 flex-1">
         <div
           ref={scrollRef}
@@ -96,10 +153,17 @@ export function ChatPane() {
           }}
           className="h-full overflow-y-auto"
         >
+          {hasHermesFloat && (bucket?.messages.length ?? 0) > 0 && (
+            <div aria-hidden="true" className="h-12" />
+          )}
           {!currentSessionId || (bucket?.messages.length ?? 0) === 0 ? (
-            <div className="flex h-full items-center justify-center text-sm text-neutral-400">
-            {currentSessionId ? "发送一条消息开始对话" : "新建一个会话开始"}
-            </div>
+            <EmptySessionSlot
+              hasSession={Boolean(currentSessionId)}
+              workspace={currentWorkspace}
+              template={currentTemplate}
+              session={currentSession ?? null}
+              setDraft={selectPrompt}
+            />
           ) : (
             renderedMessages.map((message) => (
               <MessageView
@@ -117,7 +181,13 @@ export function ChatPane() {
         </div>
         <HermesProcessFloat />
       </div>
-      <ChatInput />
+      <ChatInput
+        text={currentSessionId ? drafts[currentSessionId] ?? "" : ""}
+        onTextChange={(text) => {
+          if (!currentSessionId) return;
+          setDrafts((current) => ({ ...current, [currentSessionId]: text }));
+        }}
+      />
     </div>
   );
 }

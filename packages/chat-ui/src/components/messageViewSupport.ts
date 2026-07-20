@@ -1,4 +1,9 @@
-import type { Artifact, Message, MessagePart, ToolCall } from "silverretort-protocol";
+import type {
+  Artifact,
+  Message,
+  MessagePart,
+  ToolCall,
+} from "silverretort-protocol";
 
 export interface MessageViewContext {
   artifacts: Record<string, Artifact>;

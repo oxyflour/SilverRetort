@@ -1,10 +1,15 @@
 "use client";
 
 import { useMemo, useState } from "react";
-import { ChevronDown, ChevronUp, Clock, Terminal } from "lucide-react";
-import type { HermesBackgroundProcess } from "silverretort-protocol";
+import { Bot, Clock, Terminal } from "lucide-react";
+import type {
+  HermesAsyncDelegation,
+  HermesBackgroundProcess,
+} from "silverretort-protocol";
 import { useChatStore } from "../store";
 import { AppIcon } from "./icons";
+
+type PanelKind = "processes" | "delegations";
 
 function formatUptime(seconds: number): string {
   const safeSeconds = Math.max(0, Math.floor(seconds));
@@ -20,6 +25,10 @@ function formatUptime(seconds: number): string {
   return remainingMinutes ? `${hours}h ${remainingMinutes}m` : `${hours}h`;
 }
 
+function formatBadgeCount(count: number): string {
+  return count > 99 ? "99+" : `${count}`;
+}
+
 function processLabel(process: HermesBackgroundProcess): string {
   return process.command.trim() || process.sessionId;
 }
@@ -32,6 +41,48 @@ function statusClassName(process: HermesBackgroundProcess): string {
     return "bg-neutral-400";
   }
   return "bg-red-500";
+}
+
+function delegationStatusClassName(delegation: HermesAsyncDelegation): string {
+  if (delegation.status === "running") {
+    return "bg-sky-500";
+  }
+  if (["completed", "success"].includes(delegation.status)) {
+    return "bg-neutral-400";
+  }
+  return "bg-red-500";
+}
+
+function IconBadgeButton({
+  active,
+  count,
+  icon,
+  title,
+  onClick,
+}: {
+  active: boolean;
+  count: number;
+  icon: typeof Terminal;
+  title: string;
+  onClick: () => void;
+}) {
+  return (
+    <button
+      type="button"
+      title={title}
+      aria-label={title}
+      aria-pressed={active}
+      onClick={onClick}
+      className={`relative flex h-8 w-8 items-center justify-center rounded-md text-neutral-500 hover:bg-neutral-100 hover:text-neutral-900 dark:hover:bg-neutral-800 dark:hover:text-neutral-100 ${
+        active ? "bg-neutral-100 text-neutral-900 dark:bg-neutral-800 dark:text-neutral-100" : ""
+      }`}
+    >
+      <AppIcon icon={icon} className="h-4 w-4" />
+      <span className="absolute -right-1 -top-1 min-w-4 rounded-full border border-white bg-neutral-900 px-1 text-center text-[10px] font-medium leading-4 text-white tabular-nums dark:border-neutral-900 dark:bg-neutral-100 dark:text-neutral-900">
+        {formatBadgeCount(count)}
+      </span>
+    </button>
+  );
 }
 
 function ProcessRow({ process }: { process: HermesBackgroundProcess }) {
@@ -68,61 +119,126 @@ function ProcessRow({ process }: { process: HermesBackgroundProcess }) {
   );
 }
 
+function delegationLabel(delegation: HermesAsyncDelegation): string {
+  return delegation.goal.trim() || delegation.id;
+}
+
+function DelegationRow({ delegation }: { delegation: HermesAsyncDelegation }) {
+  const duration =
+    delegation.durationSeconds == null
+      ? ""
+      : formatUptime(delegation.durationSeconds);
+
+  return (
+    <div className="border-t border-neutral-200 px-3 py-2 first:border-t-0 dark:border-neutral-700">
+      <div className="flex min-w-0 items-center gap-2">
+        <span
+          aria-hidden="true"
+          className={`h-2 w-2 shrink-0 rounded-full ${delegationStatusClassName(delegation)}`}
+        />
+        <span className="min-w-0 flex-1 truncate text-[11px]">
+          {delegationLabel(delegation)}
+        </span>
+        <span className="shrink-0 text-[11px] text-neutral-500">
+          {delegation.status || "unknown"}
+        </span>
+      </div>
+      <div className="mt-1 flex items-center gap-2 text-[11px] text-neutral-500">
+        <AppIcon icon={Clock} className="h-3 w-3" />
+        {duration && <span>{duration}</span>}
+        {delegation.isBatch && <span>{delegation.taskCount} tasks</span>}
+        {delegation.role && <span>{delegation.role}</span>}
+        {delegation.model && <span className="truncate">{delegation.model}</span>}
+      </div>
+    </div>
+  );
+}
+
 export function HermesProcessFloat() {
   const runtime = useChatStore((state) => state.hermesRuntime);
-  const [expanded, setExpanded] = useState(false);
+  const [activePanel, setActivePanel] = useState<PanelKind | null>(null);
   const processes = useMemo(
     () => runtime?.backgroundProcesses ?? [],
     [runtime?.backgroundProcesses],
   );
-
-  if (processes.length === 0) {
-    return null;
-  }
+  const delegations = useMemo(
+    () => runtime?.asyncDelegations ?? [],
+    [runtime?.asyncDelegations],
+  );
 
   const runningCount = processes.filter(
     (process) => process.status === "running",
   ).length;
-  const displayCount = runningCount > 0 ? runningCount : processes.length;
-  const label =
+  const runningDelegationCount = delegations.filter(
+    (delegation) => delegation.status === "running",
+  ).length;
+  const processCount =
     runningCount > 0
-      ? `${runningCount} running`
-      : `${processes.length} recent`;
+      ? runningCount
+      : Math.max(processes.length, runtime?.backgroundProcessCount ?? 0);
+  const delegationCount =
+    runningDelegationCount > 0
+      ? runningDelegationCount
+      : Math.max(delegations.length, runtime?.asyncDelegationCount ?? 0);
+  const showProcesses = processCount > 0;
+  const showDelegations = delegationCount > 0;
+
+  if (!showProcesses && !showDelegations) {
+    return null;
+  }
+
+  const activeProcesses = activePanel === "processes" && processes.length > 0;
+  const activeDelegations =
+    activePanel === "delegations" && delegations.length > 0;
 
   return (
     <div className="pointer-events-none absolute left-3 top-3 z-20 max-w-[min(22rem,calc(100%-1.5rem))]">
-      <div className="pointer-events-auto overflow-hidden rounded-md border border-neutral-200 bg-white/95 text-neutral-900 shadow-lg backdrop-blur dark:border-neutral-700 dark:bg-neutral-900/95 dark:text-neutral-100">
-        <button
-          type="button"
-          onClick={() => setExpanded((value) => !value)}
-          className={`flex h-9 items-center gap-2 text-left text-xs hover:bg-neutral-100 dark:hover:bg-neutral-800 ${
-            expanded ? "w-full px-3" : "w-auto px-2.5"
-          }`}
-          aria-expanded={expanded}
-          title="Hermes background processes"
-        >
-          <AppIcon icon={Terminal} className="h-4 w-4 shrink-0 text-neutral-500" />
-          {expanded ? (
-            <>
-              <span className="min-w-0 flex-1 truncate font-medium">
-                Background processes
-              </span>
-              <span className="shrink-0 text-neutral-500">{label}</span>
-            </>
-          ) : (
-            <span className="min-w-0 font-medium tabular-nums">{displayCount}</span>
+      <div className="pointer-events-auto flex flex-col items-start gap-1 text-neutral-900 dark:text-neutral-100">
+        <div className="flex gap-1 rounded-md border border-neutral-200 bg-white/95 p-1 shadow-lg backdrop-blur dark:border-neutral-700 dark:bg-neutral-900/95">
+          {showProcesses && (
+            <IconBadgeButton
+              active={activeProcesses}
+              count={processCount}
+              icon={Terminal}
+              title="Hermes background processes"
+              onClick={() =>
+                setActivePanel((value) =>
+                  value === "processes" ? null : "processes",
+                )
+              }
+            />
           )}
-          <AppIcon
-            icon={expanded ? ChevronUp : ChevronDown}
-            className={`h-4 w-4 shrink-0 text-neutral-500 ${
-              expanded ? "" : "hidden"
-            }`}
-          />
-        </button>
-        {expanded && (
-          <div className="max-h-80 overflow-auto">
+          {showDelegations && (
+            <IconBadgeButton
+              active={activeDelegations}
+              count={delegationCount}
+              icon={Bot}
+              title="Hermes background subagents"
+              onClick={() =>
+                setActivePanel((value) =>
+                  value === "delegations" ? null : "delegations",
+                )
+              }
+            />
+          )}
+        </div>
+        {activeProcesses && (
+          <div className="max-h-80 w-[min(22rem,calc(100vw-1.5rem))] overflow-auto rounded-md border border-neutral-200 bg-white/95 text-neutral-900 shadow-lg backdrop-blur dark:border-neutral-700 dark:bg-neutral-900/95 dark:text-neutral-100">
+            <div className="px-3 py-2 text-xs font-medium text-neutral-500">
+              Background processes
+            </div>
             {processes.map((process) => (
               <ProcessRow key={process.sessionId} process={process} />
+            ))}
+          </div>
+        )}
+        {activeDelegations && (
+          <div className="max-h-80 w-[min(22rem,calc(100vw-1.5rem))] overflow-auto rounded-md border border-neutral-200 bg-white/95 text-neutral-900 shadow-lg backdrop-blur dark:border-neutral-700 dark:bg-neutral-900/95 dark:text-neutral-100">
+            <div className="px-3 py-2 text-xs font-medium text-neutral-500">
+              Background subagents
+            </div>
+            {delegations.map((delegation) => (
+              <DelegationRow key={delegation.id} delegation={delegation} />
             ))}
           </div>
         )}

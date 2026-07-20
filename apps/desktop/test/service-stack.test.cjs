@@ -5,6 +5,7 @@ const { buildUvicornEnv, waitForHttpResponse } = require("../src/service-stack.c
 test("remote switch URL is passed to uvicorn and its bridge", () => {
     const config = {
         dataDir: "C:/data",
+        templateRoot: "C:/templates",
         isPackaged: false,
         buildChildEnv: (overrides) => ({ BASE: "yes", ...overrides }),
     };
@@ -17,6 +18,7 @@ test("remote switch URL is passed to uvicorn and its bridge", () => {
     assert.equal(env.HERMES_BRIDGE_URL, "wss://switch.example/endpoint/alice/bridge");
     assert.equal(env.HERMES_API_KEY, "secret");
     assert.equal(env.DATA_DIR, "C:/data");
+    assert.equal(env.SILVERRETORT_TEMPLATE_ROOT, "C:/templates");
     assert.equal(env.SILVERRETORT_DESKTOP_MODE, "development");
     assert.equal(env.SILVERRETORT_HERMES_MODE, "remote");
 });

@@ -96,6 +96,7 @@ function buildUvicornEnv(config, hermesMode, pythonPort, publicBaseUrl = "", man
         LISTEN_PORT: `${pythonPort}`,
         ...(publicBaseUrl ? { SILVERRETORT_PUBLIC_BASE_URL: publicBaseUrl } : {}),
         DATA_DIR: config.dataDir,
+        SILVERRETORT_TEMPLATE_ROOT: config.templateRoot,
         ...(mcpsRoot ? { SILVERRETORT_MCPS_ROOT: mcpsRoot } : {}),
         SILVERRETORT_DESKTOP_MODE: config.isPackaged ? "packaged" : "development",
         SILVERRETORT_HERMES_MODE: hermesMode.mode,

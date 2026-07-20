@@ -8,6 +8,7 @@ import db
 import runs
 import switch_profiles
 import workspace_service
+import workspace_templates
 from api_routes.common import DEFAULT_TITLE, TOOL_SUMMARY_LIMIT, _require_engine_method, _workspace_response
 from engines import create_engine_for_workspace
 from models import (
@@ -22,6 +23,7 @@ from models import (
     UpdateSessionRequest,
     UpdateWorkspaceRequest,
     Workspace,
+    WorkspaceTemplate,
 )
 
 router = APIRouter()
@@ -46,6 +48,11 @@ async def list_workspaces() -> list[Workspace]:
     return [_workspace_response(workspace) for workspace in db.list_workspaces()]
 
 
+@router.get("/workspace-templates", response_model_exclude_none=True)
+def list_workspace_templates() -> list[WorkspaceTemplate]:
+    return workspace_templates.list_templates()
+
+
 @router.post("/workspaces")
 async def create_workspace(body: CreateWorkspaceRequest) -> Workspace:
     name = body.name.strip()
@@ -54,11 +61,19 @@ async def create_workspace(body: CreateWorkspaceRequest) -> Workspace:
     connection_id = body.connection_id or switch_profiles.default_profile_id()
     if switch_profiles.get_profile(connection_id) is None:
         raise HTTPException(400, "switch profile not found")
+    if body.template_id and workspace_templates.get_template(body.template_id) is None:
+        raise HTTPException(400, "workspace template not found")
     capability = await workspace_service.capability(connection_id=connection_id)
     if not capability.get("supported") or not capability.get("writable"):
         raise HTTPException(503, "Workspace creation is unavailable for this switchUrl")
     workspace_id = uuid.uuid4().hex
-    workspace = db.create_workspace(workspace_id, name, "creating", connection_id)
+    workspace = db.create_workspace(
+        workspace_id,
+        name,
+        "creating",
+        connection_id,
+        body.template_id,
+    )
     try:
         await workspace_service.create_remote(workspace_id)
     except Exception as exc:

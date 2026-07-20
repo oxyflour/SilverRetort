@@ -10,6 +10,7 @@ import bridge_client
 from artifact_bridge import artifact_bridge_response
 import db
 import mcp_server
+import workspace_templates
 from routes import router
 
 
@@ -24,6 +25,7 @@ def exit_on_stdin_eof() -> None:
 async def lifespan(_: FastAPI):
     watcher = threading.Thread(target=exit_on_stdin_eof, daemon=True)
     watcher.start()
+    workspace_templates.load_templates()
     db.connect()
     bridge_tasks = bridge_client.start_tasks()
     try:
