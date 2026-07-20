@@ -481,12 +481,16 @@ export const useChatStore = create<ChatState>((set, get) => {
     },
 
     refreshHermesRuntime: async (id) => {
+      const sessionId = id === undefined ? get().currentSessionId : id;
       try {
-        const sessionId = id === undefined ? get().currentSessionId : id;
         const runtime = await get().client.getHermesRuntime(sessionId);
-        set({ hermesRuntime: runtime });
+        if (sessionId === get().currentSessionId) {
+          set({ hermesRuntime: runtime });
+        }
       } catch {
-        set({ hermesRuntime: null });
+        if (sessionId === get().currentSessionId) {
+          set({ hermesRuntime: null });
+        }
       }
     },
 
@@ -551,7 +555,12 @@ export const useChatStore = create<ChatState>((set, get) => {
 
     selectSession: async (id) => {
       const session = get().sessions.find((item) => item.id === id);
-      set({ currentSessionId: id, currentWorkspaceId: session?.workspaceId ?? get().currentWorkspaceId, pendingAttachments: [] });
+      set({
+        currentSessionId: id,
+        currentWorkspaceId: session?.workspaceId ?? get().currentWorkspaceId,
+        hermesRuntime: null,
+        pendingAttachments: [],
+      });
       void get().refreshSessionModel(id);
       void get().refreshHermesUsage(id);
       void get().refreshHermesRuntime(id);

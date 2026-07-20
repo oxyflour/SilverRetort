@@ -332,7 +332,15 @@ def background_processes_response(session_key: str = "") -> dict[str, Any]:
         processes = process_registry.list_sessions(
             session_key=session_key if session_key else None
         )
-        payload["backgroundProcessCount"] = process_registry.count_running()
+        payload["backgroundProcessCount"] = (
+            sum(
+                1
+                for item in processes
+                if isinstance(item, dict) and item.get("status") == "running"
+            )
+            if session_key
+            else process_registry.count_running()
+        )
         payload["backgroundProcesses"] = [
             _redact_process_entry(item) for item in processes if isinstance(item, dict)
         ]
