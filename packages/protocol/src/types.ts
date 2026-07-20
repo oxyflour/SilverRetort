@@ -317,6 +317,36 @@ export const HermesUsageResponseSchema = z.object({
 });
 export type HermesUsageResponse = z.infer<typeof HermesUsageResponseSchema>;
 
+export const HermesBackgroundProcessSchema = z.object({
+  sessionId: z.string(),
+  command: z.string().default(""),
+  cwd: z.string().nullable().default(null),
+  pid: z.number().int().nullable().default(null),
+  startedAt: z.string().default(""),
+  uptimeSeconds: z.number().int().nonnegative().default(0),
+  status: z.enum(["running", "exited"]).default("running"),
+  outputPreview: z.string().default(""),
+  exitCode: z.number().int().nullable().optional(),
+  sessionScoped: z.boolean().default(false),
+  watchPatterns: z.array(z.string()).default([]),
+  watchHit: z.boolean().default(false),
+  notifyOnComplete: z.boolean().default(false),
+  detached: z.boolean().default(false),
+});
+export type HermesBackgroundProcess = z.infer<
+  typeof HermesBackgroundProcessSchema
+>;
+
+export const HermesRuntimeResponseSchema = z.object({
+  busy: z.boolean().default(false),
+  activeTaskCount: z.number().int().nonnegative().default(0),
+  backgroundProcessCount: z.number().int().nonnegative().default(0),
+  backgroundProcesses: z.array(HermesBackgroundProcessSchema).default([]),
+});
+export type HermesRuntimeResponse = z.infer<
+  typeof HermesRuntimeResponseSchema
+>;
+
 export const SessionModelSchema = z.object({
   sessionKey: z.string().default(""),
   source: z.enum(["default", "session"]).default("default"),

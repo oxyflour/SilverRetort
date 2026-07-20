@@ -23,6 +23,8 @@ import {
   WorkspaceSchema,
   HermesModelsResponse,
   HermesModelsResponseSchema,
+  HermesRuntimeResponse,
+  HermesRuntimeResponseSchema,
   HermesUsageResponse,
   HermesUsageResponseSchema,
   SessionModel,
@@ -114,6 +116,11 @@ export class ApiClient {
   getHermesUsage(sessionId?: string | null): Promise<HermesUsageResponse> {
     const query = sessionId ? `?sessionId=${encodeURIComponent(sessionId)}` : "";
     return this.request(HermesUsageResponseSchema, `/api/hermes/usage${query}`);
+  }
+
+  getHermesRuntime(sessionId?: string | null): Promise<HermesRuntimeResponse> {
+    const query = sessionId ? `?sessionId=${encodeURIComponent(sessionId)}` : "";
+    return this.request(HermesRuntimeResponseSchema, `/api/hermes/runtime${query}`);
   }
 
   getDefaultModel(): Promise<SessionModel> {

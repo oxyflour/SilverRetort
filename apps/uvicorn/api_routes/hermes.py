@@ -16,6 +16,7 @@ from api_routes.common import _engine_from_context, _models_response, _require_e
 from models import (
     CreateSwitchProfileRequest,
     HermesModelsResponse,
+    HermesRuntimeResponse,
     HermesUsageResponse,
     ModelSetting,
     SessionModel,
@@ -251,6 +252,19 @@ async def hermes_usage(sessionId: str | None = None) -> HermesUsageResponse:
         raise HTTPException(503, f"Hermes usage unavailable: {exc}") from exc
     except Exception as exc:
         raise HTTPException(503, f"Hermes usage unavailable: {exc}") from exc
+
+
+@router.get("/hermes/runtime")
+async def hermes_runtime(sessionId: str | None = None) -> HermesRuntimeResponse:
+    method = _require_engine_method(_engine_from_context(sessionId, None), "get_runtime")
+    try:
+        return HermesRuntimeResponse.model_validate(await method(sessionId))
+    except httpx.HTTPStatusError as exc:
+        if exc.response.status_code == 404:
+            return HermesRuntimeResponse()
+        raise HTTPException(503, f"Hermes runtime unavailable: {exc}") from exc
+    except Exception as exc:
+        raise HTTPException(503, f"Hermes runtime unavailable: {exc}") from exc
 
 
 @router.get("/hermes/default-model")

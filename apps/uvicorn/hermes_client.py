@@ -349,6 +349,21 @@ class HermesEngine:
             response.raise_for_status()
             return dict(response.json())
 
+    async def get_runtime(self, session_id: str | None = None) -> dict[str, Any]:
+        params = (
+            {"sessionKey": self.session_key(session_id)}
+            if session_id
+            else None
+        )
+        async with httpx.AsyncClient(timeout=httpx.Timeout(10, connect=5)) as client:
+            response = await client.get(
+                f"{self.base_url}/silverretort/runtime",
+                params=params,
+                headers=self._headers(),
+            )
+            response.raise_for_status()
+            return dict(response.json())
+
     async def get_default_model(self) -> dict[str, Any]:
         async with httpx.AsyncClient(timeout=httpx.Timeout(20, connect=5)) as client:
             response = await client.get(

@@ -259,6 +259,43 @@ def runtime_status_response() -> dict[str, Any]:
     return {"busy": active_task_count > 0, "activeTaskCount": active_task_count}
 
 
+def _redact_process_entry(entry: dict[str, Any]) -> dict[str, Any]:
+    redacted = dict(entry)
+    command = str(redacted.get("command") or "")
+    try:
+        from agent.redact import redact_sensitive_text, redact_terminal_output
+
+        if command:
+            redacted["command"] = redact_sensitive_text(command, code_file=True)
+        preview = redacted.get("output_preview")
+        if isinstance(preview, str) and preview:
+            redacted["output_preview"] = redact_terminal_output(preview, command)
+    except Exception:
+        pass
+    preview = redacted.get("output_preview")
+    if isinstance(preview, str) and len(preview) > 500:
+        redacted["output_preview"] = preview[-500:]
+    return redacted
+
+
+def background_processes_response(session_key: str = "") -> dict[str, Any]:
+    payload = runtime_status_response()
+    try:
+        from tools.process_registry import process_registry
+
+        processes = process_registry.list_sessions(
+            session_key=session_key if session_key else None
+        )
+        payload["backgroundProcessCount"] = process_registry.count_running()
+        payload["backgroundProcesses"] = [
+            _redact_process_entry(item) for item in processes if isinstance(item, dict)
+        ]
+    except Exception:
+        payload["backgroundProcessCount"] = 0
+        payload["backgroundProcesses"] = []
+    return payload
+
+
 def _require_auth(request: Request, api_key: str) -> None:
     if not authorized_request(request, api_key):
         raise HTTPException(401, "unauthorized")
@@ -330,7 +367,10 @@ def register_silverretort_routes(app: Any, api_key: str) -> None:
     @app.get("/silverretort/runtime")
     async def silverretort_runtime(request: Request) -> dict[str, Any]:
         _require_auth(request, api_key)
-        return runtime_status_response()
+        session_key = str(request.query_params.get("sessionKey") or "").strip()
+        if session_key and not SESSION_KEY_RE.match(session_key):
+            raise HTTPException(400, "invalid sessionKey")
+        return background_processes_response(session_key)
 
     @app.get("/silverretort/slash/commands")
     async def silverretort_slash_commands(request: Request) -> dict[str, Any]:

@@ -206,6 +206,30 @@ class HermesUsageResponse(ApiModel):
     unavailable_reason: str = ""
 
 
+class HermesBackgroundProcess(ApiModel):
+    session_id: str
+    command: str = ""
+    cwd: str | None = None
+    pid: int | None = None
+    started_at: str = ""
+    uptime_seconds: int = 0
+    status: Literal["running", "exited"] = "running"
+    output_preview: str = ""
+    exit_code: int | None = None
+    session_scoped: bool = False
+    watch_patterns: list[str] = Field(default_factory=list)
+    watch_hit: bool = False
+    notify_on_complete: bool = False
+    detached: bool = False
+
+
+class HermesRuntimeResponse(ApiModel):
+    busy: bool = False
+    active_task_count: int = 0
+    background_process_count: int = 0
+    background_processes: list[HermesBackgroundProcess] = Field(default_factory=list)
+
+
 class SessionModel(ApiModel):
     session_key: str = ""
     source: Literal["default", "session"] = "default"
