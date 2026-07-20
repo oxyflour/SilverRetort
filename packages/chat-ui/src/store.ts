@@ -54,7 +54,7 @@ interface ChatState {
   refreshHermesUsage: (id?: string | null) => Promise<void>;
   createWorkspace: (name: string, connectionId?: string) => Promise<void>;
   renameWorkspace: (id: string, name: string) => Promise<void>;
-  deleteWorkspace: (id: string) => Promise<void>;
+  deleteWorkspace: (id: string, force?: boolean) => Promise<void>;
   selectWorkspace: (id: string) => void;
   toggleWorkspace: (id: string) => void;
   createSession: (workspaceId?: string) => Promise<void>;
@@ -486,8 +486,8 @@ export const useChatStore = create<ChatState>((set, get) => {
       set((state) => ({ workspaces: state.workspaces.map((item) => item.id === id ? workspace : item) }));
     },
 
-    deleteWorkspace: async (id) => {
-      await get().client.deleteWorkspace(id);
+    deleteWorkspace: async (id, force = false) => {
+      await get().client.deleteWorkspace(id, force);
       const removedIds = new Set(get().sessions.filter((session) => session.workspaceId === id).map((session) => session.id));
       set((state) => {
         const workspaces = state.workspaces.filter((workspace) => workspace.id !== id);

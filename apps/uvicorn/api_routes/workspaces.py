@@ -78,24 +78,37 @@ def rename_workspace(workspace_id: str, body: UpdateWorkspaceRequest) -> Workspa
 
 
 @router.delete("/workspaces/{workspace_id}")
-async def delete_workspace(workspace_id: str) -> dict[str, bool]:
-    if db.get_workspace(workspace_id) is None:
+async def delete_workspace(workspace_id: str, force: bool = False) -> dict[str, bool]:
+    workspace = db.get_workspace(workspace_id)
+    if workspace is None:
         raise HTTPException(404, "workspace not found")
+    if switch_profiles.get_profile(workspace.connection_id) is None and not force:
+        raise HTTPException(
+            409,
+            "The workspace profile is no longer available. Force delete the workspace to remove its local record.",
+        )
     for session in db.list_sessions():
         if session.workspace_id == workspace_id:
             runs.stop_run(session.id)
     db.set_workspace_status(workspace_id, "deleting")
-    try:
-        await workspace_service.delete_remote(workspace_id)
-    except Exception as exc:
-        db.set_workspace_status(workspace_id, "error")
-        raise HTTPException(503, f"failed to delete Hermes workspace: {exc}") from exc
+    if not force:
+        try:
+            await workspace_service.delete_remote(workspace_id)
+        except Exception as exc:
+            db.set_workspace_status(workspace_id, "error")
+            raise HTTPException(503, f"failed to delete Hermes workspace: {exc}") from exc
     db.delete_workspace(workspace_id)
     if not db.list_workspaces():
         fallback_id = uuid.uuid4().hex
-        db.create_workspace(fallback_id, "Default workspace", "creating", switch_profiles.default_profile_id())
-        await workspace_service.create_remote(fallback_id)
-        db.set_workspace_status(fallback_id, "active")
+        fallback = db.create_workspace(
+            fallback_id,
+            "Default workspace",
+            "active" if force else "creating",
+            switch_profiles.default_profile_id(),
+        )
+        if not force:
+            await workspace_service.create_remote(fallback.id)
+            db.set_workspace_status(fallback.id, "active")
     return {"ok": True}
 
 
@@ -104,6 +117,11 @@ def create_session(workspace_id: str, body: CreateSessionRequest) -> Session:
     workspace = db.get_workspace(workspace_id)
     if workspace is None or workspace.status != "active":
         raise HTTPException(409, "workspace is unavailable")
+    if switch_profiles.get_profile(workspace.connection_id) is None:
+        raise HTTPException(
+            409,
+            "The workspace profile is no longer available. Force delete the workspace to remove its local record.",
+        )
     return db.create_session(uuid.uuid4().hex, workspace_id, body.title or DEFAULT_TITLE)
 
 

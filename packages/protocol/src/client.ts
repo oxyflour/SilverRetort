@@ -141,9 +141,19 @@ export class ApiClient {
     });
   }
 
-  async deleteWorkspace(id: string): Promise<void> {
-    const res = await fetch(`${this.baseUrl}/api/workspaces/${id}`, { method: "DELETE" });
-    if (!res.ok) throw new Error(`DELETE workspace failed: HTTP ${res.status}`);
+  async deleteWorkspace(id: string, force = false): Promise<void> {
+    const query = force ? "?force=true" : "";
+    const res = await fetch(`${this.baseUrl}/api/workspaces/${id}${query}`, { method: "DELETE" });
+    if (!res.ok) {
+      let detail = "";
+      try {
+        const payload = await res.json();
+        detail = typeof payload?.detail === "string" ? payload.detail : "";
+      } catch {
+        // Keep the generic HTTP error when the server did not return JSON.
+      }
+      throw new Error(detail || `DELETE workspace failed: HTTP ${res.status}`);
+    }
   }
 
   createSession(workspaceId: string, title?: string): Promise<Session> {
