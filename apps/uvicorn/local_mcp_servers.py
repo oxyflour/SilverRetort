@@ -1,13 +1,21 @@
 """Local MCP server forwarding configuration.
 
-Remote Hermes relay mode only forwards explicitly configured local HTTP MCP
-servers. Configuration lives in DATA_DIR/settings.json:
+Remote Hermes relay mode forwards explicitly configured local HTTP and stdio
+MCP servers. Configuration lives in DATA_DIR/settings.json:
 
 {
   "mcpServers": {
     "filesystem": {
+      "transport": "streamable_http",
       "url": "http://127.0.0.1:9901/mcp/",
       "headers": {"Authorization": "Bearer ..."}
+    },
+    "local_tools": {
+      "transport": "stdio",
+      "command": "npx",
+      "args": ["-y", "@modelcontextprotocol/server-filesystem", "/workspace"],
+      "env": {},
+      "cwd": "/workspace"
     }
   },
   "managedMcpServers": {
@@ -123,10 +131,29 @@ def load_servers() -> dict[str, dict[str, Any]]:
         config = raw_config if isinstance(raw_config, dict) else {}
         if config.get("enabled") is False:
             continue
+        if config.get("transport") == "stdio":
+            command = str(config.get("command") or "").strip()
+            raw_args = config.get("args")
+            raw_env = config.get("env")
+            if not command or not isinstance(raw_args, list) or not all(
+                isinstance(item, str) for item in raw_args
+            ):
+                continue
+            if not isinstance(raw_env, dict):
+                raw_env = {}
+            servers[name] = {
+                "transport": "stdio",
+                "command": command,
+                "args": list(raw_args),
+                "env": {str(key): str(value) for key, value in raw_env.items()},
+                "cwd": str(config.get("cwd") or "").strip(),
+            }
+            continue
         url = _valid_local_http_url(config.get("url"))
         if not url:
             continue
         servers[name] = {
+            "transport": "streamable_http",
             "url": url,
             "headers": _headers(config.get("headers")),
         }
