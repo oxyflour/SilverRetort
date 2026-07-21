@@ -22,7 +22,7 @@ import uvicorn
 import yaml
 from fastapi import FastAPI, HTTPException
 from starlette.requests import Request
-from starlette.responses import PlainTextResponse, Response, StreamingResponse
+from starlette.responses import JSONResponse, PlainTextResponse, Response, StreamingResponse
 from starlette.websockets import WebSocket, WebSocketDisconnect
 
 HTTP_METHODS = ["DELETE", "GET", "HEAD", "OPTIONS", "PATCH", "POST", "PUT"]
@@ -81,6 +81,8 @@ class BridgeSession:
         self.relay_base_url = relay_base_url.rstrip("/")
         self._closed = asyncio.Event()
         self._http_streams: dict[str, tuple[asyncio.Future[dict[str, Any]], asyncio.Queue[Any]]] = {}
+        self._stdio_requests: dict[str, asyncio.Future[dict[str, Any] | None]] = {}
+        self.server_transports: dict[str, str] = {}
         self._send_lock = asyncio.Lock()
 
     async def run(self) -> None:
@@ -114,6 +116,10 @@ class BridgeSession:
                 future.set_exception(error)
             queue.put_nowait(error)
         self._http_streams.clear()
+        for future in self._stdio_requests.values():
+            if not future.done():
+                future.set_exception(error)
+        self._stdio_requests.clear()
 
     async def stream_http_request(
         self,
@@ -151,6 +157,26 @@ class BridgeSession:
             self._http_streams.pop(request_id, None)
             raise
 
+    async def stdio_request(
+        self, server_name: str, message: dict[str, Any]
+    ) -> dict[str, Any] | None:
+        if self._closed.is_set():
+            raise RuntimeError("bridge disconnected")
+        request_id = uuid.uuid4().hex
+        future: asyncio.Future[dict[str, Any] | None] = asyncio.get_running_loop().create_future()
+        self._stdio_requests[request_id] = future
+        try:
+            async with self._send_lock:
+                await self.websocket.send_json({
+                    "kind": "mcp_stdio_request",
+                    "id": request_id,
+                    "server": server_name,
+                    "message": message,
+                })
+            return await asyncio.wait_for(future, timeout=TOOL_TIMEOUT_SECONDS)
+        finally:
+            self._stdio_requests.pop(request_id, None)
+
     async def _stream_http_chunks(self, request_id: str, queue: asyncio.Queue[Any]) -> Any:
         try:
             while True:
@@ -174,10 +200,29 @@ class BridgeSession:
                     name = str(raw_name or "").strip()
                     if REMOTE_MCP_NAME_RE.fullmatch(name) and name != MCP_SERVER_NAME:
                         names.append(name)
+                        transport = item.get("transport") if isinstance(item, dict) else None
+                        self.server_transports[name] = (
+                            "stdio" if transport == "stdio" else "streamable_http"
+                        )
+            self.server_transports = {
+                name: self.server_transports.get(name, "streamable_http") for name in names
+            }
             await _sync_remote_mcp_servers(sorted(set(names)), self.relay_base_url)
             return True
 
         request_id = str(payload.get("id") or "")
+        stdio_future = self._stdio_requests.get(request_id)
+        if stdio_future is not None:
+            if kind == "mcp_stdio_response" and not stdio_future.done():
+                message = payload.get("message")
+                stdio_future.set_result(message if isinstance(message, dict) else None)
+                return True
+            if kind == "mcp_stdio_response_error" and not stdio_future.done():
+                stdio_future.set_exception(
+                    RuntimeError(str(payload.get("error") or "stdio MCP request failed"))
+                )
+                return True
+
         stream = self._http_streams.get(request_id)
         if stream is None:
             return False
@@ -242,6 +287,22 @@ class BridgeRegistry:
         if session is None:
             raise RuntimeError("bridge unavailable")
         return await session.stream_http_request(server_name, method, path, query, headers, body)
+
+    async def transport(self, server_name: str) -> str:
+        async with self._lock:
+            session = self._active
+        if session is None:
+            raise RuntimeError("bridge unavailable")
+        return session.server_transports.get(server_name, "streamable_http")
+
+    async def stdio_request(
+        self, server_name: str, message: dict[str, Any]
+    ) -> dict[str, Any] | None:
+        async with self._lock:
+            session = self._active
+        if session is None:
+            raise RuntimeError("bridge unavailable")
+        return await session.stdio_request(server_name, message)
 
 
 class RelayState:
@@ -376,6 +437,19 @@ async def _mcp_proxy_request(server_name: str, request: Request, path: str = "")
         raise HTTPException(404, "MCP server not found")
     state: RelayState = request.app.state.relay_state
     try:
+        if await state.bridge.transport(server_name) == "stdio":
+            if request.method != "POST":
+                return Response(status_code=405, headers={"Allow": "POST"})
+            try:
+                message = await request.json()
+            except json.JSONDecodeError as exc:
+                raise HTTPException(400, "invalid MCP JSON-RPC body") from exc
+            if not isinstance(message, dict):
+                raise HTTPException(400, "MCP JSON-RPC body must be an object")
+            response = await state.bridge.stdio_request(server_name, message)
+            if response is None:
+                return Response(status_code=202)
+            return JSONResponse(response)
         status, headers, stream = await state.bridge.stream_http_request(
             server_name,
             request.method,

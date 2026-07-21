@@ -66,12 +66,18 @@ def _mcp_server_response(settings: dict) -> dict:
             continue
         config = raw_config if isinstance(raw_config, dict) else {}
         raw_headers = config.get("headers") if isinstance(config.get("headers"), dict) else {}
-        servers.append({
+        item = {
             "name": str(name),
+            "transport": "stdio" if config.get("transport") == "stdio" else "streamable_http",
             "url": str(config.get("url") or ""),
             "headers": {str(key): str(value) for key, value in raw_headers.items()},
             "enabled": config.get("enabled") is not False,
-        })
+            "command": str(config.get("command") or ""),
+            "args": config.get("args") if isinstance(config.get("args"), list) else [],
+            "env": config.get("env") if isinstance(config.get("env"), dict) else {},
+            "cwd": str(config.get("cwd") or ""),
+        }
+        servers.append(item)
     return {"servers": servers}
 
 
@@ -99,15 +105,37 @@ def _mcp_servers_from_body(body: dict) -> dict:
             raise HTTPException(400, f"invalid MCP server name: {name}")
         if name in servers:
             raise HTTPException(400, f"duplicate MCP server name: {name}")
+        transport = str(item.get("transport") or "streamable_http")
+        if transport == "stdio":
+            command = str(item.get("command") or "").strip()
+            args = item.get("args")
+            env = item.get("env")
+            if not command:
+                raise HTTPException(400, f"MCP server {name} command is required")
+            if not isinstance(args, list) or not all(isinstance(arg, str) for arg in args):
+                raise HTTPException(400, f"MCP server {name} args must be a string array")
+            if not isinstance(env, dict):
+                raise HTTPException(400, f"MCP server {name} env must be an object")
+            servers[name] = {
+                "transport": "stdio",
+                "command": command,
+                "args": args,
+                "env": {str(key): str(value) for key, value in env.items()},
+                "cwd": str(item.get("cwd") or "").strip(),
+                "enabled": item.get("enabled") is not False,
+            }
+            continue
+        if transport != "streamable_http":
+            raise HTTPException(400, f"unsupported MCP transport: {transport}")
         raw_headers = item.get("headers") if isinstance(item.get("headers"), dict) else {}
-        headers = {
-            str(key).strip(): str(value)
-            for key, value in raw_headers.items()
-            if str(key).strip()
-        }
         servers[name] = {
+            "transport": "streamable_http",
             "url": _validate_mcp_url(str(item.get("url") or "")),
-            "headers": headers,
+            "headers": {
+                str(key).strip(): str(value)
+                for key, value in raw_headers.items()
+                if str(key).strip()
+            },
             "enabled": item.get("enabled") is not False,
         }
     return servers
