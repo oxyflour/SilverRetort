@@ -10,8 +10,10 @@ from urllib.parse import urlsplit, urlunsplit
 
 import httpx
 from websockets.asyncio.client import connect
+from websockets.exceptions import ConnectionClosed
 
 import local_mcp_servers
+import stdio_mcp_client
 import switch_profiles
 
 RETRY_DELAYS = (1, 2, 5)
@@ -98,7 +100,10 @@ async def _send_json(websocket: Any, send_lock: asyncio.Lock, payload: dict[str,
 
 
 async def _send_local_mcp_servers(websocket: Any, send_lock: asyncio.Lock) -> None:
-    servers = [{"name": name} for name in sorted(local_mcp_servers.load_servers())]
+    servers = [
+        {"name": name, "transport": config.get("transport", "streamable_http")}
+        for name, config in sorted(local_mcp_servers.load_servers().items())
+    ]
     await _send_json(websocket, send_lock, {"kind": "mcp_servers", "servers": servers})
 
 
@@ -120,6 +125,13 @@ async def _handle_mcp_http(payload: dict[str, Any], websocket: Any, send_lock: a
             "kind": "mcp_http_response_error",
             "id": request_id,
             "error": f"unknown local MCP server: {server_name}",
+        })
+        return
+    if server.get("transport") == "stdio":
+        await _send_json(websocket, send_lock, {
+            "kind": "mcp_http_response_error",
+            "id": request_id,
+            "error": f"stdio MCP server requires protocol forwarding: {server_name}",
         })
         return
 
@@ -165,6 +177,40 @@ async def _handle_mcp_http(payload: dict[str, Any], websocket: Any, send_lock: a
         })
 
 
+async def _handle_mcp_stdio(payload: dict[str, Any], websocket: Any, send_lock: asyncio.Lock) -> None:
+    request_id = str(payload.get("id") or "")
+    server_name = str(payload.get("server") or "")
+    server = local_mcp_servers.load_servers().get(server_name)
+    if not server or server.get("transport") != "stdio":
+        await _send_json(websocket, send_lock, {
+            "kind": "mcp_stdio_response_error",
+            "id": request_id,
+            "error": f"unknown local stdio MCP server: {server_name}",
+        })
+        return
+    message = payload.get("message")
+    if not isinstance(message, dict):
+        await _send_json(websocket, send_lock, {
+            "kind": "mcp_stdio_response_error",
+            "id": request_id,
+            "error": "invalid MCP JSON-RPC message",
+        })
+        return
+    try:
+        response = await stdio_mcp_client.registry.request(server_name, server, message)
+        await _send_json(websocket, send_lock, {
+            "kind": "mcp_stdio_response",
+            "id": request_id,
+            "message": response,
+        })
+    except Exception as exc:
+        await _send_json(websocket, send_lock, {
+            "kind": "mcp_stdio_response_error",
+            "id": request_id,
+            "error": str(exc),
+        })
+
+
 async def _bridge_forever(bridge_url: str, api_key: str) -> None:
     headers = {"Authorization": f"Bearer {api_key}"} if api_key else None
     attempt = 0
@@ -187,10 +233,20 @@ async def _bridge_forever(bridge_url: str, api_key: str) -> None:
                             continue
                         if payload.get("kind") == "mcp_http_request":
                             asyncio.create_task(_handle_mcp_http(payload, websocket, send_lock))
+                        elif payload.get("kind") == "mcp_stdio_request":
+                            asyncio.create_task(_handle_mcp_stdio(payload, websocket, send_lock))
                 finally:
                     _ACTIVE_CONNECTIONS.discard((websocket, send_lock))
         except asyncio.CancelledError:
             raise
+        except ConnectionClosed as exc:
+            if exc.code == 4409:
+                print(f"[bridge] duplicate connection ignored by {bridge_url}")
+                return
+            delay = RETRY_DELAYS[min(attempt, len(RETRY_DELAYS) - 1)]
+            attempt += 1
+            print(f"[bridge] disconnected from {bridge_url}: {exc}; retrying in {delay}s")
+            await asyncio.sleep(delay)
         except Exception as exc:
             delay = RETRY_DELAYS[min(attempt, len(RETRY_DELAYS) - 1)]
             attempt += 1
@@ -247,3 +303,4 @@ async def stop_task(task: asyncio.Task[None] | None) -> None:
 async def stop_tasks(tasks: list[asyncio.Task[None]]) -> None:
     for task in tasks:
         await stop_task(task)
+    await stdio_mcp_client.registry.close()

@@ -163,6 +163,28 @@ class WorkspaceTemplateEmptyState(ApiModel):
     suggestions: list[WorkspaceTemplateSuggestion] = Field(min_length=1, max_length=6)
 
 
+class WorkspaceTemplateWorkflowStep(ApiModel):
+    model_config = ConfigDict(
+        alias_generator=to_camel,
+        populate_by_name=True,
+        extra="forbid",
+    )
+
+    id: str = Field(min_length=1, max_length=80, pattern=r"^[a-z0-9][a-z0-9._-]*$")
+    label: str = Field(min_length=1, max_length=40)
+    prompt: str = Field(min_length=1, max_length=2000)
+
+
+class WorkspaceTemplateWorkflow(ApiModel):
+    model_config = ConfigDict(
+        alias_generator=to_camel,
+        populate_by_name=True,
+        extra="forbid",
+    )
+
+    steps: list[WorkspaceTemplateWorkflowStep] = Field(min_length=2, max_length=8)
+
+
 class WorkspaceTemplateUi(ApiModel):
     model_config = ConfigDict(
         alias_generator=to_camel,
@@ -196,6 +218,7 @@ class WorkspaceTemplate(ApiModel):
     name: str = Field(min_length=1, max_length=80)
     description: str = Field(min_length=1, max_length=500)
     empty_state: WorkspaceTemplateEmptyState
+    workflow: WorkspaceTemplateWorkflow | None = None
     ui: WorkspaceTemplateUi
     agent: WorkspaceTemplateAgent | None = None
 

@@ -8,6 +8,7 @@
 @source "../../../packages/setting-ui/src";
 @source "../../../packages/artifact-ui-demo/src";
 @source "../../../packages/template-domain-ui/src";
+@source "../../../packages/template-industrial-design/src";
 
 :root {
   --scrollbar-size: 10px;
