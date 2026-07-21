@@ -10,6 +10,7 @@ import base64
 import json
 import os
 import re
+import shlex
 import time
 import uuid
 from contextlib import asynccontextmanager
@@ -326,8 +327,11 @@ async def _proxy_request(request: Request) -> Response:
                 workspace_path = workspaces.workspace_dir(workspace_id, create=False)
                 if not workspace_path.is_dir():
                     raise HTTPException(404, "workspace not found")
+                cd_command = f"cd {shlex.quote(str(workspace_path))}"
                 suffix = (
                     f"\nHermes workspace root: {workspace_path}. "
+                    f"At the start of this agent run, before inspecting files or running any other command, run `{cd_command}`. "
+                    "Every delegated or sub-agent must run the same command as its first shell command. "
                     "Use this as the working directory for all shell and file operations; do not access paths outside it."
                 )
                 payload["instructions"] = str(payload.get("instructions") or "") + suffix
