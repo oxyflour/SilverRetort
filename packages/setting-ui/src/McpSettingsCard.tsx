@@ -6,22 +6,37 @@ import { ManagedMcpSettingsCard } from "./ManagedMcpSettingsCard";
 
 interface McpServer {
   name: string;
+  transport: "streamable_http" | "stdio";
   url: string;
   headers: Record<string, string>;
+  command: string;
+  args: string[];
+  env: Record<string, string>;
+  cwd: string;
   enabled: boolean;
 }
 
 interface McpServerForm {
   name: string;
+  transport: "streamable_http" | "stdio";
   url: string;
   headersText: string;
+  command: string;
+  argsText: string;
+  envText: string;
+  cwd: string;
   enabled: boolean;
 }
 
 const emptyServer: McpServerForm = {
   name: "",
+  transport: "streamable_http",
   url: "http://127.0.0.1:9901/mcp/",
   headersText: "{}",
+  command: "",
+  argsText: "[]",
+  envText: "{}",
+  cwd: "",
   enabled: true,
 };
 
@@ -44,27 +59,46 @@ async function putJson<T>(path: string, body: unknown): Promise<T> {
 function serverToForm(server: McpServer): McpServerForm {
   return {
     name: server.name,
+    transport: server.transport || "streamable_http",
     url: server.url,
     headersText: JSON.stringify(server.headers || {}, null, 2),
+    command: server.command || "",
+    argsText: JSON.stringify(server.args || [], null, 2),
+    envText: JSON.stringify(server.env || {}, null, 2),
+    cwd: server.cwd || "",
     enabled: server.enabled,
   };
 }
 
-function parseHeaders(text: string): Record<string, string> {
+function parseObject(text: string, label: string): Record<string, string> {
   const trimmed = text.trim();
   if (!trimmed) return {};
   const parsed = JSON.parse(trimmed) as unknown;
   if (!parsed || Array.isArray(parsed) || typeof parsed !== "object") {
-    throw new Error("Headers 必须是 JSON object。");
+    throw new Error(`${label} 必须是 JSON object。`);
   }
   return Object.fromEntries(
     Object.entries(parsed).map(([key, value]) => [key, String(value)]),
   );
 }
 
+function parseArgs(text: string): string[] {
+  const parsed = JSON.parse(text.trim() || "[]") as unknown;
+  if (!Array.isArray(parsed) || !parsed.every((item) => typeof item === "string")) {
+    throw new Error("Args 必须是 JSON string array。");
+  }
+  return parsed;
+}
+
 function validateServer(server: McpServerForm, index: number) {
   if (!/^[A-Za-z0-9_-]{1,64}$/.test(server.name.trim())) {
     throw new Error(`第 ${index + 1} 个 MCP server 名称只能包含字母、数字、_ 和 -。`);
+  }
+  if (server.transport === "stdio") {
+    if (!server.command.trim()) {
+      throw new Error(`MCP server ${server.name} 必须填写 Command。`);
+    }
+    return;
   }
   const url = new URL(server.url.trim());
   if (!["http:", "https:"].includes(url.protocol)) {
@@ -119,8 +153,13 @@ export function McpSettingsCard() {
         names.add(name);
         return {
           name,
+          transport: server.transport,
           url: server.url.trim(),
-          headers: parseHeaders(server.headersText),
+          headers: parseObject(server.headersText, "Headers"),
+          command: server.command.trim(),
+          args: parseArgs(server.argsText),
+          env: parseObject(server.envText, "Env"),
+          cwd: server.cwd.trim(),
           enabled: server.enabled,
         };
       });
@@ -148,7 +187,7 @@ export function McpSettingsCard() {
           <div>
             <p className="text-sm font-medium">本机 MCP 转发</p>
             <p className="mt-1 text-xs leading-5 text-neutral-500 dark:text-neutral-400">
-              远程 Hermes 可通过 bridge 访问这些本机 HTTP MCP server。
+              远程 Hermes 可通过 bridge 访问这些本机 HTTP 或 stdio MCP server。
             </p>
           </div>
         </div>
@@ -258,25 +297,83 @@ function McpServerRow({
           />
         </label>
         <label className="text-xs text-neutral-500 dark:text-neutral-400">
-          URL
-          <input
-            type="url"
-            value={value.url}
-            onChange={(event) => onChange({ url: event.target.value })}
-            placeholder="http://127.0.0.1:9901/mcp/"
-            className="mt-1.5 w-full rounded-lg border border-neutral-300 bg-white px-3 py-2 text-sm text-neutral-900 outline-none focus:border-neutral-500 dark:border-neutral-700 dark:bg-neutral-800 dark:text-neutral-100"
-          />
+          Transport
+          <select
+            value={value.transport}
+            onChange={(event) => onChange({
+              transport: event.target.value as McpServerForm["transport"],
+            })}
+            className="mt-1.5 w-full rounded-lg border border-neutral-300 bg-white px-3 py-2 text-sm text-neutral-900 dark:border-neutral-700 dark:bg-neutral-800 dark:text-neutral-100"
+          >
+            <option value="streamable_http">Streamable HTTP</option>
+            <option value="stdio">stdio</option>
+          </select>
         </label>
-        <label className="col-span-2 text-xs text-neutral-500 dark:text-neutral-400">
-          Headers JSON
-          <textarea
-            value={value.headersText}
-            onChange={(event) => onChange({ headersText: event.target.value })}
-            rows={3}
-            spellCheck={false}
-            className="mt-1.5 w-full resize-y rounded-lg border border-neutral-300 bg-white px-3 py-2 font-mono text-xs text-neutral-900 outline-none focus:border-neutral-500 dark:border-neutral-700 dark:bg-neutral-800 dark:text-neutral-100"
-          />
-        </label>
+        {value.transport === "streamable_http" ? (
+          <label className="text-xs text-neutral-500 dark:text-neutral-400">
+            URL
+            <input
+              type="url"
+              value={value.url}
+              onChange={(event) => onChange({ url: event.target.value })}
+              placeholder="http://127.0.0.1:9901/mcp/"
+              className="mt-1.5 w-full rounded-lg border border-neutral-300 bg-white px-3 py-2 text-sm text-neutral-900 outline-none focus:border-neutral-500 dark:border-neutral-700 dark:bg-neutral-800 dark:text-neutral-100"
+            />
+          </label>
+        ) : (
+          <label className="text-xs text-neutral-500 dark:text-neutral-400">
+            Command
+            <input
+              value={value.command}
+              onChange={(event) => onChange({ command: event.target.value })}
+              placeholder="npx"
+              className="mt-1.5 w-full rounded-lg border border-neutral-300 bg-white px-3 py-2 font-mono text-sm text-neutral-900 outline-none focus:border-neutral-500 dark:border-neutral-700 dark:bg-neutral-800 dark:text-neutral-100"
+            />
+          </label>
+        )}
+        {value.transport === "streamable_http" ? (
+          <label className="col-span-2 text-xs text-neutral-500 dark:text-neutral-400">
+            Headers JSON
+            <textarea
+              value={value.headersText}
+              onChange={(event) => onChange({ headersText: event.target.value })}
+              rows={3}
+              spellCheck={false}
+              className="mt-1.5 w-full resize-y rounded-lg border border-neutral-300 bg-white px-3 py-2 font-mono text-xs text-neutral-900 outline-none focus:border-neutral-500 dark:border-neutral-700 dark:bg-neutral-800 dark:text-neutral-100"
+            />
+          </label>
+        ) : (
+          <>
+            <label className="col-span-2 text-xs text-neutral-500 dark:text-neutral-400">
+              Args JSON
+              <textarea
+                value={value.argsText}
+                onChange={(event) => onChange({ argsText: event.target.value })}
+                rows={2}
+                spellCheck={false}
+                className="mt-1.5 w-full resize-y rounded-lg border border-neutral-300 bg-white px-3 py-2 font-mono text-xs text-neutral-900 dark:border-neutral-700 dark:bg-neutral-800 dark:text-neutral-100"
+              />
+            </label>
+            <label className="text-xs text-neutral-500 dark:text-neutral-400">
+              Working directory（可选）
+              <input
+                value={value.cwd}
+                onChange={(event) => onChange({ cwd: event.target.value })}
+                className="mt-1.5 w-full rounded-lg border border-neutral-300 bg-white px-3 py-2 font-mono text-xs text-neutral-900 dark:border-neutral-700 dark:bg-neutral-800 dark:text-neutral-100"
+              />
+            </label>
+            <label className="text-xs text-neutral-500 dark:text-neutral-400">
+              Env JSON
+              <textarea
+                value={value.envText}
+                onChange={(event) => onChange({ envText: event.target.value })}
+                rows={2}
+                spellCheck={false}
+                className="mt-1.5 w-full resize-y rounded-lg border border-neutral-300 bg-white px-3 py-2 font-mono text-xs text-neutral-900 dark:border-neutral-700 dark:bg-neutral-800 dark:text-neutral-100"
+              />
+            </label>
+          </>
+        )}
       </div>
     </div>
   );
