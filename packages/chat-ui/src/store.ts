@@ -428,6 +428,7 @@ export const useChatStore = create<ChatState>((set, get) => {
     hermesControlsAvailable: true,
 
     refreshSessions: async () => {
+      const initialLoad = get().workspaces.length === 0;
       const [workspaces, sessions, workspaceTemplates] = await Promise.all([
         get().client.listWorkspaces(),
         get().client.listSessions(),
@@ -435,7 +436,19 @@ export const useChatStore = create<ChatState>((set, get) => {
       ]);
       const switchProfiles = await get().client.listSwitchProfiles().catch(() => []);
       const currentWorkspaceId = get().currentWorkspaceId ?? workspaces[0]?.id ?? null;
-      set({ workspaces, workspaceTemplates, switchProfiles, sessions, currentWorkspaceId });
+      const collapsedWorkspaceIds = initialLoad
+        ? workspaces.slice(1).map((workspace) => workspace.id)
+        : get().collapsedWorkspaceIds.filter((id) =>
+            workspaces.some((workspace) => workspace.id === id),
+          );
+      set({
+        workspaces,
+        workspaceTemplates,
+        switchProfiles,
+        sessions,
+        currentWorkspaceId,
+        collapsedWorkspaceIds,
+      });
       void get().refreshHermesControls();
       if (!get().currentSessionId && sessions.length > 0) {
         const first = sessions.find((session) => session.workspaceId === currentWorkspaceId) ?? sessions[0];
