@@ -260,13 +260,12 @@ class BridgeRegistry:
         self._active: BridgeSession | None = None
         self._lock = asyncio.Lock()
 
-    async def attach(self, session: BridgeSession) -> None:
-        previous: BridgeSession | None
+    async def attach(self, session: BridgeSession) -> bool:
         async with self._lock:
-            previous = self._active
+            if self._active is not None:
+                return False
             self._active = session
-        if previous is not None:
-            await previous.close()
+            return True
 
     async def detach(self, session: BridgeSession) -> None:
         async with self._lock:
@@ -423,7 +422,9 @@ async def _bridge_endpoint(websocket: WebSocket) -> None:
     await websocket.accept()
     state: RelayState = app.state.relay_state
     session = BridgeSession(websocket, state.relay_base_url)
-    await state.bridge.attach(session)
+    if not await state.bridge.attach(session):
+        await websocket.close(code=4409, reason="bridge already connected")
+        return
     try:
         await session.run()
     finally:

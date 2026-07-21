@@ -10,6 +10,7 @@ from urllib.parse import urlsplit, urlunsplit
 
 import httpx
 from websockets.asyncio.client import connect
+from websockets.exceptions import ConnectionClosed
 
 import local_mcp_servers
 import stdio_mcp_client
@@ -238,6 +239,14 @@ async def _bridge_forever(bridge_url: str, api_key: str) -> None:
                     _ACTIVE_CONNECTIONS.discard((websocket, send_lock))
         except asyncio.CancelledError:
             raise
+        except ConnectionClosed as exc:
+            if exc.code == 4409:
+                print(f"[bridge] duplicate connection ignored by {bridge_url}")
+                return
+            delay = RETRY_DELAYS[min(attempt, len(RETRY_DELAYS) - 1)]
+            attempt += 1
+            print(f"[bridge] disconnected from {bridge_url}: {exc}; retrying in {delay}s")
+            await asyncio.sleep(delay)
         except Exception as exc:
             delay = RETRY_DELAYS[min(attempt, len(RETRY_DELAYS) - 1)]
             attempt += 1
