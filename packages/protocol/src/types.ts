@@ -134,6 +134,15 @@ export type WorkspaceTemplateSuggestion = z.infer<
   typeof WorkspaceTemplateSuggestionSchema
 >;
 
+export const WorkspaceTemplateWorkflowStepSchema = z.object({
+  id: z.string().regex(/^[a-z0-9][a-z0-9._-]*$/),
+  label: z.string().min(1).max(40),
+  prompt: z.string().min(1).max(2000),
+}).strict();
+export type WorkspaceTemplateWorkflowStep = z.infer<
+  typeof WorkspaceTemplateWorkflowStepSchema
+>;
+
 export const WorkspaceTemplateSchema = z.object({
   version: z.literal(1),
   id: z.string().regex(/^[a-z0-9][a-z0-9._-]*$/),
@@ -144,6 +153,9 @@ export const WorkspaceTemplateSchema = z.object({
     description: z.string().min(1).max(500),
     suggestions: z.array(WorkspaceTemplateSuggestionSchema).min(1).max(6),
   }).strict(),
+  workflow: z.object({
+    steps: z.array(WorkspaceTemplateWorkflowStepSchema).min(2).max(8),
+  }).strict().optional(),
   ui: z.object({
     module: z.string().regex(/^[a-z0-9][a-z0-9._-]*$/),
   }).strict(),
