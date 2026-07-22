@@ -1,7 +1,17 @@
 "use client";
 
 import { useMemo, useState } from "react";
-import { ArrowUpRight, Bot, Clock, Package, Terminal } from "lucide-react";
+import {
+  ArrowUpRight,
+  Bot,
+  Check,
+  Clock,
+  Copy,
+  LoaderCircle,
+  Package,
+  Square,
+  Terminal,
+} from "lucide-react";
 import type {
   Artifact,
   HermesAsyncDelegation,
@@ -80,8 +90,35 @@ function IconBadgeButton({
   );
 }
 
-function ProcessRow({ process }: { process: HermesBackgroundProcess }) {
+function ProcessRow({
+  process,
+  onStop,
+}: {
+  process: HermesBackgroundProcess;
+  onStop: (processId: string) => Promise<void>;
+}) {
+  const [copied, setCopied] = useState(false);
+  const [stopping, setStopping] = useState(false);
+  const [stopError, setStopError] = useState("");
   const preview = process.outputPreview.trim();
+
+  const copyCommand = async () => {
+    await navigator.clipboard.writeText(process.command);
+    setCopied(true);
+    window.setTimeout(() => setCopied(false), 1500);
+  };
+
+  const stopProcess = async () => {
+    setStopping(true);
+    setStopError("");
+    try {
+      await onStop(process.sessionId);
+    } catch (error) {
+      setStopError(error instanceof Error ? error.message : "停止进程失败");
+    } finally {
+      setStopping(false);
+    }
+  };
 
   return (
     <div className="border-t border-neutral-200 px-3 py-2 first:border-t-0 dark:border-neutral-700">
@@ -90,9 +127,38 @@ function ProcessRow({ process }: { process: HermesBackgroundProcess }) {
           aria-hidden="true"
           className={`h-2 w-2 shrink-0 rounded-full ${statusClassName(process)}`}
         />
-        <span className="min-w-0 flex-1 truncate font-mono text-[11px]">
+        <span
+          title={process.command || process.sessionId}
+          className="min-w-0 flex-1 truncate font-mono text-[11px]"
+        >
           {processLabel(process)}
         </span>
+        {process.command && (
+          <button
+            type="button"
+            title={copied ? "已复制" : "复制命令"}
+            aria-label={copied ? "已复制命令" : "复制命令"}
+            onClick={() => void copyCommand()}
+            className="shrink-0 rounded p-1 text-neutral-400 hover:bg-neutral-100 hover:text-neutral-900 dark:hover:bg-neutral-800 dark:hover:text-neutral-100"
+          >
+            <AppIcon icon={copied ? Check : Copy} className="h-3.5 w-3.5" />
+          </button>
+        )}
+        {process.status === "running" && (
+          <button
+            type="button"
+            title={stopping ? "正在停止" : "停止进程"}
+            aria-label={stopping ? "正在停止进程" : "停止进程"}
+            disabled={stopping}
+            onClick={() => void stopProcess()}
+            className="shrink-0 rounded p-1 text-neutral-400 hover:bg-red-50 hover:text-red-600 disabled:cursor-wait disabled:opacity-60 dark:hover:bg-red-950/40 dark:hover:text-red-400"
+          >
+            <AppIcon
+              icon={stopping ? LoaderCircle : Square}
+              className={`h-3.5 w-3.5 ${stopping ? "animate-spin" : ""}`}
+            />
+          </button>
+        )}
         <span className="shrink-0 text-[11px] text-neutral-500">
           {process.status}
           {process.status === "exited" && process.exitCode != null
@@ -109,6 +175,11 @@ function ProcessRow({ process }: { process: HermesBackgroundProcess }) {
         <pre className="mt-2 max-h-20 overflow-auto whitespace-pre-wrap break-words rounded bg-neutral-100 px-2 py-1 font-mono text-[11px] text-neutral-600 dark:bg-neutral-950/60 dark:text-neutral-300">
           {preview}
         </pre>
+      )}
+      {stopError && (
+        <div className="mt-1 text-[11px] text-red-600 dark:text-red-400">
+          {stopError}
+        </div>
       )}
     </div>
   );
@@ -178,6 +249,11 @@ function ArtifactRow({
 
 export function ToolbarActivityMenu({ artifacts }: { artifacts: Artifact[] }) {
   const runtime = useChatStore((state) => state.hermesRuntime);
+  const client = useChatStore((state) => state.client);
+  const currentSessionId = useChatStore((state) => state.currentSessionId);
+  const refreshHermesRuntime = useChatStore(
+    (state) => state.refreshHermesRuntime,
+  );
   const openArtifact = useChatStore((state) => state.openArtifact);
   const [activePanel, setActivePanel] = useState<PanelKind | null>(null);
   const processes = useMemo(
@@ -221,6 +297,13 @@ export function ToolbarActivityMenu({ artifacts }: { artifacts: Artifact[] }) {
       ? "Background processes"
       : "Background subagents";
   const panelOpen = activeArtifacts || activeProcesses || activeDelegations;
+  const stopProcess = async (processId: string) => {
+    if (!currentSessionId) {
+      throw new Error("当前会话不可用");
+    }
+    await client.stopHermesProcess(currentSessionId, processId);
+    await refreshHermesRuntime(currentSessionId);
+  };
 
   return (
     <div className="relative z-20 flex h-12 items-center bg-white pr-3 text-neutral-900 dark:bg-neutral-900 dark:text-neutral-100">
@@ -283,7 +366,11 @@ export function ToolbarActivityMenu({ artifacts }: { artifacts: Artifact[] }) {
             ))}
           {activeProcesses &&
             processes.map((process) => (
-              <ProcessRow key={process.sessionId} process={process} />
+              <ProcessRow
+                key={process.sessionId}
+                process={process}
+                onStop={stopProcess}
+              />
             ))}
           {activeDelegations &&
             delegations.map((delegation) => (

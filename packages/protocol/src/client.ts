@@ -132,6 +132,14 @@ export class ApiClient {
     return this.request(HermesRuntimeResponseSchema, `/api/hermes/runtime${query}`);
   }
 
+  async stopHermesProcess(sessionId: string, processId: string): Promise<void> {
+    await this.request(
+      z.object({ ok: z.boolean() }),
+      `/api/hermes/processes/${encodeURIComponent(processId)}?sessionId=${encodeURIComponent(sessionId)}`,
+      { method: "DELETE" },
+    );
+  }
+
   getDefaultModel(): Promise<SessionModel> {
     return this.request(SessionModelSchema, "/api/hermes/default-model");
   }
