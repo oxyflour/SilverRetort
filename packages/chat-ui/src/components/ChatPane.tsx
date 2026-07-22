@@ -4,7 +4,6 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { useChatStore } from "../store";
 import { MessageView } from "./MessageView";
 import { ChatInput } from "./ChatInput";
-import { HermesProcessFloat } from "./HermesProcessFloat";
 import { ChatPaneToolbarSlot, EmptySessionSlot } from "../templateSlots";
 
 export function ChatPane() {
@@ -13,7 +12,6 @@ export function ChatPane() {
     s.currentSessionId ? s.buckets[s.currentSessionId] : undefined,
   );
   const artifacts = useChatStore((s) => s.artifacts);
-  const hermesRuntime = useChatStore((s) => s.hermesRuntime);
   const currentWorkspace = useChatStore((s) =>
     s.workspaces.find((workspace) => workspace.id === s.currentWorkspaceId),
   );
@@ -111,11 +109,6 @@ export function ChatPane() {
   ]);
   const firstRenderedIndex = Math.max(0, totalMessages - renderedCount);
   const renderedMessages = bucket?.messages.slice(firstRenderedIndex) ?? [];
-  const hasHermesFloat =
-    (hermesRuntime?.backgroundProcessCount ?? 0) > 0 ||
-    (hermesRuntime?.asyncDelegationCount ?? 0) > 0 ||
-    (hermesRuntime?.backgroundProcesses.length ?? 0) > 0 ||
-    (hermesRuntime?.asyncDelegations.length ?? 0) > 0;
   const sessionArtifacts = Object.values(artifacts).filter(
     (artifact) => artifact.sessionId === currentSessionId,
   );
@@ -153,9 +146,6 @@ export function ChatPane() {
           }}
           className="h-full overflow-y-auto"
         >
-          {hasHermesFloat && (bucket?.messages.length ?? 0) > 0 && (
-            <div aria-hidden="true" className="h-12" />
-          )}
           {!currentSessionId || (bucket?.messages.length ?? 0) === 0 ? (
             <EmptySessionSlot
               hasSession={Boolean(currentSessionId)}
@@ -179,7 +169,6 @@ export function ChatPane() {
             </div>
           )}
         </div>
-        <HermesProcessFloat />
       </div>
       <ChatInput
         text={currentSessionId ? drafts[currentSessionId] ?? "" : ""}

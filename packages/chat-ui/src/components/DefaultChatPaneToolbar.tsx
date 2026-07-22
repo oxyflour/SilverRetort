@@ -20,17 +20,15 @@ interface DefaultChatPaneToolbarProps {
 function currentStatus({
   running,
   messages,
-  artifacts,
-}: Pick<DefaultChatPaneToolbarProps, "running" | "messages" | "artifacts">) {
+}: Pick<DefaultChatPaneToolbarProps, "running" | "messages">) {
   if (running) return "处理中";
-  if (artifacts.length > 0) return `${artifacts.length} 项产物`;
   if (messages.length > 0) return "进行中";
   return "待开始";
 }
 
 export function DefaultChatPaneToolbar(props: DefaultChatPaneToolbarProps) {
   return (
-    <header className="flex h-12 shrink-0 items-center gap-3 border-b border-neutral-200 bg-white px-4 dark:border-neutral-800 dark:bg-neutral-900">
+    <header className="flex h-12 min-w-0 items-center gap-3 bg-white px-4 dark:bg-neutral-900">
       <AppIcon icon={FolderKanban} className="h-4 w-4 shrink-0 text-neutral-500" />
       <span className="truncate text-sm font-semibold">{props.workspace.name}</span>
       {props.template && (
@@ -43,13 +41,15 @@ export function DefaultChatPaneToolbar(props: DefaultChatPaneToolbarProps) {
           {props.session.title}
         </span>
       )}
-      <span className="ml-auto inline-flex shrink-0 items-center gap-1.5 text-xs text-neutral-500">
-        <AppIcon
-          icon={Activity}
-          className={`h-3.5 w-3.5 ${props.running ? "animate-pulse text-emerald-600" : ""}`}
-        />
-        {currentStatus(props)}
-      </span>
+      {props.template && (
+        <span className="ml-auto inline-flex shrink-0 items-center gap-1.5 text-xs text-neutral-500">
+          <AppIcon
+            icon={Activity}
+            className={`h-3.5 w-3.5 ${props.running ? "animate-pulse text-emerald-600" : ""}`}
+          />
+          {currentStatus(props)}
+        </span>
+      )}
     </header>
   );
 }

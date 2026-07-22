@@ -1,15 +1,17 @@
 "use client";
 
 import { useMemo, useState } from "react";
-import { Bot, Clock, Terminal } from "lucide-react";
+import { ArrowUpRight, Bot, Clock, Package, Terminal } from "lucide-react";
 import type {
+  Artifact,
   HermesAsyncDelegation,
   HermesBackgroundProcess,
 } from "silverretort-protocol";
 import { useChatStore } from "../store";
 import { AppIcon } from "./icons";
+import { ToolbarIconBadge } from "./ToolbarIconBadge";
 
-type PanelKind = "processes" | "delegations";
+type PanelKind = "artifacts" | "processes" | "delegations";
 
 function formatUptime(seconds: number): string {
   const safeSeconds = Math.max(0, Math.floor(seconds));
@@ -23,10 +25,6 @@ function formatUptime(seconds: number): string {
   const hours = Math.floor(minutes / 60);
   const remainingMinutes = minutes % 60;
   return remainingMinutes ? `${hours}h ${remainingMinutes}m` : `${hours}h`;
-}
-
-function formatBadgeCount(count: number): string {
-  return count > 99 ? "99+" : `${count}`;
 }
 
 function processLabel(process: HermesBackgroundProcess): string {
@@ -77,10 +75,7 @@ function IconBadgeButton({
         active ? "bg-neutral-100 text-neutral-900 dark:bg-neutral-800 dark:text-neutral-100" : ""
       }`}
     >
-      <AppIcon icon={icon} className="h-4 w-4" />
-      <span className="absolute -right-1 -top-1 min-w-4 rounded-full border border-white bg-neutral-900 px-1 text-center text-[10px] font-medium leading-4 text-white tabular-nums dark:border-neutral-900 dark:bg-neutral-100 dark:text-neutral-900">
-        {formatBadgeCount(count)}
-      </span>
+      <ToolbarIconBadge icon={icon} count={count} />
     </button>
   );
 }
@@ -154,8 +149,36 @@ function DelegationRow({ delegation }: { delegation: HermesAsyncDelegation }) {
   );
 }
 
-export function HermesProcessFloat() {
+function ArtifactRow({
+  artifact,
+  onOpen,
+}: {
+  artifact: Artifact;
+  onOpen: () => void;
+}) {
+  return (
+    <button
+      type="button"
+      title={artifact.title}
+      onClick={onOpen}
+      className="flex w-full items-center gap-2 border-t border-neutral-200 px-3 py-2 text-left text-xs hover:bg-neutral-100 dark:border-neutral-700 dark:hover:bg-neutral-800"
+    >
+      <AppIcon
+        icon={Package}
+        className="h-3.5 w-3.5 shrink-0 text-neutral-400"
+      />
+      <span className="min-w-0 flex-1 truncate">{artifact.title}</span>
+      <AppIcon
+        icon={ArrowUpRight}
+        className="h-3.5 w-3.5 shrink-0 text-neutral-400"
+      />
+    </button>
+  );
+}
+
+export function ToolbarActivityMenu({ artifacts }: { artifacts: Artifact[] }) {
   const runtime = useChatStore((state) => state.hermesRuntime);
+  const openArtifact = useChatStore((state) => state.openArtifact);
   const [activePanel, setActivePanel] = useState<PanelKind | null>(null);
   const processes = useMemo(
     () => runtime?.backgroundProcesses ?? [],
@@ -182,67 +205,92 @@ export function HermesProcessFloat() {
       : Math.max(delegations.length, runtime?.asyncDelegationCount ?? 0);
   const showProcesses = processCount > 0;
   const showDelegations = delegationCount > 0;
+  const showArtifacts = artifacts.length > 0;
 
-  if (!showProcesses && !showDelegations) {
+  if (!showArtifacts && !showProcesses && !showDelegations) {
     return null;
   }
 
+  const activeArtifacts = activePanel === "artifacts";
   const activeProcesses = activePanel === "processes" && processes.length > 0;
   const activeDelegations =
     activePanel === "delegations" && delegations.length > 0;
+  const panelTitle = activeArtifacts
+    ? "产物"
+    : activeProcesses
+      ? "Background processes"
+      : "Background subagents";
+  const panelOpen = activeArtifacts || activeProcesses || activeDelegations;
 
   return (
-    <div className="pointer-events-none absolute left-3 top-3 z-20 max-w-[min(22rem,calc(100%-1.5rem))]">
-      <div className="pointer-events-auto flex flex-col items-start gap-1 text-neutral-900 dark:text-neutral-100">
-        <div className="flex gap-1 rounded-md border border-neutral-200 bg-white/95 p-1 shadow-lg backdrop-blur dark:border-neutral-700 dark:bg-neutral-900/95">
-          {showProcesses && (
-            <IconBadgeButton
-              active={activeProcesses}
-              count={processCount}
-              icon={Terminal}
-              title="Hermes background processes"
-              onClick={() =>
-                setActivePanel((value) =>
-                  value === "processes" ? null : "processes",
-                )
-              }
-            />
-          )}
-          {showDelegations && (
-            <IconBadgeButton
-              active={activeDelegations}
-              count={delegationCount}
-              icon={Bot}
-              title="Hermes background subagents"
-              onClick={() =>
-                setActivePanel((value) =>
-                  value === "delegations" ? null : "delegations",
-                )
-              }
-            />
-          )}
-        </div>
-        {activeProcesses && (
-          <div className="max-h-80 w-[min(22rem,calc(100vw-1.5rem))] overflow-auto rounded-md border border-neutral-200 bg-white/95 text-neutral-900 shadow-lg backdrop-blur dark:border-neutral-700 dark:bg-neutral-900/95 dark:text-neutral-100">
-            <div className="px-3 py-2 text-xs font-medium text-neutral-500">
-              Background processes
-            </div>
-            {processes.map((process) => (
-              <ProcessRow key={process.sessionId} process={process} />
-            ))}
-          </div>
+    <div className="relative z-20 flex h-12 items-center bg-white pr-3 text-neutral-900 dark:bg-neutral-900 dark:text-neutral-100">
+      <div className="flex gap-1">
+        {showArtifacts && (
+          <IconBadgeButton
+            active={activeArtifacts}
+            count={artifacts.length}
+            icon={Package}
+            title={`${artifacts.length} 项产物`}
+            onClick={() =>
+              setActivePanel((value) =>
+                value === "artifacts" ? null : "artifacts",
+              )
+            }
+          />
         )}
-        {activeDelegations && (
-          <div className="max-h-80 w-[min(22rem,calc(100vw-1.5rem))] overflow-auto rounded-md border border-neutral-200 bg-white/95 text-neutral-900 shadow-lg backdrop-blur dark:border-neutral-700 dark:bg-neutral-900/95 dark:text-neutral-100">
-            <div className="px-3 py-2 text-xs font-medium text-neutral-500">
-              Background subagents
-            </div>
-            {delegations.map((delegation) => (
-              <DelegationRow key={delegation.id} delegation={delegation} />
-            ))}
-          </div>
+        {showProcesses && (
+          <IconBadgeButton
+            active={activeProcesses}
+            count={processCount}
+            icon={Terminal}
+            title="Hermes background processes"
+            onClick={() =>
+              setActivePanel((value) =>
+                value === "processes" ? null : "processes",
+              )
+            }
+          />
+        )}
+        {showDelegations && (
+          <IconBadgeButton
+            active={activeDelegations}
+            count={delegationCount}
+            icon={Bot}
+            title="Hermes background subagents"
+            onClick={() =>
+              setActivePanel((value) =>
+                value === "delegations" ? null : "delegations",
+              )
+            }
+          />
         )}
       </div>
+      {panelOpen && (
+        <div className="absolute right-3 top-full mt-1 max-h-80 w-[min(22rem,calc(100vw-1.5rem))] overflow-auto rounded-md border border-neutral-200 bg-white/95 text-neutral-900 shadow-lg backdrop-blur dark:border-neutral-700 dark:bg-neutral-900/95 dark:text-neutral-100">
+          <div className="px-3 py-2 text-xs font-medium text-neutral-500">
+            {panelTitle}
+          </div>
+          {activeArtifacts &&
+            artifacts.map((artifact) => (
+              <ArtifactRow
+                key={artifact.id}
+                artifact={artifact}
+                onOpen={() => {
+                  openArtifact(artifact.id, artifact.sessionId);
+                  setActivePanel(null);
+                }}
+              />
+            ))}
+          {activeProcesses &&
+            processes.map((process) => (
+              <ProcessRow key={process.sessionId} process={process} />
+            ))}
+          {activeDelegations &&
+            delegations.map((delegation) => (
+              <DelegationRow key={delegation.id} delegation={delegation} />
+            ))}
+        </div>
+      )}
     </div>
   );
 }

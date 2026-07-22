@@ -19,7 +19,7 @@ export function DomainDesignToolbar(props: ChatPaneToolbarProps) {
     : 0;
 
   return (
-    <header className="flex h-12 shrink-0 items-center gap-3 border-b border-neutral-200 bg-white px-4 dark:border-neutral-800 dark:bg-neutral-900">
+    <header className="flex h-12 min-w-0 items-center gap-3 bg-white px-4 dark:bg-neutral-900">
       <div className="flex min-w-0 items-center gap-2">
         <Boxes className="h-4 w-4 shrink-0 text-emerald-600" />
         <span className="truncate text-sm font-semibold">{props.template.name}</span>
