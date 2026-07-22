@@ -1,0 +1,13 @@
+{
+  "name": "lerobot-visualize-skill",
+  "private": true,
+  "scripts": {
+    "build": "node scripts/build.mjs"
+  },
+  "dependencies": {
+    "three": "^0.178.0"
+  },
+  "devDependencies": {
+    "esbuild": "^0.25.0"
+  }
+}

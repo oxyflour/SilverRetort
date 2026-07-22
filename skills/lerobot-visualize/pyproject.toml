@@ -1,0 +1,9 @@
+[project]
+name = "lerobot-visualize-skill"
+version = "0.1.0"
+description = "USD collision exporter for the LeRobot Three.js visualizer"
+requires-python = ">=3.10,<3.13"
+dependencies = ["usd-core>=24.11,<26"]
+
+[tool.uv]
+package = false
