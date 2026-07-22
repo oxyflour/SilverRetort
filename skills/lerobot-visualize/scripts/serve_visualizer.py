@@ -90,7 +90,7 @@ def main() -> int:
             transforms.append({"frame": frame_name(value.child_frame_id), "translation":[p.x,p.y,p.z], "rotation":[q.x,q.y,q.z,q.w]})
         stamp = msg.transforms[0].header.stamp if msg.transforms else None
         broadcast({"stamp": None if stamp is None else f"{stamp.sec}.{stamp.nanosec:09d}", "transforms":transforms})
-    node.create_subscription(TFMessage, args.tf_topic, on_tf, 10)
+    tf_subscription = node.create_subscription(TFMessage, args.tf_topic, on_tf, 10)
     server=ThreadingHTTPServer((args.host,args.port),make_handler(assets,args.collision.resolve())); threading.Thread(target=server.serve_forever,daemon=True).start()
     print(f"Viewer: http://{args.host}:{args.port}")
     stopping=False
