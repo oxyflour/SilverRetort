@@ -7,6 +7,13 @@ description: Export USD collision geometry and display it in a local Three.js vi
 
 Render only physics collision shapes in a browser. Keep the viewer local: the ROS bridge binds to loopback by default and does not modify the source USD.
 
+## Windows launcher rule
+
+- Start every LeRobot workflow through a supplied `.ps1` launcher. Invoke that launcher from PowerShell; do not invoke the underlying Python, ROS 2, Kit, or UV entry point directly from Git Bash.
+- Define every semantic argument beginning with `/` or `--/` inside the `.ps1` file. This includes `/tf`, `/clock`, `/lerobot/...`, `/World/...`, and Kit `--/exts/...` settings. Do not expose these values as Git Bash command-line arguments.
+- Treat Windows filesystem paths as launcher parameters. Quoting does not stop MSYS path expansion, so never rely on quoting or `MSYS2_ARG_CONV_EXCL` as a workaround.
+- When a required launcher does not exist, add or update a `.ps1` launcher instead of documenting a direct command.
+
 ## Prerequisites
 
 - Verify the USD scene exists.
@@ -19,8 +26,8 @@ Render only physics collision shapes in a browser. Keep the viewer local: the RO
 Export active USD prims with `PhysicsCollisionAPI`. The exporter converts stage units to meters, triangulates mesh faces, and stores every shape relative to its nearest rigid body so incoming world poses can drive it.
 
 ```powershell
-uv run python scripts\export_collision.py `
-  "C:\path\robot.usd" "C:\path\robot.collision.json"
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File scripts\run_visualize.ps1 `
+  -Export -Usd "C:\path\robot.usd" -Output "C:\path\robot.collision.json"
 ```
 
 Re-export after changing collision geometry, articulation roots, rigid-body names, or stage units. Do not use render meshes as collision substitutes.
@@ -30,10 +37,11 @@ Re-export after changing collision geometry, articulation roots, rigid-body name
 Start `lerobot-serve` first, then run the viewer in a shell with the same `ROS_DOMAIN_ID`:
 
 ```powershell
-python scripts\serve_visualizer.py "C:\path\robot.collision.json"
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File scripts\run_visualize.ps1 `
+  -Collision "C:\path\robot.collision.json"
 ```
 
-Open `http://127.0.0.1:8765`. Override `--tf-topic` only when the serving bridge publishes poses somewhere other than `/tf`. Use `--port` to avoid a local conflict. Do not expose `--host 0.0.0.0` unless the user explicitly requests network access.
+Open `http://127.0.0.1:8765`. The launcher owns the `/tf` topic string. Use `-Port` to avoid a local conflict. Keep the default loopback host unless the user explicitly requests network access; update the launcher rather than passing a slash-prefixed topic at the shell.
 
 ## Pose contract
 
@@ -43,7 +51,7 @@ Open `http://127.0.0.1:8765`. Override `--tf-topic` only when the serving bridge
 - Leave static collision geometry at its authored world transform.
 - Ignore TF frames that have no exported collision shape; never guess a fuzzy match.
 
-When geometry is offset, compare the exported frame names with `ros2 topic echo /tf --once`. Re-export after correcting USD rigid-body ownership rather than adding viewer-specific offsets.
+When geometry is offset, use the viewer link count and `lerobot-render`'s `scripts/check_render.ps1` launcher to inspect `/tf`, then compare the exported frame names. Re-export after correcting USD rigid-body ownership rather than adding viewer-specific offsets.
 
 ## Validate
 

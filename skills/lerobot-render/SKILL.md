@@ -7,12 +7,12 @@ description: Render multiple USD camera sensors from ROS 2 TF poses with the omn
 
 Use `omni.hydra.rtx` in Omniverse Kit; never import or launch Isaac Sim. Keep ROS and Kit in separate processes because their Python ABIs can differ.
 
-## Windows shell safety
+## Windows launcher rule
 
-- Treat ROS names, USD prim paths, and Kit settings that begin with `/` or `--/` as semantic values, not filesystem paths.
-- Run this skill's command blocks in PowerShell. Prefer `scripts\run_render.ps1` and omit slash-prefixed options when their defaults are sufficient so the launcher constructs and forwards those values outside Git Bash.
-- Never pass slash-prefixed semantic values directly from Git Bash to a Windows-native executable because MSYS rewrites them as Windows paths; quoting does not prevent this conversion.
-- If a direct Git Bash invocation is unavoidable, set `MSYS2_ARG_CONV_EXCL='*'` for that command only and pass actual filesystem paths in Windows form. Never change `/lerobot`, `/tf`, `/World/...`, or `--/exts/...` to work around shell conversion.
+- Start every LeRobot workflow through a supplied `.ps1` launcher. Invoke that launcher from PowerShell; do not invoke the underlying Python, ROS 2, Kit, or UV entry point directly from Git Bash.
+- Define every semantic argument beginning with `/` or `--/` inside the `.ps1` file. This includes `/tf`, `/clock`, `/lerobot/...`, `/World/...`, and Kit `--/exts/...` settings. Do not expose these values as Git Bash command-line arguments.
+- Treat Windows filesystem paths as launcher parameters. Quoting does not stop MSYS path expansion, so never rely on quoting or `MSYS2_ARG_CONV_EXCL` as a workaround.
+- When a required launcher does not exist, add or update a `.ps1` launcher instead of documenting a direct command.
 
 ## Prerequisites
 
@@ -66,13 +66,10 @@ Preserve authored non-pose transforms when applying TF overrides, especially `xf
 
 ## Verification
 
-Verify the input and output independently from PowerShell, not Git Bash:
+Verify the input and output with the supplied PowerShell launcher. It owns the `/tf` and `/lerobot/render/...` topic strings:
 
 ```powershell
-ros2 topic echo /tf --once
-ros2 topic list | Select-String "/lerobot/render/.*/image_raw"
-ros2 topic hz /lerobot/render/front/image_raw
-ros2 topic info /lerobot/render/front/image_raw --verbose
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File scripts\check_render.ps1 -Sensor "front"
 ```
 
 Expect the first RTX launch to spend time compiling shaders. Treat a missing `kit.exe`, unavailable `omni.hydra.rtx`, explicitly invalid camera prim, or ambiguous link name as a hard startup error.

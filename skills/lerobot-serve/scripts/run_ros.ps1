@@ -4,12 +4,14 @@ param(
     [string]$RosRoot = "C:\Programs\ros2-windows",
     [string]$RosPython = $env:ROS_PYTHON,
     [string]$Articulation = "/World/**",
+    [string]$Namespace = "/lerobot",
     [double]$Fps = 60.0,
     [ValidateSet("cpu", "gpu")]
     [string]$Device = "cpu",
     [ValidateSet("", "moz01")]
     [string]$ControlProfile = "",
     [switch]$LockRoot,
+    [switch]$Inspect,
     [switch]$CheckOnly
 )
 
@@ -71,8 +73,9 @@ if ($CheckOnly) {
 }
 
 $Serve = Join-Path $PSScriptRoot "serve.py"
-$Arguments = @($Serve, $Usd, "--articulation", $Articulation, "--fps", $Fps, "--device", $Device)
+$Arguments = @($Serve, $Usd, "--articulation", $Articulation, "--namespace", $Namespace, "--fps", $Fps, "--device", $Device)
 if ($LockRoot) { $Arguments += "--lock-root" }
+if ($Inspect) { $Arguments += "--inspect" }
 if ($ControlProfile) { $Arguments += @("--control-profile", $ControlProfile) }
 & $RosPython @Arguments
 exit $LASTEXITCODE

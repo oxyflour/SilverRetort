@@ -7,12 +7,12 @@ description: Evaluate a trained LeRobot policy on an ovphysx virtual robot over 
 
 Run a pretrained LeRobot policy against the ROS contract from `lerobot-serve` and optionally `lerobot-render`. Keep evaluation independent of project-specific code and LeRobot built-in Gym environments.
 
-## Windows shell safety
+## Windows launcher rule
 
-- Treat ROS names, USD prim paths, and Kit settings that begin with `/` or `--/` as semantic values, not filesystem paths.
-- Run this skill's command blocks in PowerShell. Prefer the supplied `.ps1` launchers and omit slash-prefixed options when their defaults are sufficient so the launcher constructs and forwards those values outside Git Bash.
-- Never pass slash-prefixed semantic values directly from Git Bash to a Windows-native executable because MSYS rewrites them as Windows paths; quoting does not prevent this conversion.
-- If a direct Git Bash invocation is unavoidable, set `MSYS2_ARG_CONV_EXCL='*'` for that command only and pass actual filesystem paths in Windows form. Never change `/lerobot`, `/tf`, `/World/...`, or `--/exts/...` to work around shell conversion.
+- Start every LeRobot workflow through a supplied `.ps1` launcher. Invoke that launcher from PowerShell; do not invoke the underlying Python, ROS 2, Kit, or UV entry point directly from Git Bash.
+- Define every semantic argument beginning with `/` or `--/` inside the `.ps1` file. This includes `/tf`, `/clock`, `/lerobot/...`, `/World/...`, and Kit `--/exts/...` settings. Do not expose these values as Git Bash command-line arguments.
+- Treat Windows filesystem paths as launcher parameters. Quoting does not stop MSYS path expansion, so never rely on quoting or `MSYS2_ARG_CONV_EXCL` as a workaround.
+- When a required launcher does not exist, add or update a `.ps1` launcher instead of documenting a direct command.
 
 ## Prepare
 
@@ -25,8 +25,9 @@ The launcher sources `C:\Programs\ros2-windows\setup.bat` and reuses its existin
 
 ## Run evaluation
 
+Run `uv sync` once when provisioning the skill, then launch only through PowerShell:
+
 ```powershell
-uv sync
 powershell.exe -NoProfile -ExecutionPolicy Bypass -File scripts\run_rollout.ps1 `
   -Model "C:\models\random-to-goal\pretrained_model" `
   -DatasetRoot "C:\datasets\eval-random-to-goal" `
@@ -59,8 +60,8 @@ Never overwrite an existing dataset root. Keep results local unless the user exp
 Review an episode locally:
 
 ```powershell
-uv run lerobot-dataset-viz --repo-id "local/eval-random-to-goal" `
-  --root "C:\datasets\eval-random-to-goal" --mode local --episode-index 0
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File scripts\inspect_rollout.ps1 `
+  -DatasetRoot "C:\datasets\eval-random-to-goal" -RepoId "local/eval-random-to-goal"
 ```
 
 ## Guardrails
