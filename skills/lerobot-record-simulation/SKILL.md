@@ -7,12 +7,12 @@ description: Record local LeRobot datasets from an ovphysx virtual robot over RO
 
 Record demonstrations from the ROS contract exposed by `lerobot-serve` and optionally `lerobot-render`. Keep the recorder independent of any project-specific package.
 
-## Windows shell safety
+## Windows launcher rule
 
-- Treat ROS names, USD prim paths, and Kit settings that begin with `/` or `--/` as semantic values, not filesystem paths.
-- Run this skill's command blocks in PowerShell. Prefer the supplied `.ps1` launchers and omit slash-prefixed options when their defaults are sufficient so the launcher constructs and forwards those values outside Git Bash.
-- Never pass slash-prefixed semantic values directly from Git Bash to a Windows-native executable because MSYS rewrites them as Windows paths; quoting does not prevent this conversion.
-- If a direct Git Bash invocation is unavoidable, set `MSYS2_ARG_CONV_EXCL='*'` for that command only and pass actual filesystem paths in Windows form. Never change `/lerobot`, `/tf`, `/World/...`, or `--/exts/...` to work around shell conversion.
+- Start every LeRobot workflow through a supplied `.ps1` launcher. Invoke that launcher from PowerShell; do not invoke the underlying Python, ROS 2, Kit, or UV entry point directly from Git Bash.
+- Define every semantic argument beginning with `/` or `--/` inside the `.ps1` file. This includes `/tf`, `/clock`, `/lerobot/...`, `/World/...`, and Kit `--/exts/...` settings. Do not expose these values as Git Bash command-line arguments.
+- Treat Windows filesystem paths as launcher parameters. Quoting does not stop MSYS path expansion, so never rely on quoting or `MSYS2_ARG_CONV_EXCL` as a workaround.
+- When a required launcher does not exist, add or update a `.ps1` launcher instead of documenting a direct command.
 
 ## Prepare
 
@@ -27,8 +27,9 @@ The launcher sources `C:\Programs\ros2-windows\setup.bat` and reuses its existin
 
 Run from this skill directory:
 
+Run `uv sync` once when provisioning the skill, then launch only through PowerShell:
+
 ```powershell
-uv sync
 powershell.exe -NoProfile -ExecutionPolicy Bypass -File scripts\run_record.ps1 `
   -DatasetRoot "C:\datasets\random-to-goal" `
   -RepoId "local/random-to-goal" `
@@ -57,8 +58,8 @@ The dataset root must not exist. Never delete or overwrite an existing dataset a
 The recorder reopens the finalized dataset and prints a JSON summary. Also inspect it with:
 
 ```powershell
-uv run lerobot-info
-uv run lerobot-dataset-viz --repo-id "local/random-to-goal" --root "C:\datasets\random-to-goal" --mode local --episode-index 0
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File scripts\inspect_dataset.ps1 `
+  -DatasetRoot "C:\datasets\random-to-goal" -RepoId "local/random-to-goal"
 ```
 
 Treat missing joint metadata, inconsistent joint order, stale sensor frames, an existing output root, or failure to reopen the finalized dataset as hard errors. A reset pose outside the robot's authored limits may fail to settle; reduce `-RandomRadius` or provide a safer fixed goal.

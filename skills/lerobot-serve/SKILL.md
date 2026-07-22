@@ -7,12 +7,12 @@ description: Serve LeRobot-compatible USD articulations through standalone NVIDI
 
 Use standalone `ovphysx`; never import `isaacsim`, `omni.*`, or start Kit. Keep generic ROS routing in the bridge and isolate MOZ01-specific pickup behavior under `scripts/moz01`.
 
-## Windows shell safety
+## Windows launcher rule
 
-- Treat ROS names, USD prim paths, and Kit settings that begin with `/` or `--/` as semantic values, not filesystem paths.
-- Run this skill's command blocks in PowerShell. Prefer `scripts\run_ros.ps1` and omit `-Articulation` and `-Namespace` when their slash-prefixed defaults are sufficient so the launcher constructs and forwards those values outside Git Bash.
-- Never pass slash-prefixed semantic values directly from Git Bash to a Windows-native executable because MSYS rewrites them as Windows paths; quoting does not prevent this conversion.
-- If a direct Git Bash invocation is unavoidable, set `MSYS2_ARG_CONV_EXCL='*'` for that command only and pass actual filesystem paths in Windows form. Never change `/lerobot`, `/tf`, `/World/...`, or `--/exts/...` to work around shell conversion.
+- Start every LeRobot workflow through a supplied `.ps1` launcher. Invoke that launcher from PowerShell; do not invoke the underlying Python, ROS 2, Kit, or UV entry point directly from Git Bash.
+- Define every semantic argument beginning with `/` or `--/` inside the `.ps1` file. This includes `/tf`, `/clock`, `/lerobot/...`, `/World/...`, and Kit `--/exts/...` settings. Do not expose these values as Git Bash command-line arguments.
+- Treat Windows filesystem paths as launcher parameters. Quoting does not stop MSYS path expansion, so never rely on quoting or `MSYS2_ARG_CONV_EXCL` as a workaround.
+- When a required launcher does not exist, add or update a `.ps1` launcher instead of documenting a direct command.
 
 ## Prerequisites
 
@@ -23,14 +23,16 @@ Use standalone `ovphysx`; never import `isaacsim`, `omni.*`, or start Kit. Keep 
 ## Start the bridge
 
 1. Verify the USD path exists.
-2. Inspect it with `uv run python scripts/serve.py --inspect <usd>`.
+2. Inspect it through `scripts/run_ros.ps1 -Inspect`; never invoke `serve.py` directly.
 3. Confirm at least one articulation and review missing assets or closed-articulation diagnostics.
 4. On Windows, run `scripts/run_ros.ps1 <usd>` with the validated ROS root and pass `-RosRoot` when it differs from `C:\Programs\ros2-windows`.
 5. Verify `/lerobot/joint_states` before starting an independent recorder or renderer.
 
+Run `uv sync` once when provisioning the skill, then use the launcher for both inspection and serving:
+
 ```powershell
-uv sync
-uv run python scripts/serve.py --inspect "C:\path\robot.usd"
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File scripts\run_ros.ps1 `
+  "C:\path\robot.usd" -Inspect
 powershell.exe -NoProfile -ExecutionPolicy Bypass -File scripts\run_ros.ps1 `
   "C:\path\robot.usd" -LockRoot
 ```
@@ -53,9 +55,9 @@ For MOZ01, pass `-ControlProfile moz01`. This expands each commanded finger cran
 Create a new layer without modifying the source:
 
 ```powershell
-uv run python scripts/patch_moz01_usd.py `
-  "C:\path\moz_pick_cube_scene.usda" `
-  "C:\path\moz_pick_cube_scene_collision.usda"
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File scripts\run_moz01.ps1 `
+  -Action PatchCollision -Scene "C:\path\moz_pick_cube_scene.usda" `
+  -Output "C:\path\moz_pick_cube_scene_collision.usda"
 ```
 
 The overlay deactivates legacy cube proxies and authors two invisible eight-vertex convex fingertip meshes derived from the distal STL bounds. It also disables the two imported whole-link colliders that intersect neighboring right-hand linkage parts. The script refuses to overwrite its input or an existing output.
@@ -65,7 +67,8 @@ The overlay deactivates legacy cube proxies and authors two invisible eight-vert
 Verify the authored scene before recording:
 
 ```powershell
-uv run python scripts/moz01/pickup_probe.py "C:\path\moz_pick_cube_scene_collision.usda"
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File scripts\run_moz01.ps1 `
+  -Action PickupProbe -Scene "C:\path\moz_pick_cube_scene_collision.usda"
 ```
 
 Require `success=true`, finite state, pre-close cube translation below 5 mm, and minimum held lift of at least 5 cm.
@@ -73,10 +76,10 @@ Require `success=true`, finite state, pre-close cube translation below 5 mm, and
 Generate one or more complete expert episodes with `scripts/moz01/pickup_pipeline.py`. Use camera sensors when a renderer is running; the dataset exposes joint state, action, and images but not privileged cube pose.
 
 ```powershell
-uv run python scripts/moz01/pickup_pipeline.py generate `
-  --scene "C:\path\moz_pick_cube_scene_collision.usda" `
-  --root "C:\datasets\moz01-pick" --repo-id "local/moz01-pick" `
-  --episodes 1 --sensors front,closeup --width 320 --height 240
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File scripts\run_moz01.ps1 `
+  -Action PickupGenerate -Scene "C:\path\moz_pick_cube_scene_collision.usda" `
+  -DatasetRoot "C:\datasets\moz01-pick" -RepoId "local/moz01-pick" `
+  -Episodes 1 -Sensors "front,closeup" -Width 320 -Height 240
 ```
 
 The dataset root must be new. Generate one evaluation episode per process because reused PhysX contact state is not independent.
@@ -100,12 +103,11 @@ destabilize the arm.
 Record an episode (renderer must already be running, see below):
 
 ```powershell
-powershell.exe -NoProfile -ExecutionPolicy Bypass -Command "
-  `$env:ROS_DOMAIN_ID = '42'
-  & 'scripts\moz01\run_turn_knob.ps1' `
-    -Scene 'C:\Projects\SilverRetort\artifacts\moz01\USD\moz_gas_stove_scene.usda' `
-    -DatasetRoot 'C:\path\to\new-dataset-root' `
-    -RepoId 'local/moz01-knob-turn' -Episodes 1"
+$env:ROS_DOMAIN_ID = "42"
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File scripts\moz01\run_turn_knob.ps1 `
+  -Scene "C:\Projects\SilverRetort\artifacts\moz01\USD\moz_gas_stove_scene.usda" `
+  -DatasetRoot "C:\path\to\new-dataset-root" `
+  -RepoId "local/moz01-knob-turn" -Episodes 1
 ```
 
 `run_turn_knob.ps1` assembles the environment (lerobot-record-simulation venv
@@ -139,4 +141,4 @@ metrics stay perfect):
 
 ## Validate
 
-Run `uv run pytest` after changing the generic bridge. Inspect a generated overlay before serving it and require one relative sublayer, two `fingertip_convex_hull` meshes, finite points, and inactive legacy cube proxies.
+Run `scripts/check_serve.ps1` from PowerShell after changing the generic bridge; the launcher owns the underlying UV/pytest invocation. Inspect a generated overlay before serving it and require one relative sublayer, two `fingertip_convex_hull` meshes, finite points, and inactive legacy cube proxies.
