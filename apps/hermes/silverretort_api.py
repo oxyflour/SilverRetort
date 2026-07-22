@@ -446,6 +446,33 @@ def register_silverretort_routes(app: Any, api_key: str) -> None:
             raise HTTPException(400, "invalid sessionKey")
         return background_processes_response(session_key)
 
+    @app.delete("/silverretort/processes/{process_id}")
+    async def silverretort_stop_process(
+        process_id: str, request: Request
+    ) -> dict[str, Any]:
+        _require_auth(request, api_key)
+        session_key = str(request.query_params.get("sessionKey") or "").strip()
+        if not session_key or not SESSION_KEY_RE.match(session_key):
+            raise HTTPException(400, "invalid sessionKey")
+        if not re.fullmatch(r"proc_[A-Za-z0-9_-]{1,64}", process_id):
+            raise HTTPException(400, "invalid process ID")
+
+        from tools.process_registry import process_registry
+
+        visible_processes = process_registry.list_sessions(session_key=session_key)
+        if not any(item.get("session_id") == process_id for item in visible_processes):
+            raise HTTPException(404, "process not found")
+
+        result = process_registry.kill_process(
+            process_id, source="silverretort.ui"
+        )
+        status = str(result.get("status") or "error")
+        if status == "not_found":
+            raise HTTPException(404, str(result.get("error") or "process not found"))
+        if status == "error":
+            raise HTTPException(409, str(result.get("error") or "failed to stop process"))
+        return {"ok": True, "status": status}
+
     @app.get("/silverretort/slash/commands")
     async def silverretort_slash_commands(request: Request) -> dict[str, Any]:
         _require_auth(request, api_key)

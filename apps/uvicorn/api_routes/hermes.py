@@ -295,6 +295,20 @@ async def hermes_runtime(sessionId: str | None = None) -> HermesRuntimeResponse:
         raise HTTPException(503, f"Hermes runtime unavailable: {exc}") from exc
 
 
+@router.delete("/hermes/processes/{process_id}")
+async def stop_hermes_process(process_id: str, sessionId: str) -> dict[str, bool]:
+    method = _require_engine_method(_engine_from_context(sessionId, None), "stop_process")
+    try:
+        await method(sessionId, process_id)
+        return {"ok": True}
+    except httpx.HTTPStatusError as exc:
+        status_code = exc.response.status_code
+        detail = "Hermes process not found" if status_code == 404 else "failed to stop Hermes process"
+        raise HTTPException(status_code, detail) from exc
+    except Exception as exc:
+        raise HTTPException(503, f"failed to stop Hermes process: {exc}") from exc
+
+
 @router.get("/hermes/default-model")
 async def hermes_default_model(sessionId: str | None = None, workspaceId: str | None = None) -> SessionModel:
     method = _require_engine_method(_engine_from_context(sessionId, workspaceId), "get_default_model")

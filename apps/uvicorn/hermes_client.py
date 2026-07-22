@@ -380,6 +380,16 @@ class HermesEngine:
             response.raise_for_status()
             return dict(response.json())
 
+    async def stop_process(self, session_id: str, process_id: str) -> dict[str, Any]:
+        async with httpx.AsyncClient(timeout=httpx.Timeout(15, connect=5)) as client:
+            response = await client.delete(
+                f"{self.base_url}/silverretort/processes/{process_id}",
+                params={"sessionKey": self.session_key(session_id)},
+                headers=self._headers(),
+            )
+            response.raise_for_status()
+            return dict(response.json())
+
     async def get_default_model(self) -> dict[str, Any]:
         async with httpx.AsyncClient(timeout=httpx.Timeout(20, connect=5)) as client:
             response = await client.get(
