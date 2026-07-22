@@ -8,6 +8,7 @@ import uvicorn
 
 import bridge_client
 from artifact_bridge import artifact_bridge_response
+from artifact_origin import ArtifactOriginMiddleware
 import db
 import mcp_server
 import workspace_templates
@@ -36,6 +37,7 @@ async def lifespan(_: FastAPI):
 
 
 app = FastAPI(lifespan=lifespan)
+app.add_middleware(ArtifactOriginMiddleware)
 app.include_router(router)
 app.mount("/mcp", mcp_server.mcp.streamable_http_app())
 
