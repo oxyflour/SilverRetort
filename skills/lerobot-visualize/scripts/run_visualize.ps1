@@ -32,6 +32,8 @@ if (-not $RosPython) {
     ) | Where-Object { Test-Path -LiteralPath $_ -PathType Leaf } | Select-Object -First 1
 }
 if (-not $RosPython) { throw "Pass -RosPython or set ROS_PYTHON to a ROS-compatible Python" }
+$PythonDir = Split-Path $RosPython -Parent
+$env:PATH = "$PythonDir;$(Join-Path $PythonDir 'Library\bin');$(Join-Path $PythonDir 'Scripts');$env:PATH"
 $SetupCommand = "set `"COLCON_PYTHON_EXECUTABLE=$RosPython`" && call `"$RosSetup`" && set"
 $EnvironmentLines = & cmd.exe /d /s /c $SetupCommand
 if ($LASTEXITCODE -ne 0) { throw "ROS setup failed with exit code $LASTEXITCODE" }
