@@ -114,13 +114,16 @@ def main() -> int:
         if not prim.HasAPI(UsdPhysics.CollisionAPI) or not prim.IsActive():
             continue
         body = body_for(prim)
-        body_matrix = cache.GetLocalToWorldTransform(body) if body is not None else Gf.Matrix4d(1.0)
+        articulation = articulation_for(body) if body is not None else None
+        body_matrix = cache.GetLocalToWorldTransform(body) if articulation is not None else Gf.Matrix4d(1.0)
         body_inv = body_matrix.GetInverse()
         # Recurse into Xform collision prims to find actual geometry children
         geom_prims = _find_geom_prims(prim)
         for geom_prim in geom_prims:
             world = cache.GetLocalToWorldTransform(geom_prim)
-            matrix = world if body is None else world * body_inv
+            # Only articulated bodies receive live TF frames. Standalone rigid
+            # bodies must remain in world space or they render at the origin.
+            matrix = world if articulation is None else world * body_inv
             shape = _export_shape(geom_prim, matrix)
             shapes.append(shape)
     payload = {"source": str(args.usd.resolve()), "metersPerUnit": meters_per_unit, "shapes": shapes}
