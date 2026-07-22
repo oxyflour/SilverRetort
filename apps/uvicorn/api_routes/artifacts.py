@@ -8,6 +8,7 @@ from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import FileResponse, RedirectResponse, Response, StreamingResponse
 
 import artifact_contexts
+from artifact_origin import artifact_origin_url
 import db
 import workspace_service
 from models import Artifact, ArtifactContext, ArtifactContextUpdateRequest
@@ -179,18 +180,18 @@ async def get_artifact_content(
             raise HTTPException(503, str(exc)) from exc
         port, path = _workspace_port_payload_target(payload, asset_path)
         return RedirectResponse(
-            workspace_service.local_workspace_proxy_url(
-                session.workspace_id,
-                port,
-                path,
-                request.url.query,
-            ),
+            artifact_origin_url(artifact.id, path, request.url.query),
             status_code=307,
         )
     if request.method not in {"GET", "HEAD"}:
         raise HTTPException(405, "iframe file artifacts only support GET and HEAD")
     if not isinstance(payload.get("path"), str):
         raise HTTPException(400, "iframe artifact requires payload.path")
+    if not request.scope.get("state", {}).get("silverretort_artifact_origin"):
+        return RedirectResponse(
+            artifact_origin_url(artifact.id, asset_path or "", request.url.query),
+            status_code=307,
+        )
     try:
         relative_path = workspace_service.resolve_artifact_asset(payload["path"], asset_path)
     except ValueError as exc:

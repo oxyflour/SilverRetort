@@ -49,13 +49,11 @@ workspacePort.path rules:
   for example path:"preview/" when http://127.0.0.1:PORT/preview/ works.
 
 workspacePort page URL rules:
-- SilverRetort uses a path-prefix proxy and does not rewrite HTML, CSS, or
-  JavaScript.
-- In HTML/JS served through workspacePort, avoid root-relative URLs like
-  /offer, /camera, /assets/app.js, or /artifact-bridge-v1.js. They point at the
-  SilverRetort origin root, not the proxied server route. Prefer relative URLs
-  like offer, camera, ./assets/app.js, and artifact-bridge-v1.js, or build URLs
-  from the baseUrl returned by ui_show_artifact.
+- SilverRetort mounts the page at a dedicated artifact origin and does not
+  rewrite HTML, CSS, or JavaScript.
+- Relative and root-relative URLs both target the preview server. URLs such as
+  /offer, /camera, and /assets/app.js are supported. The reserved
+  /artifact-bridge-v1.js path is served by SilverRetort.
 - workspacePort is only a transparent HTTP/WebSocket proxy. It does not create
   backend endpoints for your page. If your iframe JavaScript calls
   fetch('interactive', {{method:'POST'}}), fetch('camera', {{method:'POST'}}),
@@ -68,8 +66,8 @@ workspacePort page URL rules:
   For example, POSTing to baseUrl + "interactive" must not return 404 or 405.
 
 ui_show_artifact returns JSON with artifactId; for workspacePort iframe
-artifacts it also returns baseUrl, the workspace proxy root to use when
-configuring the preview server base path. If workspacePort is unsupported, the
+artifacts it also returns baseUrl, the dedicated artifact origin to use when
+building explicit same-origin URLs. If workspacePort is unsupported, the
 UI tool returns an explicit relay version error and you should fall back to a
 workspace path artifact.
 """

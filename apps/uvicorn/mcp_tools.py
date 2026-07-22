@@ -5,6 +5,7 @@ from typing import Any, Callable
 from urllib.parse import urlparse
 
 import db
+from artifact_origin import artifact_origin_url
 import events
 import workspace_service
 from models import Artifact
@@ -218,13 +219,7 @@ def _show_artifact_result(artifact: Artifact) -> dict[str, str]:
     port = config.get("port")
     if isinstance(port, bool) or not isinstance(port, int):
         return result
-    session = db.get_session(artifact.session_id)
-    if session is None:
-        return result
-    result["baseUrl"] = workspace_service.local_workspace_proxy_url(
-        session.workspace_id,
-        port,
-    )
+    result["baseUrl"] = artifact_origin_url(artifact.id)
     return result
 
 
@@ -250,10 +245,9 @@ def ui_show_artifact(
     that will request http://127.0.0.1:8766/project/index.html and usually 404.
     Only set path when you have verified the server responds at that URL route,
     for example path: "preview/" if http://127.0.0.1:8766/preview/ works.
-    Configure the server with the proxy path prefix, or use relative resource
-    URLs; the proxy does not rewrite HTML, CSS, or JavaScript content. In page
-    code, avoid root-relative requests like fetch('/offer') unless the server is
-    mounted at origin root; use fetch('offer') or the returned baseUrl instead.
+    The iframe is mounted at a dedicated artifact origin, so both relative URLs
+    such as fetch('offer') and root-relative URLs such as fetch('/offer') are
+    forwarded to this server. The proxy does not rewrite HTML, CSS, or JavaScript.
     workspacePort is only a transparent proxy; it does not create application
     endpoints. If the iframe page uses POST/PUT/PATCH/DELETE requests such as
     fetch('interactive', {method: 'POST'}) or fetch('camera', {method: 'POST'}),
@@ -271,9 +265,9 @@ def ui_show_artifact(
     The context is attached when the user next sends a normal chat message.
     Context must be JSON and no larger than 64 KiB. This tool returns
     {artifactId, baseUrl?} immediately and does not wait for context updates.
-    For workspacePort iframe artifacts, baseUrl is the workspace proxy resource
-    root to use when configuring a preview server base path. workspacePort.path
-    is an HTTP route on that server, not a workspace-relative file path.
+    For workspacePort iframe artifacts, baseUrl is the dedicated artifact origin.
+    workspacePort.path is an HTTP route on that server, not a workspace-relative
+    file path.
     """
     if db.get_session(session_id) is None:
         return f"error: session not found: {session_id}"

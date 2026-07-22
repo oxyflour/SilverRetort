@@ -72,7 +72,7 @@ class WorkspacePortArtifactTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(response.status_code, 307)
         self.assertEqual(
             response.headers["location"],
-            "http://127.0.0.1:23001/api/workspace-proxy/workspace/workspace-a/port/8765/?v=1",
+            "http://artifact-a.artifact.localhost:23001/?v=1",
         )
 
     async def test_workspace_port_directory_redirect_keeps_trailing_slash(self):
@@ -86,7 +86,7 @@ class WorkspacePortArtifactTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(response.status_code, 307)
         self.assertEqual(
             response.headers["location"],
-            "http://127.0.0.1:23001/api/workspace-proxy/workspace/workspace-a/port/8765/app/?v=1",
+            "http://artifact-a.artifact.localhost:23001/app/?v=1",
         )
 
     async def test_workspace_port_content_redirects_to_proxy_with_asset_path_and_query(self):
@@ -101,7 +101,7 @@ class WorkspacePortArtifactTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(response.status_code, 307)
         self.assertEqual(
             response.headers["location"],
-            "http://127.0.0.1:23001/api/workspace-proxy/workspace/workspace-a/port/5173/app/assets/app.js?v=1",
+            "http://artifact-a.artifact.localhost:23001/app/assets/app.js?v=1",
         )
 
     def test_workspace_port_directory_entry_keeps_assets_under_directory(self):
