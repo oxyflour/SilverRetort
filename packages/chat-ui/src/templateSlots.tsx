@@ -11,6 +11,7 @@ import type {
 import { getWorkspaceTemplateModule } from "./templateModules";
 import { DefaultChatPaneToolbar } from "./components/DefaultChatPaneToolbar";
 import { EmptySessionGuide } from "./components/EmptySessionGuide";
+import { ToolbarActivityMenu } from "./components/HermesProcessFloat";
 
 interface TemplateBoundaryProps {
   children: ReactNode;
@@ -44,8 +45,6 @@ interface ChatPaneToolbarSlotProps {
 }
 
 export function ChatPaneToolbarSlot(props: ChatPaneToolbarSlotProps) {
-  if (!props.template) return null;
-
   const defaultToolbar = (
     <DefaultChatPaneToolbar
       workspace={props.workspace}
@@ -57,27 +56,37 @@ export function ChatPaneToolbarSlot(props: ChatPaneToolbarSlotProps) {
     />
   );
 
-  const templateModule = getWorkspaceTemplateModule(props.template.ui.module);
-  const Toolbar = templateModule?.components?.chatPaneToolbar;
-  if (!Toolbar) return defaultToolbar;
+  let toolbar = defaultToolbar;
+  if (props.template) {
+    const templateModule = getWorkspaceTemplateModule(props.template.ui.module);
+    const Toolbar = templateModule?.components?.chatPaneToolbar;
+    if (Toolbar) {
+      toolbar = (
+        <TemplateBoundary
+          key={`${templateModule.id}:toolbar`}
+          fallback={defaultToolbar}
+        >
+          <Toolbar
+            workspace={props.workspace}
+            template={props.template}
+            session={props.session}
+            messages={props.messages}
+            artifacts={props.artifacts}
+            running={props.running}
+            defaultToolbar={defaultToolbar}
+            setDraft={props.setDraft}
+            sendMessage={props.sendMessage}
+          />
+        </TemplateBoundary>
+      );
+    }
+  }
 
   return (
-    <TemplateBoundary
-      key={`${templateModule.id}:toolbar`}
-      fallback={defaultToolbar}
-    >
-      <Toolbar
-        workspace={props.workspace}
-        template={props.template}
-        session={props.session}
-        messages={props.messages}
-        artifacts={props.artifacts}
-        running={props.running}
-        defaultToolbar={defaultToolbar}
-        setDraft={props.setDraft}
-        sendMessage={props.sendMessage}
-      />
-    </TemplateBoundary>
+    <div className="relative z-10 grid h-12 shrink-0 grid-cols-[minmax(0,1fr)_auto] bg-white after:pointer-events-none after:absolute after:inset-x-0 after:top-full after:h-2 after:bg-gradient-to-b after:from-neutral-300/35 after:to-transparent dark:bg-neutral-900 dark:after:from-black/30">
+      {toolbar}
+      <ToolbarActivityMenu artifacts={props.artifacts} />
+    </div>
   );
 }
 
