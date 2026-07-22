@@ -1,0 +1,4 @@
+interface:
+  display_name: "LeRobot Collision Visualizer"
+  short_description: "View live robot collision geometry in Three.js"
+  default_prompt: "Use $lerobot-visualize to inspect a robot collision scene from lerobot-serve in a live Three.js viewer."
