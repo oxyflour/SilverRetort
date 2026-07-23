@@ -59,7 +59,7 @@ def vision_model() -> dict[str, Any]:
 
 
 def collect_models() -> dict[str, Any]:
-    from hermes_cli.config import get_compatible_custom_providers, load_config
+    from hermes_cli.config import load_config
 
     default = model_default()
     models: list[dict[str, Any]] = []
@@ -95,14 +95,33 @@ def collect_models() -> dict[str, Any]:
     vision_name = str(vision.get("model") or "")
     append_model(vision_provider, vision_name, vision_provider)
 
-    for custom_provider in get_compatible_custom_providers(load_config()):
+    config = load_config()
+    custom_providers = config.get("custom_providers")
+    if not isinstance(custom_providers, list):
+        custom_providers = []
+    for custom_provider in custom_providers:
+        if not isinstance(custom_provider, dict):
+            continue
         name = str(custom_provider.get("name") or "").strip()
-        provider_key = str(custom_provider.get("provider_key") or "").strip()
-        provider = provider_key or f"custom:{name.lower().replace(' ', '-')}"
+        if not name:
+            continue
+        provider = f"custom:{name.lower().replace(' ', '-')}"
         configured_models = custom_provider.get("models")
-        model_names = [str(custom_provider.get("model") or "")]
+        model_names = [
+            str(
+                custom_provider.get("model")
+                or custom_provider.get("default_model")
+                or ""
+            )
+        ]
         if isinstance(configured_models, dict):
             model_names.extend(str(item) for item in configured_models)
+        elif isinstance(configured_models, list):
+            for item in configured_models:
+                if isinstance(item, str):
+                    model_names.append(item)
+                elif isinstance(item, dict):
+                    model_names.append(str(item.get("id") or item.get("name") or ""))
         for model_name in model_names:
             append_model(provider, model_name, name)
 
