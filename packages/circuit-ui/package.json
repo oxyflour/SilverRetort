@@ -8,13 +8,16 @@
   "exports": {
     ".": "./src/index.ts"
   },
+  "silverretortArtifactModule": {
+    "id": "circuit",
+    "entry": "src/browser.ts",
+    "description": "Interactive RF/electrical circuit React component and circuit helpers.",
+    "exports": ["mount", "DEFAULT_CIRCUIT", "normalizeCircuitData"],
+    "payloadSchema": "src/generated/circuit-data.schema.json"
+  },
   "scripts": {
     "schema": "node scripts/generate-schemas.mjs",
     "typecheck": "tsc --noEmit"
-  },
-  "dependencies": {
-    "ajv": "^8.20.0",
-    "silverretort-chat-ui": "workspace:*"
   },
   "peerDependencies": {
     "react": "^19",
@@ -22,6 +25,7 @@
   },
   "devDependencies": {
     "@types/react": "^19",
+    "@types/react-dom": "^19",
     "ts-json-schema-generator": "^2.9.0",
     "typescript": "^5"
   }

@@ -8,12 +8,15 @@
   "exports": {
     ".": "./src/index.ts"
   },
+  "silverretortArtifactModule": {
+    "id": "demo-stat",
+    "entry": "src/browser.ts",
+    "description": "React component for a compact statistic card.",
+    "exports": ["mount"],
+    "payloadSchema": "src/generated/demo-stat.schema.json"
+  },
   "scripts": {
     "schema": "node scripts/generate-schemas.mjs"
-  },
-  "dependencies": {
-    "ajv": "^8.20.0",
-    "silverretort-chat-ui": "workspace:*"
   },
   "peerDependencies": {
     "react": "^19",
@@ -21,6 +24,7 @@
   },
   "devDependencies": {
     "@types/react": "^19",
+    "@types/react-dom": "^19",
     "ts-json-schema-generator": "^2.9.0",
     "typescript": "^5"
   }

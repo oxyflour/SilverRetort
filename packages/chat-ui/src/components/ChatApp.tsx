@@ -5,6 +5,7 @@ import { PanelLeftClose, PanelLeftOpen } from "lucide-react";
 import { Panel, PanelGroup, PanelResizeHandle } from "react-resizable-panels";
 import { subscribeEvents } from "silverretort-protocol";
 import { listRenderDefinitions } from "../registry";
+import type { ArtifactModuleReport } from "../registry";
 import { registerBuiltinRenderers } from "../renderers/builtins";
 import { useChatStore } from "../store";
 import { ArtifactPanel } from "./ArtifactPanel";
@@ -16,6 +17,22 @@ registerBuiltinRenderers();
 
 const separatorClass =
   "w-1 bg-neutral-200 transition-colors hover:bg-neutral-400 data-[resize-handle-state=drag]:bg-neutral-400 dark:bg-neutral-800 dark:hover:bg-neutral-600";
+
+async function loadArtifactModules(): Promise<ArtifactModuleReport[]> {
+  try {
+    const response = await fetch("/artifact-modules/manifest.json");
+    if (!response.ok) return [];
+    const manifest = (await response.json()) as {
+      modules?: Array<Omit<ArtifactModuleReport, "importUrl"> & { importPath: string }>;
+    };
+    return (manifest.modules ?? []).map(({ importPath, ...module }) => ({
+      ...module,
+      importUrl: new URL(importPath, window.location.origin).href,
+    }));
+  } catch {
+    return [];
+  }
+}
 
 export function ChatApp() {
   const panelOpen = useChatStore((state) => {
@@ -49,11 +66,15 @@ export function ChatApp() {
       onConnected: () => {
         void useChatStore.getState().resyncCurrent();
         // Report registered renderers so the agent can discover them via MCP.
-        void fetch("/api/render-types", {
-          method: "POST",
-          headers: { "content-type": "application/json" },
-          body: JSON.stringify({ renderers: listRenderDefinitions() }),
-        });
+        void loadArtifactModules().then((artifactModules) =>
+          fetch("/api/render-types", {
+            method: "POST",
+            headers: { "content-type": "application/json" },
+            body: JSON.stringify({
+              renderers: listRenderDefinitions(artifactModules),
+            }),
+          }),
+        );
       },
     });
     return () => {
