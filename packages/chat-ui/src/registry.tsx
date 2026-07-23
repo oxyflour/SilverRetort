@@ -17,15 +17,6 @@ export interface ArtifactRendererDefinition {
 
 export type ArtifactRendererReport = Omit<ArtifactRendererDefinition, "renderer">;
 
-export interface ArtifactModuleReport {
-  id: string;
-  importUrl: string;
-  description?: string;
-  exports: string[];
-  payloadSchema?: unknown;
-  usage?: string;
-}
-
 const renderers = new Map<string, ArtifactRendererDefinition>();
 
 export function registerArtifactRenderer(
@@ -50,19 +41,13 @@ export function listRenderTypes(): string[] {
   return listRenderDefinitions().map((definition) => definition.type);
 }
 
-export function listRenderDefinitions(
-  artifactModules: ArtifactModuleReport[] = [],
-): ArtifactRendererReport[] {
+export function listRenderDefinitions(): ArtifactRendererReport[] {
   return [...renderers.values()].map(
-    ({ type, description, payloadSchema, examples }) =>
-      type === "iframe" && artifactModules.length > 0
-        ? {
-            type,
-            description,
-            payloadSchema,
-            examples,
-            modules: artifactModules,
-          }
-        : { type, description, payloadSchema, examples },
+    ({ type, description, payloadSchema, examples }) => ({
+      type,
+      description,
+      payloadSchema,
+      examples,
+    }),
   );
 }

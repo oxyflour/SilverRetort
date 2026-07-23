@@ -8,13 +8,6 @@
   "exports": {
     ".": "./src/index.ts"
   },
-  "silverretortArtifactModule": {
-    "id": "circuit",
-    "entry": "src/browser.ts",
-    "description": "Interactive RF/electrical circuit React component and circuit helpers.",
-    "exports": ["mount", "DEFAULT_CIRCUIT", "normalizeCircuitData"],
-    "payloadSchema": "src/generated/circuit-data.schema.json"
-  },
   "scripts": {
     "schema": "node scripts/generate-schemas.mjs",
     "typecheck": "tsc --noEmit"

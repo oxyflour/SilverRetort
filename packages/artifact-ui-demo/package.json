@@ -8,13 +8,6 @@
   "exports": {
     ".": "./src/index.ts"
   },
-  "silverretortArtifactModule": {
-    "id": "demo-stat",
-    "entry": "src/browser.ts",
-    "description": "React component for a compact statistic card.",
-    "exports": ["mount"],
-    "payloadSchema": "src/generated/demo-stat.schema.json"
-  },
   "scripts": {
     "schema": "node scripts/generate-schemas.mjs"
   },

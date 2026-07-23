@@ -1,16 +1,32 @@
 """Shared MCP tool implementations for HTTP and bridge transports."""
 
+import os
 import uuid
 from typing import Any, Callable
 from urllib.parse import urlparse
 
 import db
+from artifact_modules import ARTIFACT_MODULES
 from artifact_origin import artifact_origin_url
 import events
 import workspace_service
 from models import Artifact
 
 RenderDefinition = dict[str, Any]
+
+
+def _artifact_modules() -> list[dict[str, Any]]:
+    public_base_url = os.getenv(
+        "SILVERRETORT_PUBLIC_BASE_URL", "http://127.0.0.1:23000"
+    ).rstrip("/")
+    return [
+        {
+            **module,
+            "importUrl": f"{public_base_url}{module['importPath']}",
+        }
+        for module in ARTIFACT_MODULES
+    ]
+
 
 BUILTIN_RENDER_DEFINITIONS: list[RenderDefinition] = [
     {
@@ -67,6 +83,7 @@ BUILTIN_RENDER_DEFINITIONS: list[RenderDefinition] = [
                 },
             ],
         },
+        "modules": _artifact_modules(),
     },
     {
         "type": "image",
