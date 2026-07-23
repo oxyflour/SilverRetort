@@ -25,6 +25,13 @@ function rejectionMessage(error: unknown): string {
   return error.message;
 }
 
+function artifactOriginUrl(artifactId: string): string {
+  const url = new URL(window.location.origin);
+  url.hostname = `${artifactId}.artifact.localhost`;
+  url.pathname = "/";
+  return url.toString();
+}
+
 export function IframeRenderer({ artifact }: ArtifactRendererProps) {
   const iframeRef = useRef<HTMLIFrameElement>(null);
   const saveQueueRef = useRef<Promise<void>>(Promise.resolve());
@@ -37,7 +44,7 @@ export function IframeRenderer({ artifact }: ArtifactRendererProps) {
   const src =
     payload && "url" in payload
       ? payload.url
-      : `/api/artifacts/${encodeURIComponent(artifact.id)}/content/`;
+      : artifactOriginUrl(artifact.id);
   const isExternal = Boolean(payload && "url" in payload);
 
   useEffect(() => {
