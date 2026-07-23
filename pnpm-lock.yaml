@@ -33,15 +33,9 @@ importers:
       react-dom:
         specifier: 19.2.4
         version: 19.2.4(react@19.2.4)
-      silverretort-artifact-ui-demo:
-        specifier: workspace:*
-        version: link:../../packages/artifact-ui-demo
       silverretort-chat-ui:
         specifier: workspace:*
         version: link:../../packages/chat-ui
-      silverretort-circuit-ui:
-        specifier: workspace:*
-        version: link:../../packages/circuit-ui
       silverretort-protocol:
         specifier: workspace:*
         version: link:../../packages/protocol
@@ -80,6 +74,40 @@ importers:
   apps/switch: {}
 
   apps/uvicorn: {}
+
+  packages/artifact-esm:
+    dependencies:
+      ajv:
+        specifier: ^8.20.0
+        version: 8.20.0
+      react:
+        specifier: 19.2.4
+        version: 19.2.4
+      react-dom:
+        specifier: 19.2.4
+        version: 19.2.4(react@19.2.4)
+      silverretort-artifact-ui-demo:
+        specifier: workspace:*
+        version: link:../artifact-ui-demo
+      silverretort-circuit-ui:
+        specifier: workspace:*
+        version: link:../circuit-ui
+    devDependencies:
+      '@tailwindcss/postcss':
+        specifier: ^4
+        version: 4.3.2
+      '@types/react':
+        specifier: ^19
+        version: 19.2.17
+      '@types/react-dom':
+        specifier: ^19
+        version: 19.2.3(@types/react@19.2.17)
+      tailwindcss:
+        specifier: ^4
+        version: 4.3.2
+      vite:
+        specifier: ^8.1.4
+        version: 8.1.4(@types/node@24.13.2)(jiti@2.7.0)
 
   packages/artifact-ui-demo:
     dependencies:

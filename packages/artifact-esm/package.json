@@ -1,0 +1,23 @@
+{
+  "name": "silverretort-artifact-esm",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "vite build"
+  },
+  "dependencies": {
+    "ajv": "^8.20.0",
+    "react": "19.2.4",
+    "react-dom": "19.2.4",
+    "silverretort-artifact-ui-demo": "workspace:*",
+    "silverretort-circuit-ui": "workspace:*"
+  },
+  "devDependencies": {
+    "@tailwindcss/postcss": "^4",
+    "@types/react": "^19",
+    "@types/react-dom": "^19",
+    "tailwindcss": "^4",
+    "vite": "^8.1.4"
+  }
+}

@@ -14,6 +14,39 @@ import { SessionSidebar } from "./SessionSidebar";
 
 registerBuiltinRenderers();
 
+async function reportArtifactCapabilities() {
+  let artifactModules: unknown[] = [];
+  try {
+    const response = await fetch("/artifact-components/v1/catalog.json");
+    if (response.ok) {
+      const catalog = await response.json() as { modules?: unknown };
+      if (Array.isArray(catalog.modules)) {
+        const baseUrl = new URL("/artifact-components/v1/", window.location.origin);
+        artifactModules = catalog.modules.map((module) => {
+          if (!module || typeof module !== "object") return module;
+          const definition = module as Record<string, unknown>;
+          return typeof definition.modulePath === "string"
+            ? {
+                ...definition,
+                moduleUrl: new URL(definition.modulePath, baseUrl).href,
+              }
+            : definition;
+        });
+      }
+    }
+  } catch {
+    // Renderer discovery remains available when optional component assets are absent.
+  }
+  await fetch("/api/render-types", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({
+      renderers: listRenderDefinitions(),
+      artifactModules,
+    }),
+  });
+}
+
 const separatorClass =
   "w-1 bg-neutral-200 transition-colors hover:bg-neutral-400 data-[resize-handle-state=drag]:bg-neutral-400 dark:bg-neutral-800 dark:hover:bg-neutral-600";
 
@@ -48,12 +81,8 @@ export function ChatApp() {
       onEvent: (event) => useChatStore.getState().applyEvent(event),
       onConnected: () => {
         void useChatStore.getState().resyncCurrent();
-        // Report registered renderers so the agent can discover them via MCP.
-        void fetch("/api/render-types", {
-          method: "POST",
-          headers: { "content-type": "application/json" },
-          body: JSON.stringify({ renderers: listRenderDefinitions() }),
-        });
+        // Report renderers and iframe-importable component modules for MCP discovery.
+        void reportArtifactCapabilities();
       },
     });
     return () => {

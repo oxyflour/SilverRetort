@@ -1,5 +1,6 @@
 """Shared MCP tool implementations for HTTP and bridge transports."""
 
+import json
 import uuid
 from typing import Any, Callable
 from urllib.parse import urlparse
@@ -123,6 +124,7 @@ BUILTIN_RENDER_DEFINITIONS: list[RenderDefinition] = [
     },
 ]
 _render_definitions: list[RenderDefinition] = list(BUILTIN_RENDER_DEFINITIONS)
+_artifact_modules: dict[str, dict[str, Any]] = {}
 
 
 def _merge_with_builtin_renderers(renderers: list[RenderDefinition]) -> list[RenderDefinition]:
@@ -159,6 +161,72 @@ def supported_render_types() -> list[str]:
 
 def supported_render_definitions() -> list[RenderDefinition]:
     return list(_render_definitions)
+
+
+def set_artifact_modules(modules: list[dict[str, Any]]) -> None:
+    global _artifact_modules
+    accepted: dict[str, dict[str, Any]] = {}
+    for module in modules[:100]:
+        if not isinstance(module, dict):
+            continue
+        module_id = module.get("id")
+        module_url = module.get("moduleUrl")
+        props_schema = module.get("propsSchema")
+        if not isinstance(module_id, str) or not module_id or len(module_id) > 100:
+            continue
+        if not isinstance(module_url, str):
+            continue
+        parsed_url = urlparse(module_url)
+        if parsed_url.scheme not in {"http", "https"} or not parsed_url.netloc:
+            continue
+        if not isinstance(props_schema, dict):
+            continue
+        definition = {
+            key: module[key]
+            for key in (
+                "id",
+                "version",
+                "description",
+                "moduleUrl",
+                "exportName",
+                "propsSchema",
+                "example",
+            )
+            if key in module
+        }
+        try:
+            encoded = json.dumps(definition, ensure_ascii=False, separators=(",", ":"))
+        except (TypeError, ValueError):
+            continue
+        if len(encoded.encode("utf-8")) > 256 * 1024:
+            continue
+        accepted[module_id] = definition
+    _artifact_modules = accepted
+
+
+def ui_list_artifact_modules() -> list[dict[str, Any]]:
+    """List ESM component modules that iframe artifacts may import.
+
+    Call ui_get_artifact_module with an id to obtain its absolute module URL,
+    export name, complete props JSON Schema, and example before writing iframe code.
+    """
+    return [
+        {
+            key: module[key]
+            for key in ("id", "version", "description")
+            if key in module
+        }
+        for module in _artifact_modules.values()
+    ]
+
+
+def ui_get_artifact_module(id: str) -> dict[str, Any] | str:
+    """Get an iframe-importable ESM component contract by module id."""
+    module = _artifact_modules.get(id)
+    if module is None:
+        available = ", ".join(_artifact_modules) or "(none)"
+        return f"error: artifact module not found: {id}; available modules: {available}"
+    return dict(module)
 
 
 def validate_render_type(type: str) -> str | None:
@@ -268,6 +336,11 @@ def ui_show_artifact(
     For workspacePort iframe artifacts, baseUrl is the dedicated artifact origin.
     workspacePort.path is an HTTP route on that server, not a workspace-relative
     file path.
+
+    Iframe pages may import host-provided component ESM modules. Call
+    ui_list_artifact_modules, then ui_get_artifact_module, and use only the
+    returned moduleUrl, exportName, propsSchema, and example. Do not guess
+    package paths or module URLs.
     """
     if db.get_session(session_id) is None:
         return f"error: session not found: {session_id}"
@@ -330,6 +403,8 @@ TOOL_FUNCTIONS: dict[str, Callable[..., Any]] = {
     "ui_show_artifact": ui_show_artifact,
     "ui_update_artifact": ui_update_artifact,
     "ui_list_render_types": ui_list_render_types,
+    "ui_list_artifact_modules": ui_list_artifact_modules,
+    "ui_get_artifact_module": ui_get_artifact_module,
 }
 
 
