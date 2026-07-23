@@ -1,6 +1,3 @@
-import Ajv from "ajv";
-import type { ArtifactRendererProps } from "silverretort-chat-ui";
-import demoStatPayloadSchema from "./generated/demo-stat.schema.json";
 import type { DemoStatPayload, TrendTone } from "./payload";
 
 const trendToneClass: Record<TrendTone, string> = {
@@ -10,17 +7,8 @@ const trendToneClass: Record<TrendTone, string> = {
     "border-neutral-200 bg-neutral-50 text-neutral-700 dark:border-neutral-800 dark:bg-neutral-900 dark:text-neutral-300",
 };
 
-const validatePayload = new Ajv({ allErrors: true, strict: false }).compile<DemoStatPayload>(
-  demoStatPayloadSchema,
-);
-
-function toPayload(value: unknown): DemoStatPayload {
-  return validatePayload(value) ? value : {};
-}
-
-export function DemoStatArtifact({ artifact }: ArtifactRendererProps) {
-  const payload = toPayload(artifact.payload);
-  const label = payload.label ?? artifact.title;
+export function DemoStat({ payload }: { payload: DemoStatPayload }) {
+  const label = payload.label ?? "Statistic";
   const value = payload.value ?? "--";
   const unit = payload.unit ?? "";
   const description = payload.description ?? "";

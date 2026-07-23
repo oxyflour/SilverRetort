@@ -3,10 +3,14 @@
   "private": true,
   "packageManager": "pnpm@11.7.0",
   "scripts": {
+    "build:artifact-modules": "node scripts/build-artifact-modules.mjs",
     "dev": "pnpm --filter silverretort-desktop run dev",
     "build": "pnpm --filter silverretort-desktop run build",
     "build:dir": "pnpm --filter silverretort-desktop run build:dir",
     "switch:dev": "pnpm --filter silverretort-switch run dev",
     "switch:build": "pnpm --filter silverretort-switch run build"
+  },
+  "devDependencies": {
+    "esbuild": "^0.25.12"
   }
 }

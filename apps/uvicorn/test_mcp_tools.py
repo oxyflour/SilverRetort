@@ -20,7 +20,7 @@ class McpToolsRenderTypesTest(unittest.TestCase):
             self.assertIn("payloadSchema", definitions[renderer_type])
 
     def test_frontend_renderer_report_keeps_builtin_markdown(self):
-        mcp_tools.set_render_definitions([{"type": "circuit"}])
+        mcp_tools.set_render_definitions([{"type": "custom.renderer"}])
 
         self.assertEqual(
             mcp_tools.validate_render_type("markdown"),
@@ -28,7 +28,7 @@ class McpToolsRenderTypesTest(unittest.TestCase):
         )
         self.assertEqual(
             mcp_tools.supported_render_types(),
-            ["iframe", "image", "markdown", "circuit"],
+            ["iframe", "image", "markdown", "custom.renderer"],
         )
 
     def test_sparse_builtin_renderer_report_keeps_payload_schemas(self):
@@ -46,13 +46,13 @@ class McpToolsRenderTypesTest(unittest.TestCase):
             self.assertIn("payloadSchema", definitions[renderer_type])
 
     def test_legacy_type_report_keeps_builtin_markdown(self):
-        mcp_tools.set_render_types(["demo.stat"])
+        mcp_tools.set_render_types(["custom.renderer"])
 
         self.assertEqual(
             mcp_tools.validate_render_type("markdown"),
             None,
         )
-        self.assertIn("demo.stat", mcp_tools.supported_render_types())
+        self.assertIn("custom.renderer", mcp_tools.supported_render_types())
 
 
 if __name__ == "__main__":

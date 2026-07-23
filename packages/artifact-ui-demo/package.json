@@ -11,16 +11,13 @@
   "scripts": {
     "schema": "node scripts/generate-schemas.mjs"
   },
-  "dependencies": {
-    "ajv": "^8.20.0",
-    "silverretort-chat-ui": "workspace:*"
-  },
   "peerDependencies": {
     "react": "^19",
     "react-dom": "^19"
   },
   "devDependencies": {
     "@types/react": "^19",
+    "@types/react-dom": "^19",
     "ts-json-schema-generator": "^2.9.0",
     "typescript": "^5"
   }

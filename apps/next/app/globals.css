@@ -6,7 +6,6 @@
 /* Tailwind 4 需显式声明 workspace 包源码目录才会扫描其中的 class */
 @source "../../../packages/chat-ui/src";
 @source "../../../packages/setting-ui/src";
-@source "../../../packages/artifact-ui-demo/src";
 @source "../../../packages/template-domain-ui/src";
 @source "../../../packages/template-industrial-design/src";
 
