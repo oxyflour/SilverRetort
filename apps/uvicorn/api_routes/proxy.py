@@ -37,6 +37,26 @@ def _filter_proxy_headers(headers) -> dict[str, str]:
     }
 
 
+def _filter_proxy_response_headers(headers) -> dict[str, str]:
+    result = _filter_proxy_headers(headers)
+    policy_key = next(
+        (key for key in result if key.lower() == "content-security-policy"), None
+    )
+    content_security_policy = result.get(policy_key) if policy_key else None
+    if content_security_policy:
+        directives = [
+            directive.strip()
+            for directive in content_security_policy.split(";")
+            if directive.strip()
+            and not directive.strip().lower().startswith("frame-ancestors ")
+        ]
+        if directives:
+            result[policy_key] = "; ".join(directives)
+        else:
+            result.pop(policy_key, None)
+    return result
+
+
 def _remote_auth_headers(headers=None) -> dict[str, str]:
     result = _filter_proxy_headers(headers or {})
     api_key = os.getenv("HERMES_API_KEY", "").strip()
@@ -93,7 +113,7 @@ async def _proxy_workspace_port_http(workspace_id: str, port: int, request: Requ
     return StreamingResponse(
         _stream_remote_proxy_response(client, response),
         status_code=response.status_code,
-        headers=_filter_proxy_headers(response.headers),
+        headers=_filter_proxy_response_headers(response.headers),
     )
 
 

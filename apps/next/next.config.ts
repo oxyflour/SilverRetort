@@ -24,6 +24,16 @@ const nextConfig: NextConfig = {
     return {
       beforeFiles: [
         {
+          source: "/:path*",
+          has: [
+            {
+              type: "host",
+              value: "(?<artifactId>[a-z0-9](?:[a-z0-9-]{0,62}))\\.artifact\\.localhost(?::\\d+)?",
+            },
+          ],
+          destination: `${backend}/__artifact-origin/:artifactId/:path*`,
+        },
+        {
           source: "/api/workspace-proxy/:path*",
           destination: `${backend}/api/workspace-proxy/:path*`,
         },
