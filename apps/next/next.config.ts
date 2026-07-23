@@ -18,6 +18,14 @@ const nextConfig: NextConfig = {
     "silverretort-template-industrial-design",
     "silverretort-template-algorithm-research",
   ],
+  async headers() {
+    return [
+      {
+        source: "/artifact-modules/:path*",
+        headers: [{ key: "Access-Control-Allow-Origin", value: "*" }],
+      },
+    ];
+  },
   async rewrites() {
     const backend = (process.env.API_REWRITE ?? "http://127.0.0.1:23001/")
       .replace(/\/$/, "");

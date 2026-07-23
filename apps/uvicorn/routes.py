@@ -93,7 +93,7 @@ from api_routes.proxy import (
     _stream_remote_proxy_response,
     _validate_workspace_proxy_request,
 )
-from api_routes.system import RenderTypesRequest, event_stream, report_render_types, restart_app
+from api_routes.system import event_stream, restart_app
 from api_routes.workspaces import (
     _compact_message,
     create_session,

@@ -4,7 +4,6 @@ import { useEffect, useState } from "react";
 import { PanelLeftClose, PanelLeftOpen } from "lucide-react";
 import { Panel, PanelGroup, PanelResizeHandle } from "react-resizable-panels";
 import { subscribeEvents } from "silverretort-protocol";
-import { listRenderDefinitions } from "../registry";
 import { registerBuiltinRenderers } from "../renderers/builtins";
 import { useChatStore } from "../store";
 import { ArtifactPanel } from "./ArtifactPanel";
@@ -46,15 +45,7 @@ export function ChatApp() {
     // Subscribe to run events and MCP UI commands through one long-lived event stream.
     const stop = subscribeEvents(store.client.eventsUrl(), {
       onEvent: (event) => useChatStore.getState().applyEvent(event),
-      onConnected: () => {
-        void useChatStore.getState().resyncCurrent();
-        // Report registered renderers so the agent can discover them via MCP.
-        void fetch("/api/render-types", {
-          method: "POST",
-          headers: { "content-type": "application/json" },
-          body: JSON.stringify({ renderers: listRenderDefinitions() }),
-        });
-      },
+      onConnected: () => void useChatStore.getState().resyncCurrent(),
     });
     return () => {
       window.removeEventListener("silverretort:model-settings-changed", refreshModelSettings);
