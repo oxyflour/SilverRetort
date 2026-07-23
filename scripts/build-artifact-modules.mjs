@@ -58,7 +58,13 @@ for (const definition of moduleDefinitions) {
     importPath: `/artifact-modules/${definition.id}.js`,
     description: definition.description,
     exports: definition.exports,
-    usage: "In iframe JavaScript, dynamically import importUrl, then call module.mount(element, payload). The returned function unmounts the module.",
+    usage: [
+      "This is an ES module, not a classic script or UMD bundle.",
+      "It does not define window globals such as window.CircuitComponents.",
+      "Load it with: const { mount } = await import(importUrl);",
+      "Then call: const unmount = mount(document.getElementById('root'), payload);",
+      "Call unmount() when the iframe no longer needs the component.",
+    ].join(" "),
     payloadSchema: JSON.parse(
       await readFile(path.join(packageDir, definition.payloadSchema), "utf8"),
     ),

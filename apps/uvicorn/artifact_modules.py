@@ -9,7 +9,7 @@ ARTIFACT_MODULES = json.loads(r'''[
     "exports": [
       "mount"
     ],
-    "usage": "In iframe JavaScript, dynamically import importUrl, then call module.mount(element, payload). The returned function unmounts the module.",
+    "usage": "This is an ES module, not a classic script or UMD bundle. It does not define window globals such as window.CircuitComponents. Load it with: const { mount } = await import(importUrl); Then call: const unmount = mount(document.getElementById('root'), payload); Call unmount() when the iframe no longer needs the component.",
     "payloadSchema": {
       "$schema": "http://json-schema.org/draft-07/schema#",
       "type": "object",
@@ -92,7 +92,7 @@ ARTIFACT_MODULES = json.loads(r'''[
       "DEFAULT_CIRCUIT",
       "normalizeCircuitData"
     ],
-    "usage": "In iframe JavaScript, dynamically import importUrl, then call module.mount(element, payload). The returned function unmounts the module.",
+    "usage": "This is an ES module, not a classic script or UMD bundle. It does not define window globals such as window.CircuitComponents. Load it with: const { mount } = await import(importUrl); Then call: const unmount = mount(document.getElementById('root'), payload); Call unmount() when the iframe no longer needs the component.",
     "payloadSchema": {
       "$schema": "http://json-schema.org/draft-07/schema#",
       "type": "object",
