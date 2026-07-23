@@ -7,8 +7,7 @@ ARTIFACT_MODULES = json.loads(r'''[
     "importPath": "/artifact-modules/demo-stat.js",
     "description": "React component for a compact statistic card.",
     "exports": [
-      "DemoStat",
-      "mount"
+      "DemoStat"
     ],
     "importMap": {
       "imports": {
@@ -18,7 +17,7 @@ ARTIFACT_MODULES = json.loads(r'''[
       }
     },
     "jsxExample": "import React, { createRoot } from \"silverretort/runtime\";\nimport { DemoStat } from \"silverretort/demo-stat\";\ncreateRoot(document.getElementById(\"root\")).render(<DemoStat payload={payload} />);",
-    "usage": "This is an ES module and does not define window globals. Merge importMap.imports into an import map before loading module scripts. Compiled JSX may import and compose named components from silverretort/demo-stat. Import React and createRoot from silverretort/runtime; browsers do not execute raw JSX, so compile JSX first. For a standalone mount, import { mount } from the same specifier and call mount(element, payload).",
+    "usage": "This is an ES module and does not define window globals. Merge importMap.imports into an import map before loading module scripts. Compiled JSX may import and compose named components from silverretort/demo-stat. Import React and createRoot from silverretort/runtime; browsers do not execute raw JSX, so compile JSX first. Render exported components in the iframe application's own React tree.",
     "payloadSchema": {
       "$schema": "http://json-schema.org/draft-07/schema#",
       "type": "object",
@@ -98,7 +97,6 @@ ARTIFACT_MODULES = json.loads(r'''[
     "description": "Interactive RF/electrical circuit React component and circuit helpers.",
     "exports": [
       "Circuit",
-      "mount",
       "DEFAULT_CIRCUIT",
       "normalizeCircuitData"
     ],
@@ -110,7 +108,7 @@ ARTIFACT_MODULES = json.loads(r'''[
       }
     },
     "jsxExample": "import React, { createRoot } from \"silverretort/runtime\";\nimport { Circuit } from \"silverretort/circuit\";\ncreateRoot(document.getElementById(\"root\")).render(<Circuit data={payload} />);",
-    "usage": "This is an ES module and does not define window globals. Merge importMap.imports into an import map before loading module scripts. Compiled JSX may import and compose named components from silverretort/circuit. Import React and createRoot from silverretort/runtime; browsers do not execute raw JSX, so compile JSX first. For a standalone mount, import { mount } from the same specifier and call mount(element, payload).",
+    "usage": "This is an ES module and does not define window globals. Merge importMap.imports into an import map before loading module scripts. Compiled JSX may import and compose named components from silverretort/circuit. Import React and createRoot from silverretort/runtime; browsers do not execute raw JSX, so compile JSX first. Render exported components in the iframe application's own React tree.",
     "payloadSchema": {
       "$schema": "http://json-schema.org/draft-07/schema#",
       "type": "object",

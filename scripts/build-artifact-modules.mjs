@@ -10,7 +10,7 @@ const moduleDefinitions = [
     packageDir: "artifact-ui-demo",
     entry: "src/browser.ts",
     description: "React component for a compact statistic card.",
-    exports: ["DemoStat", "mount"],
+    exports: ["DemoStat"],
     payloadSchema: "src/generated/demo-stat.schema.json",
   },
   {
@@ -18,7 +18,7 @@ const moduleDefinitions = [
     packageDir: "circuit-ui",
     entry: "src/browser.ts",
     description: "Interactive RF/electrical circuit React component and circuit helpers.",
-    exports: ["Circuit", "mount", "DEFAULT_CIRCUIT", "normalizeCircuitData"],
+    exports: ["Circuit", "DEFAULT_CIRCUIT", "normalizeCircuitData"],
     payloadSchema: "src/generated/circuit-data.schema.json",
     worker: "src/routing.worker.ts",
   },
@@ -93,7 +93,7 @@ for (const definition of moduleDefinitions) {
       "Merge importMap.imports into an import map before loading module scripts.",
       `Compiled JSX may import and compose named components from silverretort/${definition.id}.`,
       "Import React and createRoot from silverretort/runtime; browsers do not execute raw JSX, so compile JSX first.",
-      "For a standalone mount, import { mount } from the same specifier and call mount(element, payload).",
+      "Render exported components in the iframe application's own React tree.",
     ].join(" "),
     payloadSchema: JSON.parse(
       await readFile(path.join(packageDir, definition.payloadSchema), "utf8"),
