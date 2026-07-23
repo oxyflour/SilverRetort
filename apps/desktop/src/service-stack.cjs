@@ -95,11 +95,25 @@ async function buildArtifactModules(config) {
         return;
     }
     const workspaceRoot = path.resolve(config.serviceRoot, "..");
-    const command = process.platform === "win32" ? "pnpm.cmd" : "pnpm";
-    const child = spawn(command, ["--filter", "silverretort-artifact-esm", "build"], {
+    const env = config.buildChildEnv();
+    const pnpmScript = env.npm_execpath;
+    let command;
+    let args;
+    if (process.platform === "win32") {
+        command = env.ComSpec || env.COMSPEC || "cmd.exe";
+        args = ["/d", "/s", "/c", "pnpm --filter silverretort-artifact-esm build"];
+    } else if (pnpmScript && existsSync(pnpmScript)) {
+        command = env.npm_node_execpath || process.execPath;
+        args = [pnpmScript, "--filter", "silverretort-artifact-esm", "build"];
+    } else {
+        command = "pnpm";
+        args = ["--filter", "silverretort-artifact-esm", "build"];
+    }
+    const child = spawn(command, args, {
         cwd: workspaceRoot,
-        env: config.buildChildEnv(),
+        env,
         stdio: "inherit",
+        windowsHide: true,
     });
     await new Promise((resolve, reject) => {
         child.once("error", reject);
