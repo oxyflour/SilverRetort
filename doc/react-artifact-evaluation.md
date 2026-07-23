@@ -124,7 +124,12 @@ iframe 使用按 artifact ID 划分的专用 origin，而 ESM 由应用 asset or
 - ESM 不能依赖 chat-ui DOM、CSS 或全局 React；它是可独立加载的产物。
 - agent 如使用 `/artifact-components/...` 相对路径，请求会先落到当前 artifact
   的专用 origin。artifact origin middleware 会将该保留路径重定向到应用
-  asset origin，不会将它当作 workspace 文件或 workspacePort 路由。
+  asset origin，不会将它当作 workspace 文件或 workspacePort 路由。重定向响应
+  本身也必须返回 CORS/CORP/Private-Network 响应头，因为 module fetch 会校验
+  整条 redirect chain，而不只是最终 ESM 响应。
+- artifact origin middleware 对它转发的 workspace 文件和 workspacePort HTTP
+  响应统一补全同样的 CORS/CORP/Private-Network 响应头，使 sandbox 导致的
+  opaque (`null`) origin 也能加载 artifact 页面及其内部资源。
 
 ## 交互
 

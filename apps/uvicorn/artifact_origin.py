@@ -13,6 +13,26 @@ ARTIFACT_ID_RE = re.compile(r"^[a-z0-9](?:[a-z0-9-]{0,62})$")
 BRIDGE_PATH = "/artifact-bridge-v1.js"
 INTERNAL_ORIGIN_PATH_RE = re.compile(r"^/__artifact-origin/([^/]+)(/.*)?$")
 ARTIFACT_COMPONENTS_PATH = "/artifact-components/"
+ARTIFACT_CORS_HEADERS = {
+    "Access-Control-Allow-Origin": "*",
+    "Access-Control-Allow-Private-Network": "true",
+    "Cross-Origin-Resource-Policy": "cross-origin",
+}
+
+
+def _artifact_cors_send(send):
+    async def send_with_headers(message):
+        if message["type"] == "http.response.start":
+            headers = list(message.get("headers", []))
+            present = {key.lower() for key, _value in headers}
+            for key, value in ARTIFACT_CORS_HEADERS.items():
+                encoded_key = key.lower().encode("latin-1")
+                if encoded_key not in present:
+                    headers.append((encoded_key, value.encode("latin-1")))
+            message = {**message, "headers": headers}
+        await send(message)
+
+    return send_with_headers
 
 
 def _base_url():
@@ -111,7 +131,11 @@ class ArtifactOriginMiddleware:
                 target = f"{public_base_url}{request_path}"
                 if query:
                     target = f"{target}?{query}"
-                await RedirectResponse(target, status_code=307)(scope, receive, send)
+                await RedirectResponse(
+                    target,
+                    status_code=307,
+                    headers=ARTIFACT_CORS_HEADERS,
+                )(scope, receive, send)
                 return
         config = artifact.payload.get("workspacePort")
         if isinstance(config, dict):
@@ -134,4 +158,9 @@ class ArtifactOriginMiddleware:
             return
 
         encoded_path = quote(target_path, safe="/@:+-._~!$&'()*,;=").encode("ascii")
-        await self.app({**scope, "path": target_path, "raw_path": encoded_path}, receive, send)
+        response_send = _artifact_cors_send(send) if scope["type"] == "http" else send
+        await self.app(
+            {**scope, "path": target_path, "raw_path": encoded_path},
+            receive,
+            response_send,
+        )
