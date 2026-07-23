@@ -29,6 +29,21 @@ def get_artifact(artifact_id: str) -> Artifact:
     return artifact
 
 
+@router.get("/artifacts/{artifact_id}/origin")
+def get_artifact_origin(artifact_id: str) -> dict[str, str]:
+    artifact = db.get_artifact(artifact_id)
+    if artifact is None:
+        raise HTTPException(404, "artifact not found")
+    if artifact.type != "iframe" or not isinstance(artifact.payload, dict):
+        raise HTTPException(400, "artifact is not an iframe")
+    if db.get_session(artifact.session_id) is None:
+        raise HTTPException(404, "artifact session not found")
+    path = ""
+    if "workspacePort" in artifact.payload:
+        _port, path = _workspace_port_payload_target(artifact.payload)
+    return {"url": artifact_origin_url(artifact.id, path)}
+
+
 @router.get("/sessions/{session_id}/artifact-contexts")
 def list_artifact_contexts(session_id: str) -> list[ArtifactContext]:
     if db.get_session(session_id) is None:

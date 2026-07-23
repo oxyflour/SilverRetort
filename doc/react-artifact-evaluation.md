@@ -131,6 +131,12 @@ iframe 使用按 artifact ID 划分的专用 origin，而 ESM 由应用 asset or
   响应统一补全同样的 CORS/CORP/Private-Network 响应头，使 sandbox 导致的
   opaque (`null`) origin 也能加载 artifact 页面及其内部资源。
 
+对 `{ "path": "circuit.html" }` 这类本地 iframe artifact，`path` 是 workspace entry
+文件，不是浏览器最终显示的 URL。前端会先从同源
+`/api/artifacts/{id}/origin` 取得专用 origin URL，再将该 URL 直接设为 iframe
+`src`。这避免了 sandbox iframe 先请求同源 content endpoint、再通过跨源 307
+跳转到 artifact root 时出现 opaque-origin/request-mode 冲突。
+
 ## 交互
 
 组件如需将用户操作返回 agent，继续使用

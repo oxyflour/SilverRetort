@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import {
   ApiClient,
   ArtifactContextMessageSchema,
@@ -34,11 +34,29 @@ export function IframeRenderer({ artifact }: ArtifactRendererProps) {
     [artifact.payload],
   );
   const payload = parsedPayload.success ? parsedPayload.data : null;
-  const src =
-    payload && "url" in payload
-      ? payload.url
-      : `/api/artifacts/${encodeURIComponent(artifact.id)}/content/`;
   const isExternal = Boolean(payload && "url" in payload);
+  const [localSrc, setLocalSrc] = useState<string | null>(null);
+  const src = payload && "url" in payload ? payload.url : localSrc;
+
+  useEffect(() => {
+    if (!payload || "url" in payload) return;
+    const controller = new AbortController();
+    setLocalSrc(null);
+    void fetch(`/api/artifacts/${encodeURIComponent(artifact.id)}/origin`, {
+      signal: controller.signal,
+    })
+      .then(async (response) => {
+        if (!response.ok) throw new Error(`HTTP ${response.status}`);
+        const body = await response.json() as { url?: unknown };
+        if (typeof body.url !== "string") throw new Error("Invalid artifact origin response");
+        setLocalSrc(body.url);
+      })
+      .catch((error) => {
+        if (error instanceof DOMException && error.name === "AbortError") return;
+        console.error("Failed to resolve artifact origin:", error);
+      });
+    return () => controller.abort();
+  }, [artifact.id, payload]);
 
   useEffect(() => {
     if (!payload || "url" in payload) {
@@ -108,12 +126,20 @@ export function IframeRenderer({ artifact }: ArtifactRendererProps) {
       iframe.removeEventListener("load", connect);
       activePort?.close();
     };
-  }, [artifact.id, client, payload]);
+  }, [artifact.id, client, payload, src]);
 
   if (!payload) {
     return (
       <div className="flex h-full items-center justify-center p-4 text-sm text-red-500">
         Invalid iframe artifact payload
+      </div>
+    );
+  }
+
+  if (!src) {
+    return (
+      <div className="flex h-full items-center justify-center p-4 text-sm text-neutral-400">
+        Loading artifact...
       </div>
     );
   }
