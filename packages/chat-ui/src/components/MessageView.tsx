@@ -32,10 +32,12 @@ import { hasTodoMerge, isTodoTool } from "./toolCallGroupSupport";
 const markdownRemarkPlugins = [remarkGfm];
 const markdownRehypePlugins = [rehypeHighlight];
 const messageMarkdownComponents: Components = {
-  a: ({ children }) => (
-    <span className="text-current underline decoration-neutral-400">
-      {children}
-    </span>
+  a: ({ node: _node, ...props }) => (
+    <a
+      {...props}
+      target="_blank"
+      rel="noopener noreferrer"
+    />
   ),
 };
 type ArtifactContextMessagePart = Extract<
