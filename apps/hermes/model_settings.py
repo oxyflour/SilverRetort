@@ -59,38 +59,53 @@ def vision_model() -> dict[str, Any]:
 
 
 def collect_models() -> dict[str, Any]:
+    from hermes_cli.config import get_compatible_custom_providers, load_config
+
     default = model_default()
-    provider = default["provider"]
-    model = default["model"]
     models: list[dict[str, Any]] = []
-    if provider and model:
+    seen: set[tuple[str, str]] = set()
+
+    def append_model(
+        provider: str, model: str, provider_label: str, *, current: bool = False
+    ) -> None:
+        provider = provider.strip()
+        model = model.strip()
+        identity = (provider.lower(), model.lower())
+        if not provider or not model or identity in seen:
+            return
+        seen.add(identity)
         models.append(
             {
                 "id": model_id(provider, model),
                 "provider": provider,
-                "providerLabel": provider,
+                "providerLabel": provider_label or provider,
                 "model": model,
                 "label": model.split("/")[-1],
                 "available": True,
-                "current": True,
+                "current": current,
             }
         )
+
+    provider = default["provider"]
+    model = default["model"]
+    append_model(provider, model, provider, current=True)
+
     vision = vision_model()
     vision_provider = str(vision.get("provider") or "")
     vision_name = str(vision.get("model") or "")
-    vision_id = model_id(vision_provider, vision_name)
-    if vision_provider and vision_name and not any(item["id"] == vision_id for item in models):
-        models.append(
-            {
-                "id": vision_id,
-                "provider": vision_provider,
-                "providerLabel": vision_provider,
-                "model": vision_name,
-                "label": vision_name.split("/")[-1],
-                "available": True,
-                "current": False,
-            }
-        )
+    append_model(vision_provider, vision_name, vision_provider)
+
+    for custom_provider in get_compatible_custom_providers(load_config()):
+        name = str(custom_provider.get("name") or "").strip()
+        provider_key = str(custom_provider.get("provider_key") or "").strip()
+        provider = provider_key or f"custom:{name.lower().replace(' ', '-')}"
+        configured_models = custom_provider.get("models")
+        model_names = [str(custom_provider.get("model") or "")]
+        if isinstance(configured_models, dict):
+            model_names.extend(str(item) for item in configured_models)
+        for model_name in model_names:
+            append_model(provider, model_name, name)
+
     return {"models": models, "default": default}
 
 

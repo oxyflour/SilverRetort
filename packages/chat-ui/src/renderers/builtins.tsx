@@ -43,47 +43,6 @@ const iframePayloadSchema = {
   ],
 };
 
-const imagePayloadSchema = {
-  oneOf: [
-    {
-      type: "object",
-      additionalProperties: false,
-      required: ["url"],
-      properties: { url: { type: "string" } },
-    },
-    {
-      type: "object",
-      additionalProperties: false,
-      required: ["src"],
-      properties: { src: { type: "string" } },
-    },
-    {
-      type: "object",
-      additionalProperties: false,
-      required: ["dataUri"],
-      properties: { dataUri: { type: "string" } },
-    },
-    {
-      type: "object",
-      additionalProperties: false,
-      required: ["path"],
-      properties: { path: { type: "string" } },
-    },
-    {
-      type: "object",
-      additionalProperties: false,
-      required: ["filePath"],
-      properties: { filePath: { type: "string" } },
-    },
-    {
-      type: "object",
-      additionalProperties: false,
-      required: ["localPath"],
-      properties: { localPath: { type: "string" } },
-    },
-  ],
-};
-
 const markdownPayloadSchema = {
   type: "object",
   additionalProperties: false,
@@ -99,42 +58,6 @@ function IframeRenderer({ artifact }: ArtifactRendererProps) {
 
   return (
     <InteractiveIframeRenderer artifact={artifact} />
-  );
-}
-
-type ImageArtifactPayload = {
-  url?: string;
-  dataUri?: string;
-  path?: string;
-  filePath?: string;
-  localPath?: string;
-  src?: string;
-};
-
-function isLocalImageUrl(value: string): boolean {
-  return value.startsWith("file://") || /^[A-Za-z]:[\\/]/.test(value) || value.startsWith("\\\\");
-}
-
-function toImageSrc(payload: ImageArtifactPayload): string {
-  const localPath = payload.path ?? payload.filePath ?? payload.localPath;
-  if (localPath) {
-    return `/api/local-image?path=${encodeURIComponent(localPath)}`;
-  }
-  const url = payload.url ?? payload.src;
-  if (url && isLocalImageUrl(url)) {
-    return `/api/local-image?path=${encodeURIComponent(url)}`;
-  }
-  return url ?? payload.dataUri ?? "";
-}
-
-/** image artifact payload：{ url }、{ dataUri } 或 { path/filePath/localPath } */
-function ImageRenderer({ artifact }: ArtifactRendererProps) {
-  const payload = artifact.payload as ImageArtifactPayload;
-  const src = toImageSrc(payload);
-  return (
-    <div className="flex h-full w-full items-center justify-center overflow-auto p-4">
-      <img src={src} alt={artifact.title} className="max-h-full max-w-full object-contain" />
-    </div>
   );
 }
 
@@ -159,12 +82,6 @@ export function registerBuiltinRenderers() {
     renderer: IframeRenderer,
     description: "Iframe artifact served from a workspace-relative HTML entry file, an external http(s) URL, or a workspace loopback port preview.",
     payloadSchema: iframePayloadSchema,
-  });
-  registerArtifactRenderer({
-    type: "image",
-    renderer: ImageRenderer,
-    description: "Image artifact by URL, data URI, or local path.",
-    payloadSchema: imagePayloadSchema,
   });
   registerArtifactRenderer({
     type: "markdown",
