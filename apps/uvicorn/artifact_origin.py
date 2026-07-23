@@ -63,6 +63,18 @@ def artifact_origin_url(artifact_id: str, path: str = "", query: str = "") -> st
     return urlunsplit((base.scheme, netloc, resource_path, query, ""))
 
 
+def artifact_browser_url(artifact_id: str, path: str = "", query: str = "") -> str:
+    """Build a browser-reachable artifact URL without relying on wildcard localhost DNS."""
+    if not ARTIFACT_ID_RE.fullmatch(artifact_id):
+        raise ValueError("invalid artifact id")
+    public_base_url = os.getenv("SILVERRETORT_PUBLIC_BASE_URL", "").strip().rstrip("/")
+    if not public_base_url:
+        return artifact_origin_url(artifact_id, path, query)
+    resource_path = quote(path.lstrip("/"), safe="/@:+-._~!$&'()*,;=")
+    url = f"{public_base_url}/__artifact-origin/{artifact_id}/{resource_path}"
+    return f"{url}?{query}" if query else url
+
+
 def _artifact_id_from_host(host: str) -> tuple[bool, str | None]:
     hostname = host.partition(":")[0].lower().rstrip(".")
     suffix = f".{_base_url().hostname.lower().rstrip('.')}"

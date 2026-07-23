@@ -35,6 +35,7 @@ export function IframeRenderer({ artifact }: ArtifactRendererProps) {
   );
   const payload = parsedPayload.success ? parsedPayload.data : null;
   const isExternal = Boolean(payload && "url" in payload);
+  const isPathArtifact = Boolean(payload && "path" in payload);
   const [localSrc, setLocalSrc] = useState<string | null>(null);
   const src = payload && "url" in payload ? payload.url : localSrc;
 
@@ -152,7 +153,9 @@ export function IframeRenderer({ artifact }: ArtifactRendererProps) {
       sandbox={
         isExternal
           ? "allow-scripts allow-same-origin allow-forms allow-popups allow-popups-to-escape-sandbox"
-          : "allow-scripts allow-same-origin"
+          : isPathArtifact
+            ? "allow-scripts"
+            : "allow-scripts allow-same-origin"
       }
       src={src}
     />

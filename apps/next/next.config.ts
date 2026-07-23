@@ -34,6 +34,10 @@ const nextConfig: NextConfig = {
     return {
       beforeFiles: [
         {
+          source: "/__artifact-origin/:path*",
+          destination: `${backend}/__artifact-origin/:path*`,
+        },
+        {
           source: "/:path*",
           has: [
             {

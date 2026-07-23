@@ -8,7 +8,7 @@ from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import FileResponse, RedirectResponse, Response, StreamingResponse
 
 import artifact_contexts
-from artifact_origin import artifact_origin_url
+from artifact_origin import artifact_browser_url, artifact_origin_url
 import db
 import workspace_service
 from models import Artifact, ArtifactContext, ArtifactContextUpdateRequest
@@ -41,7 +41,8 @@ def get_artifact_origin(artifact_id: str) -> dict[str, str]:
     path = ""
     if "workspacePort" in artifact.payload:
         _port, path = _workspace_port_payload_target(artifact.payload)
-    return {"url": artifact_origin_url(artifact.id, path)}
+        return {"url": artifact_origin_url(artifact.id, path)}
+    return {"url": artifact_browser_url(artifact.id)}
 
 
 @router.get("/sessions/{session_id}/artifact-contexts")
