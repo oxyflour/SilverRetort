@@ -133,14 +133,9 @@ iframe 使用按 artifact ID 划分的专用 origin，而 ESM 由应用 asset or
 
 对 `{ "path": "circuit.html" }` 这类本地 iframe artifact，`path` 是 workspace entry
 文件，不是浏览器最终显示的 URL。前端会先从同源
-`/api/artifacts/{id}/origin` 取得 `/__artifact-origin/{id}/` URL，再将该 URL
-直接设为 iframe `src`。该 iframe 不授予 `allow-same-origin`，因此即使 URL 使用
-应用 host，页面仍是 opaque origin，不能访问 chat-ui DOM/storage。这一路径不依赖
-Windows 对 `<artifact-id>.artifact.localhost` 的 wildcard localhost 解析，也避免了
-sandbox iframe 先请求同源 content endpoint、再跨源 307 的导航链。
-
-`workspacePort` artifact 仍使用独立 hostname origin，因为它需要保留 `/api` 等根相对
-路由并转发到同一 workspace server。
+`/api/artifacts/{id}/origin` 取得专用 origin URL，再将该 URL 直接设为 iframe
+`src`。这避免了 sandbox iframe 先请求同源 content endpoint、再通过跨源 307
+跳转到 artifact root 时出现 opaque-origin/request-mode 冲突。
 
 ## 交互
 
