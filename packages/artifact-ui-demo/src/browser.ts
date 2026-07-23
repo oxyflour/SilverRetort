@@ -8,3 +8,5 @@ export function mount(element: Element, payload: DemoStatPayload) {
   root.render(createElement(DemoStat, { payload }));
   return () => root.unmount();
 }
+
+export { DemoStat };

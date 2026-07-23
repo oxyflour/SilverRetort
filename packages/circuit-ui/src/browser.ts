@@ -13,4 +13,5 @@ export function mount(
   return () => root.unmount();
 }
 
+export { Circuit };
 export { DEFAULT_CIRCUIT, normalizeCircuitData } from "./defaults";

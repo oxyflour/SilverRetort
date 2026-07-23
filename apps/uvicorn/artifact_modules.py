@@ -7,9 +7,18 @@ ARTIFACT_MODULES = json.loads(r'''[
     "importPath": "/artifact-modules/demo-stat.js",
     "description": "React component for a compact statistic card.",
     "exports": [
+      "DemoStat",
       "mount"
     ],
-    "usage": "This is an ES module, not a classic script or UMD bundle. It does not define window globals such as window.CircuitComponents. Load it with: const { mount } = await import(importUrl); Then call: const unmount = mount(document.getElementById('root'), payload); Call unmount() when the iframe no longer needs the component.",
+    "importMap": {
+      "imports": {
+        "silverretort/runtime": "/artifact-modules/runtime.js",
+        "silverretort/demo-stat": "/artifact-modules/demo-stat.js",
+        "silverretort/circuit": "/artifact-modules/circuit.js"
+      }
+    },
+    "jsxExample": "import React, { createRoot } from \"silverretort/runtime\";\nimport { DemoStat } from \"silverretort/demo-stat\";\ncreateRoot(document.getElementById(\"root\")).render(<DemoStat payload={payload} />);",
+    "usage": "This is an ES module and does not define window globals. Merge importMap.imports into an import map before loading module scripts. Compiled JSX may import and compose named components from silverretort/demo-stat. Import React and createRoot from silverretort/runtime; browsers do not execute raw JSX, so compile JSX first. For a standalone mount, import { mount } from the same specifier and call mount(element, payload).",
     "payloadSchema": {
       "$schema": "http://json-schema.org/draft-07/schema#",
       "type": "object",
@@ -88,11 +97,20 @@ ARTIFACT_MODULES = json.loads(r'''[
     "importPath": "/artifact-modules/circuit.js",
     "description": "Interactive RF/electrical circuit React component and circuit helpers.",
     "exports": [
+      "Circuit",
       "mount",
       "DEFAULT_CIRCUIT",
       "normalizeCircuitData"
     ],
-    "usage": "This is an ES module, not a classic script or UMD bundle. It does not define window globals such as window.CircuitComponents. Load it with: const { mount } = await import(importUrl); Then call: const unmount = mount(document.getElementById('root'), payload); Call unmount() when the iframe no longer needs the component.",
+    "importMap": {
+      "imports": {
+        "silverretort/runtime": "/artifact-modules/runtime.js",
+        "silverretort/demo-stat": "/artifact-modules/demo-stat.js",
+        "silverretort/circuit": "/artifact-modules/circuit.js"
+      }
+    },
+    "jsxExample": "import React, { createRoot } from \"silverretort/runtime\";\nimport { Circuit } from \"silverretort/circuit\";\ncreateRoot(document.getElementById(\"root\")).render(<Circuit data={payload} />);",
+    "usage": "This is an ES module and does not define window globals. Merge importMap.imports into an import map before loading module scripts. Compiled JSX may import and compose named components from silverretort/circuit. Import React and createRoot from silverretort/runtime; browsers do not execute raw JSX, so compile JSX first. For a standalone mount, import { mount } from the same specifier and call mount(element, payload).",
     "payloadSchema": {
       "$schema": "http://json-schema.org/draft-07/schema#",
       "type": "object",

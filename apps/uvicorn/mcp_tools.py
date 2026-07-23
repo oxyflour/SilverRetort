@@ -23,6 +23,12 @@ def _artifact_modules() -> list[dict[str, Any]]:
         {
             **module,
             "importUrl": f"{public_base_url}{module['importPath']}",
+            "importMap": {
+                "imports": {
+                    specifier: f"{public_base_url}{path}"
+                    for specifier, path in module["importMap"]["imports"].items()
+                }
+            },
         }
         for module in ARTIFACT_MODULES
     ]

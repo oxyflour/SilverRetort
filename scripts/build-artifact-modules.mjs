@@ -1,5 +1,5 @@
 import { build } from "esbuild";
-import { mkdir, readFile, writeFile } from "node:fs/promises";
+import { mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import path from "node:path";
 
 const root = path.resolve(import.meta.dirname, "..");
@@ -10,7 +10,7 @@ const moduleDefinitions = [
     packageDir: "artifact-ui-demo",
     entry: "src/browser.ts",
     description: "React component for a compact statistic card.",
-    exports: ["mount"],
+    exports: ["DemoStat", "mount"],
     payloadSchema: "src/generated/demo-stat.schema.json",
   },
   {
@@ -18,27 +18,41 @@ const moduleDefinitions = [
     packageDir: "circuit-ui",
     entry: "src/browser.ts",
     description: "Interactive RF/electrical circuit React component and circuit helpers.",
-    exports: ["mount", "DEFAULT_CIRCUIT", "normalizeCircuitData"],
+    exports: ["Circuit", "mount", "DEFAULT_CIRCUIT", "normalizeCircuitData"],
     payloadSchema: "src/generated/circuit-data.schema.json",
     worker: "src/routing.worker.ts",
   },
 ];
 
+await rm(outputDir, { recursive: true, force: true });
 await mkdir(outputDir, { recursive: true });
 const modules = [];
+
+await build({
+  entryPoints: {
+    runtime: path.join(root, "scripts", "artifact-runtime.ts"),
+    ...Object.fromEntries(
+      moduleDefinitions.map((definition) => [
+        definition.id,
+        path.join(root, "packages", definition.packageDir, definition.entry),
+      ]),
+    ),
+  },
+  outdir: outputDir,
+  bundle: true,
+  splitting: true,
+  format: "esm",
+  platform: "browser",
+  target: "es2020",
+  jsx: "automatic",
+  entryNames: "[name]",
+  chunkNames: "chunks/[name]-[hash]",
+  nodePaths: [path.join(root, "apps", "next", "node_modules")],
+});
 
 for (const definition of moduleDefinitions) {
   const packageDir = path.join(root, "packages", definition.packageDir);
   const outputFile = path.join(outputDir, `${definition.id}.js`);
-  await build({
-    entryPoints: [path.join(packageDir, definition.entry)],
-    outfile: outputFile,
-    bundle: true,
-    format: "esm",
-    platform: "browser",
-    target: "es2020",
-    jsx: "automatic",
-  });
 
   if (definition.worker) {
     const source = await readFile(outputFile, "utf8");
@@ -58,12 +72,28 @@ for (const definition of moduleDefinitions) {
     importPath: `/artifact-modules/${definition.id}.js`,
     description: definition.description,
     exports: definition.exports,
+    importMap: {
+      imports: {
+        "silverretort/runtime": "/artifact-modules/runtime.js",
+        ...Object.fromEntries(
+          moduleDefinitions.map((item) => [
+            `silverretort/${item.id}`,
+            `/artifact-modules/${item.id}.js`,
+          ]),
+        ),
+      },
+    },
+    jsxExample: [
+      'import React, { createRoot } from "silverretort/runtime";',
+      `import { ${definition.exports[0]} } from "silverretort/${definition.id}";`,
+      `createRoot(document.getElementById("root")).render(<${definition.exports[0]} ${definition.id === "circuit" ? "data" : "payload"}={payload} />);`,
+    ].join("\n"),
     usage: [
-      "This is an ES module, not a classic script or UMD bundle.",
-      "It does not define window globals such as window.CircuitComponents.",
-      "Load it with: const { mount } = await import(importUrl);",
-      "Then call: const unmount = mount(document.getElementById('root'), payload);",
-      "Call unmount() when the iframe no longer needs the component.",
+      "This is an ES module and does not define window globals.",
+      "Merge importMap.imports into an import map before loading module scripts.",
+      `Compiled JSX may import and compose named components from silverretort/${definition.id}.`,
+      "Import React and createRoot from silverretort/runtime; browsers do not execute raw JSX, so compile JSX first.",
+      "For a standalone mount, import { mount } from the same specifier and call mount(element, payload).",
     ].join(" "),
     payloadSchema: JSON.parse(
       await readFile(path.join(packageDir, definition.payloadSchema), "utf8"),
