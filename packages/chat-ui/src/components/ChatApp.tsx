@@ -76,6 +76,7 @@ export function ChatApp() {
       void useChatStore.getState().refreshSessions();
     };
     window.addEventListener("silverretort:switch-profiles-changed", refreshSwitchProfiles);
+    void reportArtifactCapabilities();
     // Subscribe to run events and MCP UI commands through one long-lived event stream.
     const stop = subscribeEvents(store.client.eventsUrl(), {
       onEvent: (event) => useChatStore.getState().applyEvent(event),

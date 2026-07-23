@@ -90,6 +90,29 @@ function startNextServer(config, utilityProcess, nextPort, pythonPort) {
     });
 }
 
+async function buildArtifactModules(config) {
+    if (config.isPackaged) {
+        return;
+    }
+    const workspaceRoot = path.resolve(config.serviceRoot, "..");
+    const command = process.platform === "win32" ? "pnpm.cmd" : "pnpm";
+    const child = spawn(command, ["--filter", "silverretort-artifact-esm", "build"], {
+        cwd: workspaceRoot,
+        env: config.buildChildEnv(),
+        stdio: "inherit",
+    });
+    await new Promise((resolve, reject) => {
+        child.once("error", reject);
+        child.once("exit", (code, signal) => {
+            if (code === 0) {
+                resolve();
+                return;
+            }
+            reject(new Error(`artifact ESM build failed (${signal ?? code ?? "unknown"})`));
+        });
+    });
+}
+
 function buildUvicornEnv(config, hermesMode, pythonPort, publicBaseUrl = "", managedMcpControl = null) {
     const mcpsRoot = resolveMcpsRoot(config);
     return config.buildChildEnv({
@@ -132,6 +155,7 @@ async function startServiceStack({ config, supervisor, utilityProcess, ports = {
     const managedMcp = createManagedMcpService({ config, supervisor });
     const managedMcpControl = await managedMcp.startControlServer();
     await managedMcp.startAuto();
+    await buildArtifactModules(config);
 
     const publicBaseUrl = `http://127.0.0.1:${nextPort}`;
     const uvicorn = spawn(pythonRuntime.command, pythonRuntime.args, {
@@ -169,6 +193,7 @@ module.exports = {
     assertUrl,
     waitForHttpResponse,
     buildUvicornEnv,
+    buildArtifactModules,
     resolveNextEntry,
     resolvePythonRuntime,
     startServiceStack,

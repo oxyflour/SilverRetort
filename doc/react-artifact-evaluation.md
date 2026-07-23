@@ -143,6 +143,9 @@ iframe 使用按 artifact ID 划分的专用 origin，而 ESM 由应用 asset or
 `packages/artifact-esm` 构建为带独立 CSS/worker 资源的 ESM，Next 启动和构建前
 会自动刷新产物。前端连接后端时读取生成的 catalog，将模块 URL
 转换为当前应用 origin 下的绝对 URL，再与 renderer 能力一起上报。
+由于 desktop 开发模式直接启动 Next CLI，不会触发 package 的 `predev`，desktop
+服务栈会在启动 Next 前显式执行一次 ESM 构建，保证 catalog 不会因静态产物
+缺失而上报为空。
 
 ## 验收标准
 
