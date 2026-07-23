@@ -182,7 +182,6 @@ async def get_artifact_content(
         return RedirectResponse(
             artifact_origin_url(artifact.id, path, request.url.query),
             status_code=307,
-            headers=_artifact_content_headers(),
         )
     if request.method not in {"GET", "HEAD"}:
         raise HTTPException(405, "iframe file artifacts only support GET and HEAD")
@@ -192,7 +191,6 @@ async def get_artifact_content(
         return RedirectResponse(
             artifact_origin_url(artifact.id, asset_path or "", request.url.query),
             status_code=307,
-            headers=_artifact_content_headers(),
         )
     try:
         relative_path = workspace_service.resolve_artifact_asset(payload["path"], asset_path)

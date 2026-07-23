@@ -55,15 +55,7 @@ async def _reject(scope, receive, send, message: str = "artifact not found") -> 
     if scope["type"] == "websocket":
         await send({"type": "websocket.close", "code": 1008, "reason": message})
         return
-    await PlainTextResponse(
-        message,
-        status_code=404,
-        headers={
-            "Access-Control-Allow-Origin": "*",
-            "Access-Control-Allow-Private-Network": "true",
-            "Cross-Origin-Resource-Policy": "cross-origin",
-        },
-    )(scope, receive, send)
+    await PlainTextResponse(message, status_code=404)(scope, receive, send)
 
 
 class ArtifactOriginMiddleware:
