@@ -16,3 +16,7 @@ def set_render_types(types: list[str]) -> None:
 
 def set_render_definitions(renderers: list[dict]) -> None:
     mcp_tools.set_render_definitions(renderers)
+
+
+def set_artifact_modules(modules: list[dict]) -> None:
+    mcp_tools.set_artifact_modules(modules)

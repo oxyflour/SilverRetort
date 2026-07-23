@@ -1,0 +1,10 @@
+@import "tailwindcss";
+@source "../../artifact-ui-demo/src";
+@source "../../circuit-ui/src";
+
+html,
+body,
+#root {
+  height: 100%;
+  margin: 0;
+}

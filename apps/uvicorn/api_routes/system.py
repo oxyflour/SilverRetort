@@ -31,6 +31,7 @@ async def event_stream() -> EventSourceResponse:
 class RenderTypesRequest(ApiModel):
     types: list[str] = []
     renderers: list[dict] = []
+    artifact_modules: list[dict] = []
 
 
 @router.post("/render-types")
@@ -39,4 +40,5 @@ def report_render_types(body: RenderTypesRequest) -> dict[str, bool]:
         mcp_server.set_render_definitions(body.renderers)
     else:
         mcp_server.set_render_types(body.types)
+    mcp_server.set_artifact_modules(body.artifact_modules)
     return {"ok": True}

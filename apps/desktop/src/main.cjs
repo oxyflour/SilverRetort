@@ -91,10 +91,15 @@ function getRuntime() {
                 app.quit();
             },
         });
+        const serviceUrlPromise = startServiceStack({ config, supervisor, utilityProcess });
+        // createDesktopWindow awaits this shortly afterwards. Attach a rejection
+        // handler immediately so startup failures are not reported as temporarily
+        // unhandled while Electron is still creating the window.
+        void serviceUrlPromise.catch(() => {});
         runtime = {
             config,
             supervisor,
-            serviceUrlPromise: startServiceStack({ config, supervisor, utilityProcess }),
+            serviceUrlPromise,
         };
     }
     return runtime;

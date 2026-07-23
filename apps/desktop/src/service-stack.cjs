@@ -90,6 +90,41 @@ function startNextServer(config, utilityProcess, nextPort, pythonPort) {
     });
 }
 
+async function buildArtifactModules(config) {
+    if (config.isPackaged) {
+        return;
+    }
+    const workspaceRoot = path.resolve(config.serviceRoot, "..");
+    const packageRoot = path.join(workspaceRoot, "packages", "artifact-esm");
+    const viteCli = path.join(packageRoot, "node_modules", "vite", "bin", "vite.js");
+    const env = config.buildChildEnv();
+    if (!existsSync(viteCli)) {
+        throw new Error(`missing artifact ESM build tool: ${viteCli}`);
+    }
+    const nodeExecutable = env.npm_node_execpath && existsSync(env.npm_node_execpath)
+        ? env.npm_node_execpath
+        : process.execPath;
+    if (nodeExecutable === process.execPath && process.versions.electron) {
+        env.ELECTRON_RUN_AS_NODE = "1";
+    }
+    const child = spawn(nodeExecutable, [viteCli, "build"], {
+        cwd: packageRoot,
+        env,
+        stdio: "inherit",
+        windowsHide: true,
+    });
+    await new Promise((resolve, reject) => {
+        child.once("error", reject);
+        child.once("exit", (code, signal) => {
+            if (code === 0) {
+                resolve();
+                return;
+            }
+            reject(new Error(`artifact ESM build failed (${signal ?? code ?? "unknown"})`));
+        });
+    });
+}
+
 function buildUvicornEnv(config, hermesMode, pythonPort, publicBaseUrl = "", managedMcpControl = null) {
     const mcpsRoot = resolveMcpsRoot(config);
     return config.buildChildEnv({
@@ -132,6 +167,7 @@ async function startServiceStack({ config, supervisor, utilityProcess, ports = {
     const managedMcp = createManagedMcpService({ config, supervisor });
     const managedMcpControl = await managedMcp.startControlServer();
     await managedMcp.startAuto();
+    await buildArtifactModules(config);
 
     const publicBaseUrl = `http://127.0.0.1:${nextPort}`;
     const uvicorn = spawn(pythonRuntime.command, pythonRuntime.args, {
@@ -169,6 +205,7 @@ module.exports = {
     assertUrl,
     waitForHttpResponse,
     buildUvicornEnv,
+    buildArtifactModules,
     resolveNextEntry,
     resolvePythonRuntime,
     startServiceStack,
