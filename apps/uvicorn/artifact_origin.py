@@ -4,7 +4,7 @@ import os
 import re
 from urllib.parse import quote, urlsplit, urlunsplit
 
-from starlette.responses import PlainTextResponse
+from starlette.responses import PlainTextResponse, RedirectResponse
 
 import db
 
@@ -12,6 +12,7 @@ import db
 ARTIFACT_ID_RE = re.compile(r"^[a-z0-9](?:[a-z0-9-]{0,62})$")
 BRIDGE_PATH = "/artifact-bridge-v1.js"
 INTERNAL_ORIGIN_PATH_RE = re.compile(r"^/__artifact-origin/([^/]+)(/.*)?$")
+ARTIFACT_COMPONENTS_PATH = "/artifact-components/"
 
 
 def _base_url():
@@ -103,6 +104,15 @@ class ArtifactOriginMiddleware:
             return
 
         request_path = scope.get("path", "/")
+        if scope["type"] == "http" and request_path.startswith(ARTIFACT_COMPONENTS_PATH):
+            public_base_url = os.getenv("SILVERRETORT_PUBLIC_BASE_URL", "").strip().rstrip("/")
+            if public_base_url:
+                query = scope.get("query_string", b"").decode("latin-1")
+                target = f"{public_base_url}{request_path}"
+                if query:
+                    target = f"{target}?{query}"
+                await RedirectResponse(target, status_code=307)(scope, receive, send)
+                return
         config = artifact.payload.get("workspacePort")
         if isinstance(config, dict):
             port = config.get("port")

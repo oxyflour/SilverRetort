@@ -122,6 +122,9 @@ iframe 使用按 artifact ID 划分的专用 origin，而 ESM 由应用 asset or
 - 使用内容 hash 的不可变 chunk URL，entry URL 按 catalog 大版本管理。
 - CSS、字体、图片、WASM 和 worker URL 由构建器处理，且被 iframe CSP 允许。
 - ESM 不能依赖 chat-ui DOM、CSS 或全局 React；它是可独立加载的产物。
+- agent 如使用 `/artifact-components/...` 相对路径，请求会先落到当前 artifact
+  的专用 origin。artifact origin middleware 会将该保留路径重定向到应用
+  asset origin，不会将它当作 workspace 文件或 workspacePort 路由。
 
 ## 交互
 
