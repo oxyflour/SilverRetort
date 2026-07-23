@@ -18,7 +18,7 @@ function classifyWindowOpen(target, baseUrl) {
     if (targetUrl.origin === appOrigin && targetUrl.pathname.startsWith("/artifacts/")) {
         return { kind: "artifact", url: targetUrl.toString() };
     }
-    if ((targetUrl.protocol === "http:" || targetUrl.protocol === "https:") && targetUrl.origin !== appOrigin) {
+    if (targetUrl.protocol === "http:" || targetUrl.protocol === "https:") {
         return { kind: "external", url: targetUrl.toString() };
     }
     return { kind: "deny" };

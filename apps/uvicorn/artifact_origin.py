@@ -11,11 +11,20 @@ import db
 
 ARTIFACT_ID_RE = re.compile(r"^[a-z0-9](?:[a-z0-9-]{0,62})$")
 BRIDGE_PATH = "/artifact-bridge-v1.js"
+INTERNAL_ORIGIN_PATH_RE = re.compile(r"^/__artifact-origin/([^/]+)(/.*)?$")
 
 
 def _base_url():
     configured = os.getenv("SILVERRETORT_ARTIFACT_ORIGIN_BASE_URL", "").strip()
-    value = configured or f"http://artifact.localhost:{int(os.getenv('LISTEN_PORT', '23001'))}"
+    public_base_url = os.getenv("SILVERRETORT_PUBLIC_BASE_URL", "").strip()
+    if configured:
+        value = configured
+    elif public_base_url:
+        public = urlsplit(public_base_url)
+        netloc = f"artifact.localhost:{public.port}" if public.port is not None else "artifact.localhost"
+        value = urlunsplit((public.scheme, netloc, "", "", ""))
+    else:
+        value = f"http://artifact.localhost:{int(os.getenv('LISTEN_PORT', '23001'))}"
     parsed = urlsplit(value)
     if parsed.scheme not in {"http", "https"} or not parsed.hostname or parsed.path.rstrip("/"):
         raise RuntimeError("invalid SILVERRETORT_ARTIFACT_ORIGIN_BASE_URL")
@@ -61,6 +70,19 @@ class ArtifactOriginMiddleware:
             return
         headers = {key.lower(): value for key, value in scope.get("headers", [])}
         matched, artifact_id = _artifact_id_from_host(headers.get(b"host", b"").decode("latin-1"))
+        internal_match = INTERNAL_ORIGIN_PATH_RE.fullmatch(scope.get("path", ""))
+        if not matched and internal_match:
+            matched = True
+            candidate_id = internal_match.group(1)
+            artifact_id = candidate_id if ARTIFACT_ID_RE.fullmatch(candidate_id) else None
+            request_path = internal_match.group(2) or "/"
+            scope = {
+                **scope,
+                "path": request_path,
+                "raw_path": quote(
+                    request_path, safe="/@:+-._~!$&'()*,;="
+                ).encode("ascii"),
+            }
         if not matched:
             await self.app(scope, receive, send)
             return

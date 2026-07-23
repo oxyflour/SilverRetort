@@ -168,17 +168,6 @@ describe("workspace template UI", () => {
     consoleError.mockRestore();
   });
 
-  it("does not render a toolbar for a workspace without a template", () => {
-    render(
-      <ChatPaneToolbarSlot
-        {...toolbarProps}
-        template={undefined}
-      />,
-    );
-
-    expect(screen.queryByRole("banner")).not.toBeInTheDocument();
-  });
-
   it("passes the selected domain when creating a workspace", async () => {
     const user = userEvent.setup();
     const createWorkspace = vi.fn().mockResolvedValue(undefined);

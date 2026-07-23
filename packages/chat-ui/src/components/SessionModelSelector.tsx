@@ -21,7 +21,12 @@ export function SessionModelSelector() {
   const defaultLabel = sessionModel?.defaultModel
     ? shortModelName(sessionModel.defaultModel)
     : "Default model";
-  const selectedModel = models.find((model) => model.id === value);
+  const selectableModels = models.filter(
+    (model, index) =>
+      !(model.provider === sessionModel?.defaultProvider && model.model === sessionModel.defaultModel) &&
+      models.findIndex((candidate) => candidate.id === model.id) === index,
+  );
+  const selectedModel = selectableModels.find((model) => model.id === value);
   const selectedProvider = selectedModel
     ? providerTitle(selectedModel.provider, selectedModel.providerLabel)
     : defaultProvider;
@@ -49,7 +54,7 @@ export function SessionModelSelector() {
             void setSessionModel(currentSessionId, null);
             return;
           }
-          const selected = models.find((model) => model.id === next);
+          const selected = selectableModels.find((model) => model.id === next);
           if (selected) void setSessionModel(currentSessionId, selected);
         }}
         className="max-w-28 bg-transparent text-xs outline-none disabled:opacity-50"
@@ -59,7 +64,7 @@ export function SessionModelSelector() {
         <option value="__default__" title={`Provider: ${defaultProvider}`}>
           {defaultLabel}
         </option>
-        {models.map((model) => (
+        {selectableModels.map((model) => (
           <option
             key={model.id}
             value={model.id}

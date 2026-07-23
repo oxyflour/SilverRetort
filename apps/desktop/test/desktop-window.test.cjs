@@ -2,10 +2,10 @@ const assert = require("node:assert/strict");
 const test = require("node:test");
 const { classifyWindowOpen, configureWindowOpenHandler } = require("../src/desktop-window.cjs");
 
-test("classifyWindowOpen allows only same-origin artifact routes", () => {
+test("classifyWindowOpen separates artifact routes from browser links", () => {
     const baseUrl = "http://127.0.0.1:23000";
     assert.equal(classifyWindowOpen(`${baseUrl}/artifacts/123`, baseUrl).kind, "artifact");
-    assert.equal(classifyWindowOpen(`${baseUrl}/chat`, baseUrl).kind, "deny");
+    assert.equal(classifyWindowOpen(`${baseUrl}/chat`, baseUrl).kind, "external");
     assert.equal(classifyWindowOpen("not a url", baseUrl).kind, "deny");
 });
 

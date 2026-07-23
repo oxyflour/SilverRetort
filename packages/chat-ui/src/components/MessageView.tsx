@@ -8,7 +8,7 @@ import {
   ExternalLink,
   X,
 } from "lucide-react";
-import ReactMarkdown from "react-markdown";
+import ReactMarkdown, { type Components } from "react-markdown";
 import rehypeHighlight from "rehype-highlight";
 import remarkGfm from "remark-gfm";
 import { Message, MessagePart, ToolCall } from "silverretort-protocol";
@@ -31,6 +31,15 @@ import { hasTodoMerge, isTodoTool } from "./toolCallGroupSupport";
 
 const markdownRemarkPlugins = [remarkGfm];
 const markdownRehypePlugins = [rehypeHighlight];
+const messageMarkdownComponents: Components = {
+  a: ({ node: _node, ...props }) => (
+    <a
+      {...props}
+      target="_blank"
+      rel="noopener noreferrer"
+    />
+  ),
+};
 type ArtifactContextMessagePart = Extract<
   MessagePart,
   { type: "artifact-input" | "artifact-context" }
@@ -476,6 +485,7 @@ function MessageViewComponent({
                     <ReactMarkdown
                       remarkPlugins={markdownRemarkPlugins}
                       rehypePlugins={markdownRehypePlugins}
+                      components={messageMarkdownComponents}
                     >
                       {group.part.text}
                     </ReactMarkdown>

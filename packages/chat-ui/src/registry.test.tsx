@@ -5,9 +5,7 @@ import { listRenderDefinitions, listRenderTypes } from "./registry";
 describe("artifact renderer registry", () => {
   it("has builtin renderers as soon as ChatApp is loaded", () => {
     expect(ChatApp).toBeDefined();
-    expect(listRenderTypes()).toEqual(
-      expect.arrayContaining(["iframe", "image", "markdown"]),
-    );
+    expect(listRenderTypes()).toEqual(["iframe", "markdown"]);
   });
 
   it("reports payload schemas for builtin renderers", () => {
@@ -18,7 +16,7 @@ describe("artifact renderer registry", () => {
       ]),
     );
 
-    for (const type of ["iframe", "image", "markdown"]) {
+    for (const type of ["iframe", "markdown"]) {
       expect(definitions[type]?.payloadSchema).toBeTruthy();
     }
   });
