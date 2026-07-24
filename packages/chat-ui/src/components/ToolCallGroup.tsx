@@ -6,7 +6,7 @@ import {
   ChevronDown,
   ChevronRight,
   Circle,
-  FolderOpen,
+  PanelRight,
   LoaderCircle,
   X,
 } from "lucide-react";
@@ -139,8 +139,7 @@ export function ToolCallGroup({
             onClick={() => onOpenArtifact?.(artifact.id)}
             className="inline-flex items-center gap-1 rounded-md px-2 py-0.5 text-xs text-neutral-500 hover:bg-neutral-100 hover:text-neutral-900 dark:hover:bg-neutral-800 dark:hover:text-neutral-100"
           >
-            <AppIcon icon={FolderOpen} className="h-3.5 w-3.5" />
-            打开
+            <AppIcon icon={PanelRight} className="h-3.5 w-3.5" />
           </button>
         ))}
       </div>

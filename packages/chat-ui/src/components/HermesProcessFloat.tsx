@@ -11,7 +11,7 @@ import {
   ExternalLink,
   LoaderCircle,
   Package,
-  PanelRightOpen,
+  PanelRight,
   Square,
   Terminal,
 } from "lucide-react";
@@ -281,7 +281,7 @@ function ArtifactRow({
         onClick={onOpenInPanel}
         className="shrink-0 rounded p-1 text-neutral-400 hover:bg-neutral-100 hover:text-neutral-900 dark:hover:bg-neutral-800 dark:hover:text-neutral-100"
       >
-        <AppIcon icon={PanelRightOpen} className="h-3.5 w-3.5" />
+        <AppIcon icon={PanelRight} className="h-3.5 w-3.5" />
       </button>
       <button
         type="button"
