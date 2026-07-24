@@ -2,13 +2,16 @@
 
 import { useMemo, useState } from "react";
 import {
-  ArrowUpRight,
   Bot,
   Check,
+  ChevronDown,
+  ChevronRight,
   Clock,
   Copy,
+  ExternalLink,
   LoaderCircle,
   Package,
+  PanelRightOpen,
   Square,
   Terminal,
 } from "lucide-react";
@@ -99,6 +102,7 @@ function ProcessRow({
   onStop: (processId: string) => Promise<void>;
 }) {
   const [copied, setCopied] = useState(false);
+  const [logExpanded, setLogExpanded] = useState(false);
   const [stopping, setStopping] = useState(false);
   const [stopError, setStopError] = useState("");
   const preview = process.outputPreview.trim();
@@ -171,8 +175,24 @@ function ProcessRow({
         <AppIcon icon={Clock} className="h-3 w-3" />
         <span>{formatUptime(process.uptimeSeconds)}</span>
         {process.pid != null && <span>pid {process.pid}</span>}
+        {preview && (
+          <button
+            type="button"
+            title={logExpanded ? "折叠日志" : "展开日志"}
+            aria-label={logExpanded ? "折叠进程日志" : "展开进程日志"}
+            aria-expanded={logExpanded}
+            onClick={() => setLogExpanded((expanded) => !expanded)}
+            className="ml-auto inline-flex items-center gap-1 rounded p-1 text-neutral-400 hover:bg-neutral-100 hover:text-neutral-900 dark:hover:bg-neutral-800 dark:hover:text-neutral-100"
+          >
+            <AppIcon
+              icon={logExpanded ? ChevronDown : ChevronRight}
+              className="h-3.5 w-3.5"
+            />
+            日志
+          </button>
+        )}
       </div>
-      {preview && (
+      {preview && logExpanded && (
         <pre className="mt-2 max-h-20 overflow-auto whitespace-pre-wrap break-words rounded bg-neutral-100 px-2 py-1 font-mono text-[11px] text-neutral-600 dark:bg-neutral-950/60 dark:text-neutral-300">
           {preview}
         </pre>
@@ -256,18 +276,21 @@ function ArtifactRow({
       </div>
       <button
         type="button"
+        title="右侧打开"
+        aria-label={`在右侧打开 ${artifact.title}`}
         onClick={onOpenInPanel}
-        className="shrink-0 rounded px-2 py-1 text-[11px] text-neutral-500 hover:bg-neutral-100 hover:text-neutral-900 dark:hover:bg-neutral-800 dark:hover:text-neutral-100"
+        className="shrink-0 rounded p-1 text-neutral-400 hover:bg-neutral-100 hover:text-neutral-900 dark:hover:bg-neutral-800 dark:hover:text-neutral-100"
       >
-        右侧打开
+        <AppIcon icon={PanelRightOpen} className="h-3.5 w-3.5" />
       </button>
       <button
         type="button"
+        title="弹出打开"
+        aria-label={`弹出打开 ${artifact.title}`}
         onClick={() => openArtifactInNewWindow(artifact.id)}
-        className="inline-flex shrink-0 items-center gap-1 rounded px-2 py-1 text-[11px] text-neutral-500 hover:bg-neutral-100 hover:text-neutral-900 dark:hover:bg-neutral-800 dark:hover:text-neutral-100"
+        className="shrink-0 rounded p-1 text-neutral-400 hover:bg-neutral-100 hover:text-neutral-900 dark:hover:bg-neutral-800 dark:hover:text-neutral-100"
       >
-        弹出打开
-        <AppIcon icon={ArrowUpRight} className="h-3 w-3" />
+        <AppIcon icon={ExternalLink} className="h-3.5 w-3.5" />
       </button>
     </div>
   );
