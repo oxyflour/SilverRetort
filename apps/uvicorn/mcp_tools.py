@@ -92,50 +92,6 @@ BUILTIN_RENDER_DEFINITIONS: list[RenderDefinition] = [
         "modules": _artifact_modules(),
     },
     {
-        "type": "image",
-        "description": "Image artifact by URL, data URI, or local path.",
-        "payloadSchema": {
-            "oneOf": [
-                {
-                    "type": "object",
-                    "additionalProperties": False,
-                    "required": ["url"],
-                    "properties": {"url": {"type": "string"}},
-                },
-                {
-                    "type": "object",
-                    "additionalProperties": False,
-                    "required": ["src"],
-                    "properties": {"src": {"type": "string"}},
-                },
-                {
-                    "type": "object",
-                    "additionalProperties": False,
-                    "required": ["dataUri"],
-                    "properties": {"dataUri": {"type": "string"}},
-                },
-                {
-                    "type": "object",
-                    "additionalProperties": False,
-                    "required": ["path"],
-                    "properties": {"path": {"type": "string"}},
-                },
-                {
-                    "type": "object",
-                    "additionalProperties": False,
-                    "required": ["filePath"],
-                    "properties": {"filePath": {"type": "string"}},
-                },
-                {
-                    "type": "object",
-                    "additionalProperties": False,
-                    "required": ["localPath"],
-                    "properties": {"localPath": {"type": "string"}},
-                },
-            ],
-        },
-    },
-    {
         "type": "markdown",
         "description": "Markdown document artifact.",
         "payloadSchema": {
