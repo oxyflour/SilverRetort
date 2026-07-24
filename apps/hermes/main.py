@@ -8,6 +8,7 @@ import os
 import signal
 import sys
 import threading
+from contextvars import ContextVar
 from pathlib import Path
 from typing import Any
 
@@ -180,12 +181,36 @@ def patch_api_server_usage_tracking() -> None:
         return
 
     original_create_agent = APIServerAdapter._create_agent
+    original_session_model_override_for = APIServerAdapter._session_model_override_for
+    resolving_session_override = ContextVar(
+        "silverretort_resolving_session_override",
+        default=False,
+    )
+
+    def session_model_override_for(self, session_key: str | None) -> dict[str, Any] | None:
+        if resolving_session_override.get():
+            return None
+        return original_session_model_override_for(self, session_key)
 
     def create_agent_with_usage_tracking(self, *args: Any, **kwargs: Any) -> Any:
-        agent = original_create_agent(self, *args, **kwargs)
         session_key = str(
             kwargs.get("gateway_session_key") or kwargs.get("session_id") or ""
         )
+        session_override = original_session_model_override_for(self, session_key)
+        if session_override:
+            # Hermes 0.14 notices a session override only to suppress static
+            # model routing, but does not apply that override when constructing
+            # an API-server agent. Feed it through the existing route path while
+            # hiding it from that one guard so toolbar model changes affect the
+            # next response without changing the global default in Settings.
+            kwargs["route"] = session_override
+            token = resolving_session_override.set(True)
+            try:
+                agent = original_create_agent(self, *args, **kwargs)
+            finally:
+                resolving_session_override.reset(token)
+        else:
+            agent = original_create_agent(self, *args, **kwargs)
         if session_key:
             agents = getattr(self, "_silverretort_usage_agents", None)
             if not isinstance(agents, dict):
@@ -194,6 +219,7 @@ def patch_api_server_usage_tracking() -> None:
             agents[session_key] = agent
         return agent
 
+    APIServerAdapter._session_model_override_for = session_model_override_for
     APIServerAdapter._create_agent = create_agent_with_usage_tracking
     APIServerAdapter._silverretort_usage_tracking_patched = True
 
