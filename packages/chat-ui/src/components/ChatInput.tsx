@@ -11,6 +11,17 @@ interface ChatInputProps {
   onTextChange: (text: string) => void;
 }
 
+type RunningGoalControl = "status" | "pause" | "clear" | "stop";
+
+export function parseRunningGoalControl(text: string): RunningGoalControl | null {
+  const normalized = text.trim().toLowerCase().replace(/\s+/g, " ");
+  if (normalized === "/goal" || normalized === "/goal status") return "status";
+  if (normalized === "/goal pause") return "pause";
+  if (normalized === "/goal clear" || normalized === "/goal done") return "clear";
+  if (normalized === "/goal stop") return "stop";
+  return null;
+}
+
 export function ChatInput({ text, onTextChange }: ChatInputProps) {
   const currentSessionId = useChatStore((s) => s.currentSessionId);
   const running = useChatStore((s) =>
@@ -26,10 +37,15 @@ export function ChatInput({ text, onTextChange }: ChatInputProps) {
   const clearArtifactContext = useChatStore((s) => s.clearArtifactContext);
   const slashCommands = useChatStore((s) => s.slashCommands);
   const refreshHermesControls = useChatStore((s) => s.refreshHermesControls);
+  const refreshGoal = useChatStore((s) => s.refreshGoal);
+  const goalAction = useChatStore((s) => s.goalAction);
   const [draggingFiles, setDraggingFiles] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const trimmedText = text.trim();
+  const runningGoalControl = running
+    ? parseRunningGoalControl(trimmedText)
+    : null;
   const pendingArtifactContexts = useMemo(
     () =>
       Object.values(artifactContexts).filter(
@@ -39,12 +55,22 @@ export function ChatInput({ text, onTextChange }: ChatInputProps) {
   );
   const canSubmit =
     Boolean(currentSessionId) &&
-    !running &&
+    (!running || runningGoalControl !== null) &&
     (trimmedText.length > 0 || pendingAttachments.length > 0);
 
   const submit = () => {
     if (!canSubmit) return;
     onTextChange("");
+    if (currentSessionId && runningGoalControl) {
+      if (runningGoalControl === "status") {
+        void refreshGoal(currentSessionId);
+      } else if (runningGoalControl === "stop") {
+        void goalAction("clear").finally(() => stopRun(currentSessionId));
+      } else {
+        void goalAction(runningGoalControl);
+      }
+      return;
+    }
     void sendMessage(trimmedText);
   };
 
@@ -243,21 +269,33 @@ export function ChatInput({ text, onTextChange }: ChatInputProps) {
             <SessionModelSelector />
             <button
               type="button"
-              title={running ? "\u505c\u6b62\u751f\u6210" : "\u53d1\u9001\u6d88\u606f"}
-              aria-label={running ? "\u505c\u6b62\u751f\u6210" : "\u53d1\u9001\u6d88\u606f"}
+              title={
+                runningGoalControl
+                  ? "发送目标命令"
+                  : running
+                    ? "\u505c\u6b62\u751f\u6210"
+                    : "\u53d1\u9001\u6d88\u606f"
+              }
+              aria-label={
+                runningGoalControl
+                  ? "发送目标命令"
+                  : running
+                    ? "\u505c\u6b62\u751f\u6210"
+                    : "\u53d1\u9001\u6d88\u606f"
+              }
               onClick={() =>
-                running
+                running && !runningGoalControl
                   ? currentSessionId && void stopRun(currentSessionId)
                   : submit()
               }
-              disabled={running ? !currentSessionId : !canSubmit}
+              disabled={running && !runningGoalControl ? !currentSessionId : !canSubmit}
               className={
-                running
+                running && !runningGoalControl
                   ? "flex h-8 w-8 items-center justify-center rounded-full bg-red-600 px-3 text-sm font-medium text-white transition-colors hover:bg-red-700 disabled:opacity-40"
                   : "flex h-8 w-8 items-center justify-center rounded-full bg-neutral-900 text-white transition-colors hover:bg-neutral-700 disabled:bg-neutral-200 disabled:text-neutral-400 dark:bg-neutral-100 dark:text-neutral-900 dark:hover:bg-neutral-300 dark:disabled:bg-neutral-800 dark:disabled:text-neutral-500"
               }
             >
-              {running ? (
+              {running && !runningGoalControl ? (
                 <AppIcon icon={Square} className="h-3.5 w-3.5 fill-current" />
               ) : (
                 <AppIcon icon={SendHorizontal} className="h-4 w-4" />

@@ -90,6 +90,17 @@ class GoalApiTest(unittest.TestCase):
         self.assertEqual(response["action"], "run")
         self.assertEqual(response["prompt"], "Status page implementation")
 
+    def test_stop_clears_the_goal(self):
+        manager = FakeGoalManager()
+        manager.set("Finish the feature")
+        with patch.object(silverretort_api, "_goal_manager", return_value=manager):
+            response = silverretort_api.handle_goal_command(
+                "/goal stop", "silverretort:session-a"
+            )
+
+        self.assertEqual(response["action"], "control")
+        self.assertIsNone(response["goal"])
+
     def test_evaluate_returns_done_state(self):
         manager = FakeGoalManager()
         manager.set("Finish the feature")

@@ -143,7 +143,7 @@ def handle_goal_command(
     elif normalized == "pause":
         manager.pause(pause_reason)
         action = "control"
-    elif normalized == "clear":
+    elif normalized in {"clear", "stop", "done"}:
         manager.clear()
         action = "control"
     elif normalized == "resume":
