@@ -11,7 +11,7 @@
 
 ### 2. packages/chat-ui — 自研三栏 UI ✅
 - `src/store.ts`：zustand，消息按 session_id 分桶，与当前显示解耦（多会话并发基础）
-- `src/registry.tsx`：artifact 渲染器注册表；`src/renderers/builtins.tsx`：内置 iframe（sandboxed）/ image / markdown
+- `src/registry.tsx`：artifact 渲染器注册表；`src/renderers/builtins.tsx`：内置 iframe（sandboxed）/ markdown
 - `src/components/`：ChatApp（react-resizable-panels 三栏 + 事件通道订阅 + 渲染器类型上报）、SessionSidebar（新建/重命名/删除/运行中指示）、ChatPane（自动滚动跟随）、MessageView（流式 Markdown + 工具卡片 + 附件 + artifact chip）、ChatInput（附件上传/粘贴、停止按钮）、ArtifactPanel（tab 切换 + 关闭）
 - 已验证：浏览器中完整跑通（mock 引擎流式回复、工具卡片、artifact 自动开面板、标题自动生成同步、刷新/重启后历史保留）
 

@@ -16,7 +16,7 @@ class McpToolsRenderTypesTest(unittest.TestCase):
             for renderer in mcp_tools.supported_render_definitions()
         }
 
-        for renderer_type in ["iframe", "image", "markdown"]:
+        for renderer_type in ["iframe", "markdown"]:
             self.assertIn("payloadSchema", definitions[renderer_type])
 
     def test_frontend_renderer_report_keeps_builtin_markdown(self):
@@ -28,13 +28,12 @@ class McpToolsRenderTypesTest(unittest.TestCase):
         )
         self.assertEqual(
             mcp_tools.supported_render_types(),
-            ["iframe", "image", "markdown", "custom.renderer"],
+            ["iframe", "markdown", "custom.renderer"],
         )
 
     def test_sparse_builtin_renderer_report_keeps_payload_schemas(self):
         mcp_tools.set_render_definitions([
             {"type": "iframe"},
-            {"type": "image"},
             {"type": "markdown"},
         ])
         definitions = {
@@ -42,7 +41,7 @@ class McpToolsRenderTypesTest(unittest.TestCase):
             for renderer in mcp_tools.supported_render_definitions()
         }
 
-        for renderer_type in ["iframe", "image", "markdown"]:
+        for renderer_type in ["iframe", "markdown"]:
             self.assertIn("payloadSchema", definitions[renderer_type])
 
     def test_legacy_type_report_keeps_builtin_markdown(self):

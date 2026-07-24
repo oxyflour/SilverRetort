@@ -17,6 +17,7 @@ import type {
   HermesAsyncDelegation,
   HermesBackgroundProcess,
 } from "silverretort-protocol";
+import { openArtifactInNewWindow } from "../openArtifactInNewWindow";
 import { useChatStore } from "../store";
 import { AppIcon } from "./icons";
 import { ToolbarIconBadge } from "./ToolbarIconBadge";
@@ -222,28 +223,53 @@ function DelegationRow({ delegation }: { delegation: HermesAsyncDelegation }) {
 
 function ArtifactRow({
   artifact,
-  onOpen,
+  onOpenInPanel,
 }: {
   artifact: Artifact;
-  onOpen: () => void;
+  onOpenInPanel: () => void;
 }) {
+  const createdAt = new Date(artifact.createdAt);
+  const formattedCreatedAt = Number.isNaN(createdAt.getTime())
+    ? artifact.createdAt
+    : new Intl.DateTimeFormat("zh-CN", {
+        month: "2-digit",
+        day: "2-digit",
+        hour: "2-digit",
+        minute: "2-digit",
+        hour12: false,
+      }).format(createdAt);
+
   return (
-    <button
-      type="button"
-      title={artifact.title}
-      onClick={onOpen}
-      className="flex w-full items-center gap-2 border-t border-neutral-200 px-3 py-2 text-left text-xs hover:bg-neutral-100 dark:border-neutral-700 dark:hover:bg-neutral-800"
-    >
+    <div className="flex w-full items-center gap-2 border-t border-neutral-200 px-3 py-2 text-xs dark:border-neutral-700">
       <AppIcon
         icon={Package}
         className="h-3.5 w-3.5 shrink-0 text-neutral-400"
       />
-      <span className="min-w-0 flex-1 truncate">{artifact.title}</span>
-      <AppIcon
-        icon={ArrowUpRight}
-        className="h-3.5 w-3.5 shrink-0 text-neutral-400"
-      />
-    </button>
+      <div className="min-w-0 flex-1">
+        <div className="truncate" title={artifact.title}>{artifact.title}</div>
+        <time
+          dateTime={artifact.createdAt}
+          className="mt-0.5 block text-[11px] text-neutral-400"
+        >
+          {formattedCreatedAt}
+        </time>
+      </div>
+      <button
+        type="button"
+        onClick={onOpenInPanel}
+        className="shrink-0 rounded px-2 py-1 text-[11px] text-neutral-500 hover:bg-neutral-100 hover:text-neutral-900 dark:hover:bg-neutral-800 dark:hover:text-neutral-100"
+      >
+        右侧打开
+      </button>
+      <button
+        type="button"
+        onClick={() => openArtifactInNewWindow(artifact.id)}
+        className="inline-flex shrink-0 items-center gap-1 rounded px-2 py-1 text-[11px] text-neutral-500 hover:bg-neutral-100 hover:text-neutral-900 dark:hover:bg-neutral-800 dark:hover:text-neutral-100"
+      >
+        弹出打开
+        <AppIcon icon={ArrowUpRight} className="h-3 w-3" />
+      </button>
+    </div>
   );
 }
 
@@ -358,7 +384,7 @@ export function ToolbarActivityMenu({ artifacts }: { artifacts: Artifact[] }) {
               <ArtifactRow
                 key={artifact.id}
                 artifact={artifact}
-                onOpen={() => {
+                onOpenInPanel={() => {
                   openArtifact(artifact.id, artifact.sessionId);
                   setActivePanel(null);
                 }}

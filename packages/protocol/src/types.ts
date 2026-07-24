@@ -199,7 +199,7 @@ export const MessageSchema = z.object({
 });
 export type Message = z.infer<typeof MessageSchema>;
 
-// type 为开放字符串：内置 iframe/image/markdown，图表、3D 等由前端注册表扩展
+// type 为开放字符串：内置 iframe/markdown，图表、3D 等由前端注册表扩展
 export const ArtifactSchema = z.object({
   id: z.string(),
   sessionId: z.string(),
