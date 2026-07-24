@@ -341,6 +341,47 @@ class HermesEngine:
             payload = response.json()
             return list(payload.get("commands") or [])
 
+    async def get_goal(self, session_id: str) -> dict[str, Any]:
+        async with httpx.AsyncClient(timeout=httpx.Timeout(10, connect=5)) as client:
+            response = await client.get(
+                f"{self.base_url}/silverretort/goal",
+                params={"sessionKey": self.session_key(session_id)},
+                headers=self._headers(),
+            )
+            response.raise_for_status()
+            return dict(response.json())
+
+    async def goal_command(
+        self, session_id: str, text: str, reason: str | None = None
+    ) -> dict[str, Any]:
+        body = {"sessionKey": self.session_key(session_id), "text": text}
+        if reason:
+            body["reason"] = reason
+        async with httpx.AsyncClient(timeout=httpx.Timeout(15, connect=5)) as client:
+            response = await client.post(
+                f"{self.base_url}/silverretort/goal/command",
+                json=body,
+                headers=self._headers(),
+            )
+            response.raise_for_status()
+            return dict(response.json())
+
+    async def evaluate_goal(self, session_id: str, response_text: str) -> dict[str, Any]:
+        async with httpx.AsyncClient(timeout=httpx.Timeout(45, connect=5)) as client:
+            response = await client.post(
+                f"{self.base_url}/silverretort/goal/evaluate",
+                json={
+                    "sessionKey": self.session_key(session_id),
+                    "response": response_text,
+                },
+                headers=self._headers(),
+            )
+            response.raise_for_status()
+            return dict(response.json())
+
+    async def pause_goal(self, session_id: str, reason: str = "user-paused") -> dict[str, Any]:
+        return await self.goal_command(session_id, "/goal pause", reason)
+
     async def list_models(self) -> dict[str, Any]:
         async with httpx.AsyncClient(timeout=httpx.Timeout(30, connect=5)) as client:
             response = await client.get(
@@ -496,12 +537,20 @@ class HermesEngine:
     async def run(
         self, session_id: str, workspace_id: str, history: list[Message], user_message: Message
     ) -> AsyncGenerator[dict[str, Any], None]:
-        expanded_user_message = user_message
         original_text = _text_of(user_message)
-        expanded_text = await self._expand_slash(session_id, original_text)
-        if expanded_text != original_text:
-            expanded_user_message = user_message.model_copy(deep=True)
-            expanded_user_message.parts = [TextPart(text=expanded_text)]
+        goal_run = original_text.strip().lower().startswith("/goal")
+        goal_result: dict[str, Any] | None = None
+        if goal_run:
+            goal_result = await self.goal_command(session_id, original_text)
+            yield {"kind": "goal-state", "goal": goal_result.get("goal")}
+            if goal_result.get("action") != "run":
+                message = str(goal_result.get("message") or "")
+                if message:
+                    yield {"kind": "text", "delta": message}
+                return
+            current_prompt = str(goal_result.get("prompt") or "")
+        else:
+            current_prompt = await self._expand_slash(session_id, original_text)
 
         system = SYSTEM_PROMPT.format(
             session_id=session_id,
@@ -511,41 +560,77 @@ class HermesEngine:
             attachments_note=_attachments_note(history, user_message),
         )
         system = _append_template_instructions(system, workspace_id)
-        conversation_history = [
+        initial_history = [
             _to_openai_message(m) for m in history if _content_of(m) or m.attachments
         ]
-        payload = {
-            "model": self.model,
-            "instructions": system,
-            "conversation_history": conversation_history,
-            "input": [_to_openai_message(expanded_user_message)],
-            "stream": True,
-            "conversation": self.session_key(session_id),
-            "workspace_id": workspace_id,
-        }
         headers = self._headers(session_id)
-        completed_tool_calls: set[str] = set()
+        first_turn = True
 
-        async with httpx.AsyncClient(timeout=httpx.Timeout(None, connect=10)) as client:
-            async with client.stream(
-                "POST",
-                f"{self.base_url}/v1/responses",
-                json=payload,
-                headers=headers,
-            ) as response:
-                if response.status_code != 200:
-                    body = (await response.aread()).decode("utf-8", "replace")[:500]
-                    raise RuntimeError(f"hermes HTTP {response.status_code}: {body}")
-                async for event_name, data in _iter_sse_events(response):
-                    if data == "[DONE]":
-                        return
-                    try:
-                        event_payload = json.loads(data)
-                    except json.JSONDecodeError:
-                        continue
-                    for event in _normalize_response_event(
-                        event_name,
-                        event_payload,
-                        completed_tool_calls,
-                    ):
-                        yield event
+        while True:
+            input_message = user_message.model_copy(deep=True)
+            input_message.parts = [TextPart(text=current_prompt)]
+            payload = {
+                "model": self.model,
+                "instructions": system,
+                "input": [_to_openai_message(input_message)],
+                "stream": True,
+                "conversation": self.session_key(session_id),
+                "workspace_id": workspace_id,
+            }
+            if first_turn:
+                payload["conversation_history"] = initial_history
+
+            completed_tool_calls: set[str] = set()
+            response_text_parts: list[str] = []
+            async with httpx.AsyncClient(timeout=httpx.Timeout(None, connect=10)) as client:
+                async with client.stream(
+                    "POST",
+                    f"{self.base_url}/v1/responses",
+                    json=payload,
+                    headers=headers,
+                ) as response:
+                    if response.status_code != 200:
+                        body = (await response.aread()).decode("utf-8", "replace")[:500]
+                        raise RuntimeError(f"hermes HTTP {response.status_code}: {body}")
+                    async for event_name, data in _iter_sse_events(response):
+                        if data == "[DONE]":
+                            break
+                        try:
+                            event_payload = json.loads(data)
+                        except json.JSONDecodeError:
+                            continue
+                        for event in _normalize_response_event(
+                            event_name,
+                            event_payload,
+                            completed_tool_calls,
+                        ):
+                            if event["kind"] == "text":
+                                response_text_parts.append(event["delta"])
+                            yield event
+
+            if not goal_run:
+                return
+
+            try:
+                decision = await self.evaluate_goal(
+                    session_id, "".join(response_text_parts)
+                )
+            except Exception:
+                paused = await self.pause_goal(
+                    session_id, "goal-judge-unavailable"
+                )
+                yield {"kind": "goal-state", "goal": paused.get("goal")}
+                return
+            yield {"kind": "goal-state", "goal": decision.get("goal")}
+            if not decision.get("shouldContinue"):
+                return
+
+            latest = await self.get_goal(session_id)
+            goal = latest.get("goal")
+            yield {"kind": "goal-state", "goal": goal}
+            if not isinstance(goal, dict) or goal.get("status") != "active":
+                return
+            current_prompt = str(decision.get("continuationPrompt") or "")
+            if not current_prompt:
+                return
+            first_turn = False

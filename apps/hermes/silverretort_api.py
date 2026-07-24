@@ -22,6 +22,7 @@ from usage import usage_response
 SESSION_KEY_RE = re.compile(r"^[A-Za-z0-9_.:-]{1,200}$")
 LOOPBACK_HOSTS = {"127.0.0.1", "::1", "localhost"}
 UI_OPERATION_TIMEOUT_SECONDS = 5.0
+GOAL_JUDGE_TIMEOUT_SECONDS = 40.0
 T = TypeVar("T")
 
 
@@ -64,8 +65,15 @@ def collect_slash_commands() -> list[dict[str, Any]]:
     from agent.skill_bundles import get_skill_bundles
     from agent.skill_commands import get_skill_commands
 
-    commands: list[dict[str, Any]] = []
-    seen: set[str] = set()
+    commands: list[dict[str, Any]] = [
+        {
+            "command": "/goal",
+            "name": "goal",
+            "description": "Set or manage a standing goal",
+            "kind": "builtin",
+        }
+    ]
+    seen: set[str] = {"goal"}
     for key, info in sorted(get_skill_bundles().items()):
         command = key.lstrip("/")
         seen.add(command)
@@ -90,6 +98,92 @@ def collect_slash_commands() -> list[dict[str, Any]]:
             }
         )
     return commands
+
+
+def _goal_manager(session_key: str) -> Any:
+    from hermes_cli.goals import GoalManager
+
+    return GoalManager(session_id=session_key)
+
+
+def _goal_state_payload(manager: Any) -> dict[str, Any] | None:
+    state = manager.state
+    if state is None or state.status == "cleared":
+        return None
+    return {
+        "objective": state.goal,
+        "status": state.status,
+        "turnsUsed": state.turns_used,
+        "maxTurns": state.max_turns,
+        "lastVerdict": state.last_verdict,
+        "lastReason": state.last_reason,
+        "pausedReason": state.paused_reason,
+    }
+
+
+def goal_status(session_key: str) -> dict[str, Any]:
+    manager = _goal_manager(session_key)
+    return {"goal": _goal_state_payload(manager), "message": manager.status_line()}
+
+
+def handle_goal_command(
+    text: str, session_key: str, pause_reason: str = "user-paused"
+) -> dict[str, Any]:
+    parsed = _slash_command_name(text)
+    if parsed is None or parsed[0].lower() != "goal":
+        return {"handled": False}
+
+    manager = _goal_manager(session_key)
+    argument = parsed[1].strip()
+    normalized = argument.lower()
+    verb = argument.split(None, 1)[0].lower() if argument else "status"
+
+    if not argument or normalized == "status":
+        action = "control"
+    elif normalized == "pause":
+        manager.pause(pause_reason)
+        action = "control"
+    elif normalized == "clear":
+        manager.clear()
+        action = "control"
+    elif normalized == "resume":
+        state = manager.resume()
+        action = "run" if state is not None else "control"
+    elif verb in {"draft", "show", "wait", "unwait"}:
+        return {
+            "handled": True,
+            "action": "control",
+            "prompt": None,
+            "goal": _goal_state_payload(manager),
+            "message": f"/goal {verb} is not supported in SilverRetort yet.",
+        }
+    else:
+        manager.set(argument)
+        action = "run"
+
+    prompt = manager.next_continuation_prompt() if action == "run" else None
+    if normalized != "resume" and action == "run":
+        prompt = argument
+    return {
+        "handled": True,
+        "action": action,
+        "prompt": prompt,
+        "goal": _goal_state_payload(manager),
+        "message": manager.status_line(),
+    }
+
+
+def evaluate_goal(session_key: str, response_text: str) -> dict[str, Any]:
+    manager = _goal_manager(session_key)
+    decision = manager.evaluate_after_turn(response_text)
+    return {
+        "goal": _goal_state_payload(manager),
+        "shouldContinue": bool(decision.get("should_continue")),
+        "continuationPrompt": decision.get("continuation_prompt"),
+        "verdict": str(decision.get("verdict") or ""),
+        "reason": str(decision.get("reason") or ""),
+        "message": str(decision.get("message") or ""),
+    }
 
 
 def expand_slash_text(text: str, session_key: str) -> dict[str, Any]:
@@ -493,6 +587,53 @@ def register_silverretort_routes(app: Any, api_key: str) -> None:
             "slash expand",
             lambda: expand_slash_text(str(body.get("text") or ""), session_key),
         )
+
+    @app.get("/silverretort/goal")
+    async def silverretort_goal(request: Request) -> dict[str, Any]:
+        _require_auth(request, api_key)
+        session_key = _session_key_from_query(request)
+        return await run_ui_operation(
+            "goal status", lambda: goal_status(session_key)
+        )
+
+    @app.post("/silverretort/goal/command")
+    async def silverretort_goal_command(request: Request) -> dict[str, Any]:
+        _require_auth(request, api_key)
+        body = await request.json()
+        if not isinstance(body, dict):
+            raise HTTPException(400, "invalid body")
+        session_key = str(body.get("sessionKey") or "").strip()
+        if not session_key or not SESSION_KEY_RE.match(session_key):
+            raise HTTPException(400, "invalid sessionKey")
+        return await run_ui_operation(
+            "goal command",
+            lambda: handle_goal_command(
+                str(body.get("text") or ""),
+                session_key,
+                str(body.get("reason") or "user-paused")[:200],
+            ),
+        )
+
+    @app.post("/silverretort/goal/evaluate")
+    async def silverretort_goal_evaluate(request: Request) -> dict[str, Any]:
+        _require_auth(request, api_key)
+        body = await request.json()
+        if not isinstance(body, dict):
+            raise HTTPException(400, "invalid body")
+        session_key = str(body.get("sessionKey") or "").strip()
+        if not session_key or not SESSION_KEY_RE.match(session_key):
+            raise HTTPException(400, "invalid sessionKey")
+        try:
+            return await asyncio.wait_for(
+                asyncio.to_thread(
+                    evaluate_goal,
+                    session_key,
+                    str(body.get("response") or ""),
+                ),
+                timeout=GOAL_JUDGE_TIMEOUT_SECONDS,
+            )
+        except TimeoutError as exc:
+            raise HTTPException(503, "Hermes goal judge timed out") from exc
 
     @app.get("/silverretort/models")
     async def silverretort_models(request: Request) -> dict[str, Any]:

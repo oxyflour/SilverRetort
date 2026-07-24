@@ -29,6 +29,10 @@ import {
   HermesRuntimeResponseSchema,
   HermesUsageResponse,
   HermesUsageResponseSchema,
+  GoalActionResponse,
+  GoalActionResponseSchema,
+  GoalStatusResponse,
+  GoalStatusResponseSchema,
   SessionModel,
   SessionModelSchema,
   SetModelRequest,
@@ -326,6 +330,27 @@ export class ApiClient {
       method: "POST",
     });
     if (!res.ok) throw new Error(`stop run failed: HTTP ${res.status}`);
+  }
+
+  getGoal(sessionId: string): Promise<GoalStatusResponse> {
+    return this.request(
+      GoalStatusResponseSchema,
+      `/api/sessions/${encodeURIComponent(sessionId)}/goal`,
+    );
+  }
+
+  goalAction(
+    sessionId: string,
+    action: "pause" | "resume" | "clear",
+  ): Promise<GoalActionResponse> {
+    return this.request(
+      GoalActionResponseSchema,
+      `/api/sessions/${encodeURIComponent(sessionId)}/goal/actions`,
+      {
+        method: "POST",
+        body: JSON.stringify({ action }),
+      },
+    );
   }
 
   uploadFile(workspaceId: string, file: File): Promise<Attachment> {

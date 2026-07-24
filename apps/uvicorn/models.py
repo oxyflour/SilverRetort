@@ -251,7 +251,31 @@ class SlashCommand(ApiModel):
     command: str
     name: str
     description: str = ""
-    kind: Literal["skill", "bundle"]
+    kind: Literal["skill", "bundle", "builtin"]
+
+
+class GoalState(ApiModel):
+    objective: str
+    status: Literal["active", "paused", "done"]
+    turns_used: int = 0
+    max_turns: int = 20
+    last_verdict: str | None = None
+    last_reason: str | None = None
+    paused_reason: str | None = None
+
+
+class GoalStatusResponse(ApiModel):
+    goal: GoalState | None = None
+    message: str = ""
+
+
+class GoalActionRequest(ApiModel):
+    action: Literal["pause", "resume", "clear"]
+
+
+class GoalActionResponse(GoalStatusResponse):
+    run_id: str | None = None
+    assistant_message_id: str | None = None
 
 
 class HermesModel(ApiModel):

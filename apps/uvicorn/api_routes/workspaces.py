@@ -176,6 +176,15 @@ async def set_session_model(session_id: str, body: SetModelRequest) -> SessionMo
 
 @router.delete("/sessions/{session_id}")
 async def delete_session(session_id: str) -> dict[str, bool]:
+    session = db.get_session(session_id)
+    if session is not None:
+        engine = create_engine_for_workspace(session.workspace_id)
+        clear_goal = getattr(engine, "goal_command", None)
+        if clear_goal is not None:
+            try:
+                await clear_goal(session_id, "/goal clear")
+            except Exception:
+                pass
     runs.stop_run(session_id)
     db.delete_session(session_id)
     return {"ok": True}

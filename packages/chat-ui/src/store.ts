@@ -8,6 +8,7 @@ import {
   HermesModel,
   HermesRuntimeResponse,
   HermesUsageResponse,
+  GoalState,
   Message,
   SessionModel,
   Session,
@@ -44,6 +45,7 @@ interface ChatState {
   artifacts: Record<string, Artifact>;
   artifactContexts: Record<string, ArtifactContext>;
   artifactWorkspaces: Record<string, ArtifactWorkspaceState>;
+  goalStates: Record<string, GoalState | null>;
   pendingAttachments: Attachment[];
   slashCommands: SlashCommand[];
   hermesModels: HermesModel[];
@@ -57,6 +59,8 @@ interface ChatState {
   refreshHermesControls: () => Promise<void>;
   refreshHermesUsage: (id?: string | null) => Promise<void>;
   refreshHermesRuntime: (id?: string | null) => Promise<void>;
+  refreshGoal: (id?: string | null) => Promise<void>;
+  goalAction: (action: "pause" | "resume" | "clear") => Promise<void>;
   createWorkspace: (
     name: string,
     connectionId?: string,
@@ -418,6 +422,7 @@ export const useChatStore = create<ChatState>((set, get) => {
     artifacts: {},
     artifactContexts: {},
     artifactWorkspaces: {},
+    goalStates: {},
     pendingAttachments: [],
     slashCommands: [],
     hermesModels: [],
@@ -507,6 +512,37 @@ export const useChatStore = create<ChatState>((set, get) => {
       }
     },
 
+    refreshGoal: async (id) => {
+      const sessionId = id === undefined ? get().currentSessionId : id;
+      if (!sessionId) return;
+      try {
+        const response = await get().client.getGoal(sessionId);
+        set((state) => ({
+          goalStates: { ...state.goalStates, [sessionId]: response.goal },
+        }));
+      } catch {
+        set((state) => ({
+          goalStates: { ...state.goalStates, [sessionId]: null },
+        }));
+      }
+    },
+
+    goalAction: async (action) => {
+      const sessionId = get().currentSessionId;
+      if (!sessionId) return;
+      const response = await get().client.goalAction(sessionId, action);
+      set((state) => ({
+        goalStates: { ...state.goalStates, [sessionId]: response.goal },
+      }));
+      if (response.runId && response.assistantMessageId) {
+        withBucket(sessionId, (bucket) => ({
+          ...ensureAssistantMessage(bucket, sessionId, response.assistantMessageId!),
+          runId: response.runId,
+          error: null,
+        }));
+      }
+    },
+
     createWorkspace: async (name, connectionId, templateId) => {
       const resolvedConnectionId =
         connectionId ??
@@ -577,6 +613,7 @@ export const useChatStore = create<ChatState>((set, get) => {
       void get().refreshSessionModel(id);
       void get().refreshHermesUsage(id);
       void get().refreshHermesRuntime(id);
+      void get().refreshGoal(id);
       const bucket = get().buckets[id];
       if (bucket?.loaded) {
         const contexts = await get().client.listArtifactContexts(id);
@@ -652,6 +689,7 @@ export const useChatStore = create<ChatState>((set, get) => {
         const { [id]: _removedWorkspace, ...artifactWorkspaces } =
           state.artifactWorkspaces;
         const { [id]: _removedModel, ...sessionModels } = state.sessionModels;
+        const { [id]: _removedGoal, ...goalStates } = state.goalStates;
         return {
           sessions,
           buckets,
@@ -663,6 +701,7 @@ export const useChatStore = create<ChatState>((set, get) => {
           ),
           artifactWorkspaces,
           sessionModels,
+          goalStates,
           currentSessionId:
             state.currentSessionId === id
               ? (sessions[0]?.id ?? null)
@@ -1095,6 +1134,15 @@ export const useChatStore = create<ChatState>((set, get) => {
             error: event.message,
           }));
           void get().refreshHermesRuntime(event.sessionId);
+          break;
+
+        case "goal-state":
+          set((state) => ({
+            goalStates: {
+              ...state.goalStates,
+              [event.sessionId]: event.goal,
+            },
+          }));
           break;
 
         case "ui-command": {

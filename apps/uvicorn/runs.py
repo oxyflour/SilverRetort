@@ -118,12 +118,21 @@ async def _run(
                         session_id, artifact.model_dump(by_alias=True), run_id, message.id
                     )
                 )
+            elif kind == "goal-state":
+                events.broadcast(events.goal_state(session_id, event.get("goal")))
             db.update_message(message)
 
         message.status = "complete"
         db.update_message(message)
         events.broadcast(events.done(session_id, run_id, message.id))
     except asyncio.CancelledError:
+        pause_goal = getattr(engine, "pause_goal", None)
+        if pause_goal is not None:
+            try:
+                result = await pause_goal(session_id, "stopped-by-user")
+                events.broadcast(events.goal_state(session_id, result.get("goal")))
+            except Exception:
+                pass
         message.status = "stopped"
         db.update_message(message)
         events.broadcast(events.done(session_id, run_id, message.id))

@@ -242,6 +242,17 @@ const runBase = {
   messageId: z.string(),
 };
 
+export const GoalStateSchema = z.object({
+  objective: z.string(),
+  status: z.enum(["active", "paused", "done"]),
+  turnsUsed: z.number().int().nonnegative().default(0),
+  maxTurns: z.number().int().positive().default(20),
+  lastVerdict: z.string().nullable().default(null),
+  lastReason: z.string().nullable().default(null),
+  pausedReason: z.string().nullable().default(null),
+});
+export type GoalState = z.infer<typeof GoalStateSchema>;
+
 export const ChatEventSchema = z.discriminatedUnion("type", [
   z.object({
     type: z.literal("user-message"),
@@ -280,6 +291,11 @@ export const ChatEventSchema = z.discriminatedUnion("type", [
   z.object({ type: z.literal("done"), ...runBase }),
   z.object({ type: z.literal("error"), ...runBase, message: z.string() }),
   z.object({
+    type: z.literal("goal-state"),
+    sessionId: z.string(),
+    goal: GoalStateSchema.nullable(),
+  }),
+  z.object({
     type: z.literal("ui-command"),
     sessionId: z.string().optional(),
     uiCommand: UiCommandSchema,
@@ -313,9 +329,21 @@ export const SlashCommandSchema = z.object({
   command: z.string(),
   name: z.string(),
   description: z.string().default(""),
-  kind: z.enum(["skill", "bundle"]),
+  kind: z.enum(["skill", "bundle", "builtin"]),
 });
 export type SlashCommand = z.infer<typeof SlashCommandSchema>;
+
+export const GoalStatusResponseSchema = z.object({
+  goal: GoalStateSchema.nullable().default(null),
+  message: z.string().default(""),
+});
+export type GoalStatusResponse = z.infer<typeof GoalStatusResponseSchema>;
+
+export const GoalActionResponseSchema = GoalStatusResponseSchema.extend({
+  runId: z.string().nullable().default(null),
+  assistantMessageId: z.string().nullable().default(null),
+});
+export type GoalActionResponse = z.infer<typeof GoalActionResponseSchema>;
 
 export const HermesModelSchema = z.object({
   id: z.string(),

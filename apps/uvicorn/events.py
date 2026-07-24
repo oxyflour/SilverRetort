@@ -113,6 +113,10 @@ def error(session_id: str, run_id: str, message_id: str, message: str) -> dict:
     }
 
 
+def goal_state(session_id: str, goal: dict | None) -> dict:
+    return {"type": "goal-state", "sessionId": session_id, "goal": goal}
+
+
 def ui_command(command: dict, session_id: str | None = None) -> dict:
     event: dict[str, Any] = {"type": "ui-command", "uiCommand": command}
     if session_id is not None:

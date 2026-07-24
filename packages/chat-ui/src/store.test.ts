@@ -33,6 +33,7 @@ beforeEach(() => {
     artifacts: {},
     artifactWorkspaces: {},
     pendingAttachments: [],
+    goalStates: {},
   });
 });
 
@@ -43,6 +44,49 @@ afterEach(() => {
 });
 
 describe("chat event routing", () => {
+  it("stores goal state events by session", () => {
+    useChatStore.getState().applyEvent({
+      type: "goal-state",
+      sessionId,
+      goal: {
+        objective: "Finish the feature",
+        status: "active",
+        turnsUsed: 1,
+        maxTurns: 20,
+        lastVerdict: "continue",
+        lastReason: "More work remains",
+        pausedReason: null,
+      },
+    });
+
+    expect(useChatStore.getState().goalStates[sessionId]).toMatchObject({
+      objective: "Finish the feature",
+      status: "active",
+      turnsUsed: 1,
+    });
+  });
+
+  it("applies goal action state returned by the API", async () => {
+    vi.spyOn(useChatStore.getState().client, "goalAction").mockResolvedValue({
+      goal: {
+        objective: "Finish the feature",
+        status: "paused",
+        turnsUsed: 1,
+        maxTurns: 20,
+        lastVerdict: "continue",
+        lastReason: "More work remains",
+        pausedReason: "user-paused",
+      },
+      message: "paused",
+      runId: null,
+      assistantMessageId: null,
+    });
+
+    await useChatStore.getState().goalAction("pause");
+
+    expect(useChatStore.getState().goalStates[sessionId]?.status).toBe("paused");
+  });
+
   it("opens the current session artifact panel when a markdown artifact arrives", () => {
     useChatStore.getState().applyEvent({
       type: "artifact",

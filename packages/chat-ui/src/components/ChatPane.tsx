@@ -4,6 +4,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { useChatStore } from "../store";
 import { MessageView } from "./MessageView";
 import { ChatInput } from "./ChatInput";
+import { GoalStatusBar } from "./GoalStatusBar";
 import { ChatPaneToolbarSlot, EmptySessionSlot } from "../templateSlots";
 
 export function ChatPane() {
@@ -170,6 +171,7 @@ export function ChatPane() {
           )}
         </div>
       </div>
+      <GoalStatusBar />
       <ChatInput
         text={currentSessionId ? drafts[currentSessionId] ?? "" : ""}
         onTextChange={(text) => {

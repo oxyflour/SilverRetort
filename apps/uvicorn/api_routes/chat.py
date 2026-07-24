@@ -10,9 +10,94 @@ import runs
 import workspace_service
 from api_routes.common import DEFAULT_TITLE, _auto_title
 from engines import create_engine_for_workspace
-from models import Attachment, Message, RestartMessageRequest, SendChatRequest, SendChatResponse, TextPart
+from models import (
+    Attachment,
+    GoalActionRequest,
+    GoalActionResponse,
+    GoalStatusResponse,
+    Message,
+    RestartMessageRequest,
+    SendChatRequest,
+    SendChatResponse,
+    TextPart,
+)
 
 router = APIRouter()
+
+
+def _goal_engine(session_id: str):
+    session = db.get_session(session_id)
+    if session is None:
+        raise HTTPException(404, "session not found")
+    return session, create_engine_for_workspace(session.workspace_id)
+
+
+@router.get("/sessions/{session_id}/goal")
+async def get_goal(session_id: str) -> GoalStatusResponse:
+    _, engine = _goal_engine(session_id)
+    method = getattr(engine, "get_goal", None)
+    if method is None:
+        raise HTTPException(503, "Hermes goals are unavailable")
+    try:
+        return GoalStatusResponse.model_validate(await method(session_id))
+    except Exception as exc:
+        raise HTTPException(503, f"Hermes goal unavailable: {exc}") from exc
+
+
+@router.post("/sessions/{session_id}/goal/actions")
+async def goal_action(
+    session_id: str, body: GoalActionRequest
+) -> GoalActionResponse:
+    session, engine = _goal_engine(session_id)
+    if body.action == "resume":
+        get_goal_method = getattr(engine, "get_goal", None)
+        if get_goal_method is None or getattr(engine, "goal_command", None) is None:
+            raise HTTPException(503, "Hermes goals are unavailable")
+        if runs.is_running(session_id):
+            raise HTTPException(409, "session already has an active run")
+        history = db.list_messages(session_id)
+        now = db.now_iso()
+        synthetic_user = Message(
+            id=uuid.uuid4().hex,
+            session_id=session_id,
+            role="user",
+            parts=[TextPart(text="/goal resume")],
+            created_at=now,
+        )
+        assistant = Message(
+            id=uuid.uuid4().hex,
+            session_id=session_id,
+            role="assistant",
+            status="streaming",
+            created_at=now,
+        )
+        db.insert_message(assistant)
+        run_id = uuid.uuid4().hex
+        runs.start_run(
+            engine,
+            session_id,
+            session.workspace_id,
+            run_id,
+            history,
+            synthetic_user,
+            assistant,
+        )
+        current = await get_goal_method(session_id)
+        return GoalActionResponse(
+            **current,
+            run_id=run_id,
+            assistant_message_id=assistant.id,
+        )
+
+    method = getattr(engine, "goal_command", None)
+    if method is None:
+        raise HTTPException(503, "Hermes goals are unavailable")
+    try:
+        result = await method(session_id, f"/goal {body.action}")
+    except Exception as exc:
+        raise HTTPException(503, f"failed to update Hermes goal: {exc}") from exc
+    events.broadcast(events.goal_state(session_id, result.get("goal")))
+    return GoalActionResponse.model_validate(result)
 
 
 @router.post("/sessions/{session_id}/chat")
